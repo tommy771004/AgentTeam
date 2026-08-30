@@ -31,11 +31,11 @@ import type {
 export { resolveBusyPolicy, type BusyPolicy } from './taskRunTypes.ts'
 
 /**
- * What a steer actually achieved. A safe park stops at the next tool boundary,
+ * What an abort-and-replace takeover actually achieved. A safe park stops at the next tool boundary,
  * so "the previous run was told to stop" and "the new goal is running" are two
  * different facts and the thread must not conflate them.
  */
-export type SteerOutcome =
+export type TakeoverOutcome =
   /** Capacity came free inside the wait window; the new goal is running. */
   | 'took-over'
   /** The previous run was aborted but had not let go; the new goal is queued. */
@@ -45,8 +45,8 @@ export type SteerOutcome =
   /** Nothing abortable was behind the busy signal; the new goal did not start. */
   | 'not-abortable'
 
-export type SteerNoticeInput = {
-  outcome: SteerOutcome
+export type TakeoverNoticeInput = {
+  outcome: TakeoverOutcome
   runningTitle?: string
   partial?: string
   /** 1-based queue position; only meaningful for `queued`. */
@@ -56,21 +56,21 @@ export type SteerNoticeInput = {
 }
 
 /**
- * The one sentence that says what a steer did. Both the thread bubble and the
+ * The one sentence that says what a takeover did. Both the thread bubble and the
  * admission result's `error` are built from it, so the two can never drift
  * into claiming different things about the same steer.
  */
-export function steerOutcomeSummary(input: SteerNoticeInput): string {
+export function takeoverOutcomeSummary(input: TakeoverNoticeInput): string {
   const title = input.runningTitle ? `（${input.runningTitle.slice(0, 32)}）` : ''
   switch (input.outcome) {
     case 'took-over':
-      return `轉向目前執行：已中止前一個任務${title}，新目標已接手`
+      return `中止並接手：已中止前一個任務${title}，新目標已接手`
     case 'queued':
-      return `轉向目前執行：已中止前一個任務${title}，但容量尚未釋出 — 新目標已排入佇列第 ${input.queuePosition || 1} 位（${input.queueTotal || 1}/${MAX_RUN_QUEUE}）`
+      return `中止並接手：已中止前一個任務${title}，但容量尚未釋出 — 新目標已排入佇列第 ${input.queuePosition || 1} 位（${input.queueTotal || 1}/${MAX_RUN_QUEUE}）`
     case 'aborted-not-queued':
-      return `轉向目前執行：已中止前一個任務${title}，但佇列已滿或重複 — 新目標未啟動，請稍後重送`
+      return `中止並接手：已中止前一個任務${title}，但佇列已滿或重複 — 新目標未啟動，請稍後重送`
     case 'not-abortable':
-      return `轉向目前執行：無法中止前一個任務${title}，新目標未啟動`
+      return `中止並接手：無法中止前一個任務${title}，新目標未啟動`
   }
 }
 
@@ -79,14 +79,14 @@ export function steerOutcomeSummary(input: SteerNoticeInput): string {
  * achieved. That digest rides along in every branch — the partial progress is
  * the cost of steering, and the user is owed it whichever way the steer landed.
  */
-export function formatSteerNotice(input: SteerNoticeInput): string {
-  const headline = steerOutcomeSummary(input)
+export function formatTakeoverNotice(input: TakeoverNoticeInput): string {
+  const headline = takeoverOutcomeSummary(input)
   const partial = input.partial?.trim()
   return partial ? `${headline}\n\n### 中止前摘要\n${partial}` : headline
 }
 
-/** Compact partial result when steer aborts a running task. */
-export function buildSteerPartialDigest(agent: AgentState): string {
+/** Compact partial result when takeover stops a running task. */
+export function buildTakeoverPartialDigest(agent: AgentState): string {
   const bits: string[] = []
   if (agent.objective) bits.push(`目標：${agent.objective.slice(0, 120)}`)
   if (agent.loopConfig?.loopType) bits.push(`Loop：${agent.loopConfig.loopType}`)

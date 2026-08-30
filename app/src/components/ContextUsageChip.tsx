@@ -33,7 +33,7 @@ export const ContextUsageChip = memo(function ContextUsageChip({
       <button
         type="button"
         onClick={onClick}
-        title="開啟執行摘要的上下文用量"
+        title="開啟執行摘要的本次執行累積與上下文"
         className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] tabular-nums text-ink-3 transition-colors hover:text-ink"
       >
         {microcopy}

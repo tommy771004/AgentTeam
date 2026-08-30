@@ -49,6 +49,7 @@ export type PersistedQueueItem = {
   title?: string
   loopType?: LoopType
   runner?: ThreadRunner
+  followUpAction?: ExternalRunOpts['followUpAction']
   eventPreMatched?: boolean
   attachedSkills?: string[]
   sourceLabel?: string
@@ -188,6 +189,7 @@ function toPersisted(item: QueuedExternalRun): PersistedQueueItem {
     title: item.title,
     loopType: item.loopType,
     runner: item.runner,
+    followUpAction: item.followUpAction,
     eventPreMatched: item.eventPreMatched,
     attachedSkills: item.attachedSkills,
     sourceLabel: item.sourceLabel,
@@ -244,6 +246,7 @@ function fromPersisted(p: PersistedQueueItem): QueuedExternalRun {
     title: bounded(p.title, 120),
     loopType: p.loopType,
     runner: p.runner,
+    followUpAction: p.followUpAction,
     eventPreMatched: p.eventPreMatched,
     attachedSkills: p.attachedSkills,
     sourceLabel: bounded(p.sourceLabel, 160),

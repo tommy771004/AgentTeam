@@ -63,7 +63,7 @@ export function formatUsd(value: number): string {
 }
 
 /**
- * `73.2k tok (7%)` — the one microcopy, for every surface that shows one.
+ * `本次執行累積 73.2k tok (7%)` — the one microcopy, for every surface that shows one.
  *
  * Returns an empty string when nothing was measured, which is how a runner
  * that reports no usage shows no figure instead of a fabricated one. Lives
@@ -73,7 +73,7 @@ export function formatUsd(value: number): string {
  */
 export function contextUsageMicrocopy(usage: ContextUsage): string {
   if (usage.measuredSteps === 0) return ''
-  const total = `${formatTokensCompact(usage.tokens.total)} tok`
+  const total = `本次執行累積 ${formatTokensCompact(usage.tokens.total)} tok`
   return usage.ratio === undefined ? total : `${total} (${formatRatio(usage.ratio)})`
 }
 
@@ -90,7 +90,7 @@ export function contextUsageActivityMicrocopy(usage: ContextUsage): string {
  */
 export function contextUsageReportLines(usage: ContextUsage): string[] {
   const lines: string[] = []
-  const total = `Tokens：${formatTokens(usage.tokens.total)}`
+  const total = `本次執行累積 Tokens：${formatTokens(usage.tokens.total)}`
   lines.push(
     usage.contextTokens !== undefined && usage.contextWindow !== undefined && usage.ratio !== undefined
       ? `${total} · 上下文 ${formatTokens(usage.contextTokens)}/${formatTokens(usage.contextWindow)}（${formatRatio(usage.ratio)}）`
@@ -108,7 +108,7 @@ export function contextUsageReportLines(usage: ContextUsage): string[] {
   if (usage.costUsd !== undefined) lines.push(`成本：${formatUsd(usage.costUsd)}`)
   lines.push(`步驟：${usage.steps} · 工具呼叫：${usage.toolCalls} · 訊息：${usage.messages.assistant}`)
   if (usage.runningSteps > 0) {
-    lines.push(`${usage.runningSteps} 個步驟執行中，用量尚未計入。`)
+    lines.push(`${usage.runningSteps} 個步驟執行中，尚未計入本次執行累積用量。`)
   }
   if (usage.partial) {
     lines.push(`尚有 ${usage.unloadedBefore} 筆更早的記錄未載入，以上為已載入範圍。`)

@@ -38,13 +38,14 @@ import {
 import { applyRendererStorageSnapshot } from './agent/updateMigration'
 import { compareVersions } from './agent/updateContracts'
 import type { PiSessionProjection } from './agent/piHostProjection'
-import { mapPiHostEventToActivity } from './agent/piHostActivity'
+import { applyPiHostActivityUpdate, mapPiHostEventToActivity } from './agent/piHostActivity'
 import { recordAppendFromEvent } from './agent/liveTimeline'
 import { presentReattachedApproval, reattachPiHostRuns } from './agent/activeRunReattachment'
 import { usePiHostEventStore } from './store/piHostEventStore'
 import { useRunActivityStore } from './store/runActivityStore'
 import { useWorkingStateProjectionStore } from './store/workingStateProjectionStore'
 import { isElectronPiProduction } from './agent/piProduction'
+import { startHostAgentQueuePump } from './agent/hostAgentQueuePump.ts'
 
 const DevTrajectoryMeasurement = import.meta.env.DEV
   ? lazy(() => import('./DevTrajectoryMeasurement').then((module) => ({ default: module.DevTrajectoryMeasurement })))
@@ -80,6 +81,11 @@ function RunQueueBootstrap() {
       cancelled = true
     }
   }, [])
+  return null
+}
+
+function HostAgentQueueBootstrap() {
+  useEffect(() => startHostAgentQueuePump(), [])
   return null
 }
 
@@ -162,28 +168,7 @@ function PiHostEventBootstrap() {
       }
       const update = mapPiHostEventToActivity(event)
       if (!update) return
-      const activity = useRunActivityStore.getState()
-      if (update.kind === 'text') {
-        activity.appendText(update.delta, update.runId)
-        return
-      }
-      if (update.kind === 'thought') {
-        activity.appendThought(update.delta, update.runId)
-        return
-      }
-      activity.push({
-        id: update.eventId,
-        runId: update.runId,
-        kind: update.kind,
-        title: update.title,
-        detail: update.detail,
-        tool: update.tool,
-        callId: update.callId,
-        ok: update.ok,
-      })
-      // Structured phase rides along when the Host named what it is doing;
-      // otherwise setStatus falls back to deriving the phase from the copy.
-      activity.setStatus(update.title, update.runId, update.phase)
+      applyPiHostActivityUpdate(useRunActivityStore.getState(), update)
     })
     return () => { unsubscribe?.() }
   }, [push])
@@ -1272,6 +1257,7 @@ export default function App() {
       <SkillsMigrationBootstrap />
         <ExternalCliSessionBootstrap />
         <RunQueueBootstrap />
+        <HostAgentQueueBootstrap />
         <SkillCuratorBootstrap />
         <SchedulerBootstrap />
         <WebhookBootstrap />

@@ -63,6 +63,13 @@ try {
     runId: 'run_linked_changed', projectRoot: linked, runnerKind: 'external', capturedAt: '2026-08-30T00:00:01.500Z',
   })
   assert.notEqual(changedAdmission.baseline?.workingTree, linkedAdmission.baseline?.workingTree, 'untracked content changes the frozen working tree')
+  assert.notEqual(changedAdmission.baseline?.workingRevision, linkedAdmission.baseline?.workingRevision, 'untracked content changes the working CAS revision')
+
+  await writeFile(join(linked, 'untracked-測試.bin'), Buffer.from([9, 8, 7, 6]))
+  const rewrittenAdmission = await captureReviewWorkspaceAdmission({
+    runId: 'run_linked_rewritten', projectRoot: linked, runnerKind: 'external', capturedAt: '2026-08-30T00:00:01.750Z',
+  })
+  assert.notEqual(rewrittenAdmission.baseline?.workingRevision, changedAdmission.baseline?.workingRevision, 'same-path untracked rewrites change the working CAS revision')
 
   const nonGit = join(root, 'plain project')
   await mkdir(nonGit)

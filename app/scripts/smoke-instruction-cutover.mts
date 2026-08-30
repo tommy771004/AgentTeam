@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const [learningPage, learningStore, piRuntime, runDispatch, coordinator, agentStore, personalization, projectionCursor, projectionUpdate, packageSource] = await Promise.all([
+const [learningPage, learningStore, piRuntime, piProtocol, runDispatch, coordinator, agentStore, personalization, projectionCursor, projectionUpdate, packageSource] = await Promise.all([
   readFile(new URL('../src/pages/LearningPage.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/store/learningStore.ts', import.meta.url), 'utf8'),
   readFile(new URL('../electron/piCoreRuntime.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../electron/piHostProtocol.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/agent/runDispatch.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/agent/taskRunCoordinator.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/store/agentStore.ts', import.meta.url), 'utf8'),
@@ -17,6 +18,7 @@ const [learningPage, learningStore, piRuntime, runDispatch, coordinator, agentSt
 assert.doesNotMatch(learningPage, /setSoul|setAgents|SOUL\.md|internal AGENTS/i, 'Learning must not revive a second instruction editor')
 assert.doesNotMatch(learningStore, /\n\s*setSoul:\s*async|\n\s*setAgents:\s*async/, 'legacy instruction write actions must stay removed')
 assert.match(piRuntime, /noContextFiles:\s*true/, 'Pi native context discovery would duplicate the Host-frozen instruction snapshot')
+assert.match(piProtocol, /import \{ resolveInstructionSnapshot,[^\n]+\} from '\.\/instructionResolver\.ts'/, 'Pi Host protocol remains the production instruction resolver owner')
 assert.ok(runDispatch.indexOf('snapshot.overrides.extraSystemContext') < runDispatch.indexOf('agent.startLocalCliExecution'), 'external instruction wrapper must enter the actual CLI prompt before dispatch')
 assert.match(runDispatch, /'## 近期對話歷史（Reference chat history）',[\s\S]*history,[\s\S]*cliPrompt,/, 'external history must precede the current request')
 assert.match(coordinator, /delivery\.mode === 'native'[\s\S]*projection\.globalEffectiveText/, 'native CLI must receive expanded global text, never raw provenance bodies')

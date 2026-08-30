@@ -82,11 +82,9 @@ export async function captureReviewWorkspaceBaseline(
   capturedAt: string,
 ): Promise<ReviewWorkspaceBaseline> {
   const cwd = binding.worktreeRoot || binding.projectRoot
-  const [head, staged, working, untracked, indexTree] = await Promise.all([
+  const [head, staged, indexTree] = await Promise.all([
     optionalGit(cwd, ['rev-parse', '--verify', 'HEAD']),
     optionalGit(cwd, ['diff', '--cached', '--binary', '--no-ext-diff']),
-    optionalGit(cwd, ['diff', '--binary', '--no-ext-diff']),
-    optionalGit(cwd, ['ls-files', '--others', '--exclude-standard']),
     optionalGit(cwd, ['write-tree']),
   ])
   const workingTree = await captureWorkingTree(cwd, head || undefined)
@@ -97,7 +95,7 @@ export async function captureReviewWorkspaceBaseline(
     indexTree: indexTree || undefined,
     workingTree,
     indexRevision,
-    workingRevision: sha256('working', indexRevision, working, untracked),
+    workingRevision: sha256('working', indexRevision, workingTree),
   }
 }
 

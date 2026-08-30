@@ -9,6 +9,7 @@ import { replaySafeCheckpointIndex } from '../agent/runFork.ts'
 import type { CapabilityUnlockProvenance } from '../agent/capabilities/runtime.ts'
 import { projectPiSession, type PiSessionProjection } from '../agent/piHostProjection.ts'
 import type { ReviewSnapshotRef } from '../agent/reviewContract.ts'
+import type { TurnRecordEntry } from '../agent/turnRecord.ts'
 import { useWorkingStateProjectionStore } from './workingStateProjectionStore.ts'
 
 const KEY = 'subagents.threads.v5'
@@ -38,6 +39,8 @@ export type ThreadPlanItem = {
   text: string
   status: ThreadPlanStatus
   at: string
+  meta?: string
+  details?: Array<{ label: string; meta?: string }>
 }
 
 export type ThreadAgentSummary = {
@@ -55,6 +58,12 @@ export type ThreadRunSummary = {
    * hydration can re-attach the same card without duplicating it.
    */
   runId?: string
+  /** Host replay coordinates for the Agent Work Tree owned by this Chat turn. */
+  agentWork?: {
+    sessionId: string
+    originTurn: number
+    entries: TurnRecordEntry[]
+  }
   /** Terminal lifecycle state shared with the live process feed. */
   status?: 'success' | 'failed' | 'halted'
   durationMs?: number
@@ -282,7 +291,13 @@ interface ThreadStore {
   setThreadStatus: (id: string, status: ExecutionStatus | 'idle') => void
   setRunPlan: (
     id: string,
-    items: Array<{ id?: string; text: string; status?: string }>,
+    items: Array<{
+      id?: string
+      text: string
+      status?: string
+      meta?: string
+      details?: Array<{ label: string; meta?: string }>
+    }>,
   ) => void
   clearRunPlan: (id: string) => void
   /** Persist capability / tool_search state for next run on this thread */
@@ -506,11 +521,24 @@ function migrateThread(raw: Record<string, unknown>): Thread {
       const text = String(value.text || '').trim()
       if (!text) return null
       const status = String(value.status || '').toLowerCase()
+      const meta = String(value.meta || '').trim().slice(0, 80)
+      const details = Array.isArray(value.details)
+        ? value.details.slice(0, 8).flatMap((rawDetail) => {
+            if (!rawDetail || typeof rawDetail !== 'object') return []
+            const detail = rawDetail as Record<string, unknown>
+            const label = String(detail.label || '').trim().slice(0, 200)
+            if (!label) return []
+            const detailMeta = String(detail.meta || '').trim().slice(0, 80)
+            return [{ label, ...(detailMeta ? { meta: detailMeta } : {}) }]
+          })
+        : []
       return {
         id: String(value.id || `plan_${index + 1}`),
         text: text.slice(0, 200),
         status: status === 'done' || status === 'active' || status === 'failed' ? status : 'pending',
         at: String(value.at || now),
+        ...(meta ? { meta } : {}),
+        ...(details.length ? { details } : {}),
       } as ThreadPlanItem
     })
     .filter((item): item is ThreadPlanItem => Boolean(item))
@@ -789,7 +817,10 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
         ...bubble,
         id: uid('b'),
       })),
-      runPlan: source.runPlan?.map((item) => ({ ...item })),
+      runPlan: source.runPlan?.map((item) => ({
+        ...item,
+        details: item.details?.map((detail) => ({ ...detail })),
+      })),
       // A local fork never inherits a provider-owned session identity.
       externalRun: undefined,
       createdAt: now,
@@ -981,6 +1012,13 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       content: '執行過程',
       at: new Date().toISOString(),
       runSummary: {
+        ...(summary.agentWork ? {
+          agentWork: {
+            sessionId: summary.agentWork.sessionId.slice(0, 512),
+            originTurn: summary.agentWork.originTurn,
+            entries: structuredClone(summary.agentWork.entries.slice(-256)),
+          },
+        } : {}),
         status: summary.status,
         durationMs: summary.durationMs,
         subDesign: summary.subDesign
@@ -1226,11 +1264,22 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
         const text = item.text.trim().slice(0, 200)
         if (!text) return null
         const old = previous.find((entry) => entry.id === item.id || entry.text === text)
+        const meta = String(item.meta || '').trim().slice(0, 80)
+        const details = Array.isArray(item.details)
+          ? item.details.slice(0, 8).flatMap((rawDetail) => {
+              const label = String(rawDetail?.label || '').trim().slice(0, 200)
+              if (!label) return []
+              const detailMeta = String(rawDetail.meta || '').trim().slice(0, 80)
+              return [{ label, ...(detailMeta ? { meta: detailMeta } : {}) }]
+            })
+          : []
         return {
           id: item.id?.trim() || old?.id || `plan_${index + 1}`,
           text,
           status: statusOf(item.status),
           at: old?.at || now,
+          ...(meta ? { meta } : {}),
+          ...(details.length ? { details } : {}),
         }
       })
       .filter((item): item is ThreadPlanItem => Boolean(item))

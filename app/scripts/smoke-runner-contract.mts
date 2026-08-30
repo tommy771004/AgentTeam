@@ -70,6 +70,8 @@ test('presentation uses only a declared or run-frozen capability snapshot', () =
     parse: false, validateDoD: false, iterate: false, continueGoal: false,
     progressiveCapabilities: false, runScopedProgress: false,
     workingState: false, skillPreflight: false, checkers: false,
+    sessionReuse: false, mailbox: false, followUp: false,
+    interrupt: false, completion: false,
   })
   const external = projectRunnerCapabilitySnapshot(
     { runner: 'codex', capabilities: EXTERNAL_CLI_RUNNER_CAPABILITIES },

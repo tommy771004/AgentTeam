@@ -24,7 +24,7 @@ import type {
   ExternalRunResult,
   RunSourceKind,
 } from './taskRunTypes.ts'
-import type { BusyPolicy, SteerOutcome } from './taskRunPolicy.ts'
+import type { BusyPolicy, TakeoverOutcome } from './taskRunPolicy.ts'
 import type { DispatchResult } from './runDispatch.ts'
 import type { HookEvaluation } from './hooks.ts'
 import type { ThreadRunner } from '../store/threadStore.ts'
@@ -42,6 +42,7 @@ import { orchestrationFromAgent } from './runLifecycle.ts'
 import { resolveTurnTimeout } from './turnTimeout.ts'
 import { clampContinueFreshnessMs, isSnapshotFresh } from './autoContinueFreshness.ts'
 import { applyComposerApprovalHandoff } from './composerApprovalHandoff.ts'
+import { followUpActionForRunner, submitHostInteractiveFollowUp } from './interactiveFollowUp.ts'
 import {
   nonCanonicalReviewAdmission,
   type ReviewAdmissionSnapshot,
@@ -1034,6 +1035,7 @@ async function runFinalizationSequence(
       result: failResult,
       projectRoot: input.projectRoot,
       settings,
+      reviewAdmission: input.reviewAdmission,
       reviewSnapshotRef,
     })
     await persistArtifactIndexForRun({
@@ -1198,6 +1200,7 @@ async function runFinalizationSequence(
       status: String(status),
       projectRoot: input.projectRoot,
       settings,
+      reviewAdmission: input.reviewAdmission,
       reviewSnapshotRef,
     })
   } catch {
@@ -1567,6 +1570,7 @@ async function pushEarlyFailureSummary(input: {
   result: DispatchResult
   projectRoot?: string
   settings: import('./types.ts').LlmSettings
+  reviewAdmission?: ReviewAdmissionSnapshot
   reviewSnapshotRef?: ReviewSnapshotRef
 }): Promise<void> {
   if (!input.finalAgent) return
@@ -1581,6 +1585,7 @@ async function pushEarlyFailureSummary(input: {
       status: 'failed',
       projectRoot: input.projectRoot,
       settings: input.settings,
+      reviewAdmission: input.reviewAdmission,
       reviewSnapshotRef: input.reviewSnapshotRef,
     })
   } catch {
@@ -1589,11 +1594,15 @@ async function pushEarlyFailureSummary(input: {
 }
 
 async function legacySummaryDiff(input: {
+  reviewAdmission?: ReviewAdmissionSnapshot
   reviewSnapshotRef?: ReviewSnapshotRef
   producedFiles: Array<{ path: string }>
   projectRoot?: string
 }): Promise<string | undefined> {
-  if (input.reviewSnapshotRef || input.producedFiles.length === 0) return undefined
+  // Only the explicitly non-canonical browser compatibility path may read a
+  // live workspace. A failed canonical capture remains failed; rereading the
+  // mutable tree would silently substitute different evidence.
+  if (input.reviewAdmission?.canonical !== false || input.reviewSnapshotRef || input.producedFiles.length === 0) return undefined
   try {
     const { useProjectStore } = await import('../store/projectStore.ts')
     const projectRoot = input.projectRoot || useProjectStore.getState().root || undefined
@@ -1610,6 +1619,28 @@ async function legacySummaryDiff(input: {
   }
 }
 
+function archivedAgentWork(finalAgent: AgentState) {
+  if (!finalAgent.hostSessionId) return undefined
+  const recordedEntries = finalAgent.turnRecord?.entries || []
+  const originTurn = recordedEntries.reduce((highest, entry) => (
+    entry.kind === 'agent-lifecycle' || entry.kind === 'agent-collaboration'
+      ? highest
+      : Math.max(highest, entry.turn)
+  ), 0)
+  if (originTurn <= 0) return undefined
+  const entries = recordedEntries.filter((entry) => entry.kind === 'agent-lifecycle'
+    || entry.kind === 'agent-collaboration'
+    || entry.kind === 'delegation-assignment'
+    || entry.kind === 'delegation-observation'
+    || entry.kind === 'delegation-check')
+  return { sessionId: finalAgent.hostSessionId, originTurn, entries }
+}
+
+function archivedAgentWorkPayload(finalAgent: AgentState) {
+  const agentWork = archivedAgentWork(finalAgent)
+  return agentWork ? { agentWork } : {}
+}
+
 async function pushRunProcessSummary(args: {
   thr: ReturnType<typeof import('../store/threadStore.ts').useThreadStore.getState>
   tid: string
@@ -1621,6 +1652,7 @@ async function pushRunProcessSummary(args: {
   projectRoot?: string
   /** The run's frozen settings — the only place user-stated model rates live. */
   settings?: import('./types.ts').LlmSettings
+  reviewAdmission?: ReviewAdmissionSnapshot
   reviewSnapshotRef?: ReviewSnapshotRef
 }): Promise<void> {
   const { thr, tid, runId, finalAgent, result, status } = args
@@ -1653,6 +1685,7 @@ async function pushRunProcessSummary(args: {
   }))
   const producedFiles = projectProducedFiles(finalAgent.turnRecord)
   const diff = await legacySummaryDiff({
+    reviewAdmission: args.reviewAdmission,
     reviewSnapshotRef: args.reviewSnapshotRef,
     producedFiles,
     projectRoot: args.projectRoot,
@@ -1682,6 +1715,7 @@ async function pushRunProcessSummary(args: {
   })
   thr.pushRunSummary(tid, {
     runId,
+    ...archivedAgentWorkPayload(finalAgent),
     status:
       status === 'failed' ? 'failed' : status === 'halted' ? 'halted' : 'success',
     durationMs: finalAgent.metrics?.executionMs,
@@ -1839,6 +1873,149 @@ function isUnexpectedQueuedDuplicate(
   return Boolean(queued && !opts._fromQueue)
 }
 
+function activeSameThreadRunId(opts: ExternalRunOpts, busyRunId: string | null | undefined, activeRunIds: readonly string[]): string | undefined {
+  return opts.reuseThreadId && busyRunId && activeRunIds.includes(busyRunId) ? busyRunId : undefined
+}
+
+function admittedObjective(opts: ExternalRunOpts): string {
+  const objective = opts.objective.trim()
+  return objective || (opts.attachments?.length ? '請分析我附上的圖片或檔案。' : '')
+}
+
+function frozenBusyPolicy(opts: ExternalRunOpts): BusyPolicy | undefined {
+  if (opts.followUpAction === 'queue') return 'queue'
+  if (opts.followUpAction === 'takeover') return 'steer'
+  return undefined
+}
+
+function busyPolicyForRun(input: {
+  opts: ExternalRunOpts
+  followUpMode: LlmSettings['followUpMode']
+  resolve: (sourceKind: NonNullable<ExternalRunOpts['sourceKind']>, followUpMode: LlmSettings['followUpMode']) => BusyPolicy
+  shouldEnqueue: (opts: ExternalRunOpts) => boolean
+}): BusyPolicy {
+  const frozen = frozenBusyPolicy(input.opts)
+  if (frozen) return frozen
+  if (input.opts.sourceKind) return input.resolve(input.opts.sourceKind, input.followUpMode)
+  return input.shouldEnqueue(input.opts) ? 'queue' : 'reject'
+}
+
+function queuedFollowUpCount(queue: unknown, threadId: string): number {
+  if (!Array.isArray(queue)) return 0
+  return queue.filter((value) => {
+    if (!value || typeof value !== 'object') return false
+    const item = value as Record<string, unknown>
+    const profile = item.profile && typeof item.profile === 'object' ? item.profile as Record<string, unknown> : {}
+    return item.action === 'queue' && item.status === 'queued' && profile.threadId === threadId
+  }).length
+}
+
+function eligibleBuiltinFollowUpAction(input: {
+  opts: ExternalRunOpts
+  runner: ThreadRunner
+  activeRunId?: string
+  settings: LlmSettings
+}): 'steer' | 'queue' | undefined {
+  const interactiveSource = input.opts.sourceKind === 'composer'
+    || input.opts.sourceKind === 'slash'
+    || input.opts.sourceKind === 'retry'
+    || input.opts.sourceKind === 'review'
+  if (!interactiveSource || input.opts._fromQueue || input.runner !== 'builtin' || !input.activeRunId || !input.opts.reuseThreadId) return undefined
+  const action = input.opts.followUpAction || followUpActionForRunner(input.runner, input.settings.followUpMode || 'steer')
+  return action === 'steer' || action === 'queue' ? action : undefined
+}
+
+function builtinFollowUpProfile(input: {
+  opts: ExternalRunOpts
+  settings: LlmSettings
+  existingThread?: { model?: string; agentMode?: string }
+}): Record<string, unknown> {
+  return Object.fromEntries(Object.entries({
+    model: input.opts.overrides?.model || input.existingThread?.model,
+    thinkingLevel: input.opts.overrides?.thinkingDepth,
+    speed: input.opts.overrides?.speed,
+    approvalMode: input.opts.overrides?.approvalMode || input.settings.approvalMode,
+    agentMode: input.opts.overrides?.agentMode || input.existingThread?.agentMode,
+  }).filter(([, value]) => value !== undefined))
+}
+
+function acceptedBuiltinFollowUpResult(input: {
+  action: 'steer' | 'queue'
+  response: Record<string, unknown>
+  threadId: string
+  runId: string
+}): ExternalRunResult {
+  const queuedCount = queuedFollowUpCount(input.response.queue, input.threadId)
+  const notice = input.action === 'steer'
+    ? '已引導目前執行：將在下一個安全工具／模型邊界套用。'
+    : `已加入目前對話的 Host 佇列第 ${Math.max(1, queuedCount)} 位，會在目前 Task run 完成後執行。`
+  return { path: 'builtin', status: 'skipped', error: notice, threadId: input.threadId, runId: input.runId, skipped: true, skipReason: input.action, ...(input.action === 'queue' ? { queued: true } : {}) }
+}
+
+function rejectedBuiltinFollowUpResult(input: {
+  action: 'steer' | 'queue'
+  error: unknown
+  threadId: string
+  runId: string
+  objective: string
+}): ExternalRunResult {
+  const reason = input.error instanceof Error ? input.error.message : String(input.error)
+  const label = input.action === 'steer' ? '引導' : '排隊'
+  return {
+    path: 'builtin',
+    status: 'skipped',
+    error: `${label}未接受：${reason}；原始指令已保留，可編輯或改為排隊。`,
+    threadId: input.threadId,
+    runId: input.runId,
+    skipped: true,
+    skipReason: 'busy',
+    followUpRecovery: {
+      id: input.runId,
+      text: input.objective,
+      action: input.action,
+      reason,
+    },
+  }
+}
+
+async function submitBuiltinBusyFollowUp(input: {
+  opts: ExternalRunOpts
+  runId: string
+  objective: string
+  activeRunId?: string
+  runner: ThreadRunner
+  attachments: ChatAttachment[]
+  projectRoot?: string
+  settings: LlmSettings
+  existingThread?: { model?: string; agentMode?: string }
+  pushUserBubble: (threadId: string, text: string, attachments: ChatAttachment[]) => void
+}): Promise<ExternalRunResult | undefined> {
+  const action = eligibleBuiltinFollowUpAction(input)
+  if (!action || !input.activeRunId || !input.opts.reuseThreadId) return undefined
+  const piHost = window.subagents?.piHost
+  if (!piHost?.sessions?.list || !piHost.turn?.submit) {
+    return { path: 'builtin', status: 'skipped', error: 'Pi Host follow-up bridge unavailable；原始指令尚未接受，請稍後重送。', threadId: input.opts.reuseThreadId, runId: input.runId, skipped: true, skipReason: 'busy' }
+  }
+  try {
+    const profile = builtinFollowUpProfile(input)
+    const response = await submitHostInteractiveFollowUp(piHost, {
+      action,
+      threadId: input.opts.reuseThreadId,
+      runId: input.runId,
+      expectedActiveRunId: input.activeRunId,
+      prompt: input.objective,
+      runner: 'builtin',
+      projectRoot: input.projectRoot,
+      attachments: input.attachments,
+      profile,
+    })
+    input.pushUserBubble(input.opts.reuseThreadId, input.objective, input.attachments)
+    return acceptedBuiltinFollowUpResult({ action, response, threadId: input.opts.reuseThreadId, runId: input.runId })
+  } catch (error) {
+    return rejectedBuiltinFollowUpResult({ action, error, threadId: input.opts.reuseThreadId, runId: input.runId, objective: input.objective })
+  }
+}
+
 /**
  * Coordinate one Task run: admission → immutable dispatch snapshot → adapter → finalization.
  * This is the only lifecycle implementation behind the public runTask seam.
@@ -1848,10 +2025,7 @@ async function coordinateTaskRun(
 ): Promise<ExternalRunResult> {
   opts = normalizeTaskRunInput(opts)
   const runId = opts.runId || `run_${uuid().slice(0, 12)}`
-  let objective = opts.objective.trim()
-  if (!objective && opts.attachments?.length) {
-    objective = '請分析我附上的圖片或檔案。'
-  }
+  const objective = admittedObjective(opts)
   if (!objective) {
     return {
       path: 'builtin',
@@ -1883,10 +2057,10 @@ async function coordinateTaskRun(
     import('./taskRunPolicy.ts'),
   ])
   const {
-    buildSteerPartialDigest,
+    buildTakeoverPartialDigest,
     explicitLoopTypeForConversation,
-    formatSteerNotice,
-    steerOutcomeSummary,
+    formatTakeoverNotice,
+    takeoverOutcomeSummary,
     isAutomationSource,
     isInteractiveConversationSource,
     presentConversationAutomationSuggestion,
@@ -2057,14 +2231,12 @@ async function coordinateTaskRun(
   const agent = useAgentStore.getState()
   let capacity = await checkRunCapacity(runId, opts.reuseThreadId)
   if (!capacity.allowed) {
-    const policy: BusyPolicy = opts.sourceKind
-      ? resolveBusyPolicy(
-          opts.sourceKind,
-          useSettingsStore.getState().settings.followUpMode,
-        )
-      : shouldEnqueueWhenBusy(opts)
-        ? 'queue'
-        : 'reject'
+    const policy = busyPolicyForRun({
+      opts,
+      followUpMode: useSettingsStore.getState().settings.followUpMode,
+      resolve: resolveBusyPolicy,
+      shouldEnqueue: shouldEnqueueWhenBusy,
+    })
 
     const thrBusy = useThreadStore.getState()
     const busyThreadId = opts.reuseThreadId || thrBusy.runningThreadId || thrBusy.runningThreadIds[0]
@@ -2074,24 +2246,38 @@ async function coordinateTaskRun(
     const runningTitle = busyThreadId
       ? thrBusy.threads.find((t) => t.id === busyThreadId)?.title?.slice(0, 32)
       : undefined
+    const sameThreadActiveRunId = activeSameThreadRunId(opts, busyRunId, useAgentStore.getState().activeRunIds)
+    const builtinFollowUp = await submitBuiltinBusyFollowUp({
+      opts,
+      runId,
+      objective,
+      activeRunId: sameThreadActiveRunId,
+      runner: (selectedRunner || 'builtin') as ThreadRunner,
+      attachments: attachments || [],
+      projectRoot: attachmentProjectRoot,
+      settings: admissionSettings,
+      existingThread: existingAdmissionThread,
+      pushUserBubble: (threadId, text, bubbleAttachments) => thrBusy.pushBubble(threadId, 'user', text, bubbleAttachments),
+    })
+    if (builtinFollowUp) return builtinFollowUp
 
     if (policy === 'steer' && !opts._fromQueue) {
-      // Interactive steer: capture the partial digest, abort, then report what
+      // External CLI takeover: capture the partial digest, abort, then report what
       // actually happened. The bubble is written after the outcome is known —
       // announcing an abort up front is how the old path could say "已轉向"
       // and then answer busy, leaving the user's instruction nowhere at all.
       const tid0 = opts.reuseThreadId || thrBusy.activeId
-      const partial = buildSteerPartialDigest(agent.getRunState(busyRunId || undefined) || agent.agent)
+      const partial = buildTakeoverPartialDigest(agent.getRunState(busyRunId || undefined) || agent.agent)
       // The bubble and the returned `error` are the same sentence, so the
       // thread and the caller can never be told different stories.
-      const steerResult = (
-        outcome: SteerOutcome,
+      const takeoverResult = (
+        outcome: TakeoverOutcome,
         queuePosition?: number,
         queueTotal?: number,
       ): string => {
         const shape = { outcome, runningTitle, partial, queuePosition, queueTotal }
-        if (tid0) thrBusy.pushBubble(tid0, 'system', formatSteerNotice(shape))
-        return steerOutcomeSummary(shape)
+        if (tid0) thrBusy.pushBubble(tid0, 'system', formatTakeoverNotice(shape))
+        return takeoverOutcomeSummary(shape)
       }
       // Only a run still holding a capacity slot can be steered away from.
       // A stale thread→run association is not something to abort, and busy is
@@ -2104,7 +2290,7 @@ async function coordinateTaskRun(
         return {
           path: 'builtin',
           status: 'skipped',
-          error: steerResult('not-abortable'),
+          error: takeoverResult('not-abortable'),
           threadId: tid0 || null,
           runId,
           skipped: true,
@@ -2118,7 +2304,7 @@ async function coordinateTaskRun(
           if (capacity.allowed) break
         }
         if (capacity.allowed) {
-          steerResult('took-over')
+          takeoverResult('took-over')
         } else {
           // A safe park stops at the next tool boundary, so outliving the wait
           // window is normal behaviour — not a reason to discard the new goal.
@@ -2134,7 +2320,7 @@ async function coordinateTaskRun(
             return {
               path: 'builtin',
               status: 'skipped',
-              error: steerResult('queued', pos > 0 ? pos : queueLength(), queueLength()),
+              error: takeoverResult('queued', pos > 0 ? pos : queueLength(), queueLength()),
               threadId: tid0 || null,
               runId,
               skipped: true,
@@ -2150,7 +2336,7 @@ async function coordinateTaskRun(
           return {
             path: 'builtin',
             status: 'skipped',
-            error: steerResult('aborted-not-queued'),
+            error: takeoverResult('aborted-not-queued'),
             threadId: tid0 || null,
             runId,
             skipped: true,

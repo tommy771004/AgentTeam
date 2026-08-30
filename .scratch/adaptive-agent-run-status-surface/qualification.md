@@ -12,9 +12,10 @@ Status: `resolved`
 
 ## Implementation evidence
 
-- `src/agent/runStatusSurface.ts` 是單一純 UI Projection owner；只讀 frozen runner capabilities、bounded lifecycle/activity、Host Working State、attention 與 terminal facts。
+- `src/agent/runStatusSurface.ts` 是單一純 UI Projection owner；任務進度只讀 Host-carried structured Agent plan，另外讀 frozen runner capabilities、bounded lifecycle/activity、attention 與 terminal facts。
 - 第一區只使用 bounded runtime vocabulary，顯示「執行狀態」、elapsed time 與最後更新；objective、assistant text、instruction bodies、constraints、absolute paths 與 raw output 不參與文案。
-- 第二區依 evidence 選擇「任務進度」、「最近活動」、「需要你處理」或「執行摘要」；沒有實質內容時不渲染。
+- 第二區依 structured run tasks 與 lifecycle 選擇「任務進度」、「最近活動」、「需要你處理」或「執行摘要」；Working State objective／reference history 不得成為 milestone，沒有實質內容時不渲染。
+- Live progress 使用 `docs/ui/Task Rows.md` 的 capsule row；archive 使用 list row。Rendered smoke 覆蓋 active spinner、四種狀態、鍵盤 disclosure、bounded meta/details、reload fallback、新 run 清除與 archive variant。
 - Archive 與 live rail 共用 `projectRunStatusSurface`；renderer archive 的 Working State 仍保持 unverified，不因重播而提升 Host guarantee。
 - Working State revision、runner guarantee、constraints 與 evidence identities 僅在鍵盤可操作、預設收合的「執行資訊」中顯示。
 

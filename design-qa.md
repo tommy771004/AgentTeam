@@ -106,6 +106,54 @@ Reviewed: 2026-08-28
 
 final result: passed
 
+---
+
+# Design QA — Live Agent Task Rows
+
+Reviewed: 2026-08-30
+
+## Source visual truth and implementation
+
+- Source contract: `/Users/tommy/Documents/Proj/AgentTeam/docs/ui/Task Rows.md`.
+- Rendered Task Row reference: `/var/folders/05/x61j217d49g9k0_kccntyzsr0000gn/T/agentteam-task-rows-6ca8gm/dark.png` (`320 × 585` focused crop from a `320 × 860` CSS viewport, DPR 1).
+- Browser-rendered live panel: `/Users/tommy/Documents/Proj/AgentTeam/.scratch/adaptive-agent-run-status-surface/evidence/ui-2026-08-30/builtin-progress.png` (`360 × 780`, `360 × 780` CSS viewport, DPR 1).
+- Combined comparison input: `/Users/tommy/Documents/Proj/AgentTeam/.scratch/adaptive-agent-run-status-surface/evidence/ui-2026-08-30/task-rows-comparison.png` (`704 × 824`).
+- State: dark theme; completed, active, pending, and failed Agent-authored tasks; live panel rows collapsed. Expanded detail behavior was checked separately because the reference and implementation crops use different surrounding containers.
+
+## Full-view and focused comparison
+
+- Full view: the live rail keeps its existing lifecycle header and section rhythm while the task region adopts the reference's compact capsule rows, status rings, semantic badges, row meta, and chevrons.
+- Focused rows: 24 px numbered rings, 44 px minimum hit targets, 80 ms stagger, 22/14 px closed/open radii, status pills, left detail rule, and quiet child metadata match the shared `RunTaskRow` reference.
+- The rail is intentionally 360 px wide rather than the standalone reference's 320 px fixture; no pixel scaling was applied. Both captures remain DPR 1, and the comparison judges the same component grammar rather than unrelated surrounding chrome.
+
+## Findings and comparison history
+
+1. Initial live progress used a flat text list with glyph markers and no Task Row interaction.
+   - Fix: live milestones now render through the same `RunTaskRow` component used by archived summaries.
+2. Initial plan projection discarded Host step ids and had no route for row meta or expandable child details.
+   - Fix: bounded Agent-authored `id`, `meta`, and `details` now survive Host announcement, run-scoped activity, current-thread reload fallback, and archived summary projection.
+3. Post-fix combined comparison found no actionable P0, P1, or P2 mismatch.
+
+## Required fidelity surfaces
+
+- Fonts and typography: existing AgentStudio UI and mono families remain unchanged; task labels use 13 px medium text, row metadata 12.5 px tabular text, and detail metadata 11 px mono text.
+- Spacing and layout rhythm: row height, 8 px capsule gaps, status alignment, left detail rule, padding, radii, and elevation follow the reference without widening the rail or creating overflow.
+- Colors and visual tokens: existing surface, inset, line, ink, green, red, and semantic tint tokens are reused. No new palette, gradient, glow, or glass treatment was introduced.
+- Image quality and assets: this component contains no raster imagery. Status and disclosure icons use the existing product icon system; the progress ring uses the existing shared primitive.
+- Copy and content: `待處理`, `進行中`, `已完成`, `失敗`, short row meta, and Agent-authored child steps communicate lifecycle directly. Prompt text, reference chat history, and raw tool output are excluded from task content.
+
+## Primary interactions and accessibility
+
+- Keyboard Enter/Space opens and closes task details; `aria-expanded`, `aria-controls`, and disclosure state remain synchronized.
+- Only an active task in a live run spins; archived or terminal active tasks read `未完成` and never animate.
+- Reduced-motion disables continuous and entrance motion.
+- A new run clears the previous thread plan before its run identity is bound.
+- Live, current-thread fallback, archived list variant, light/dark theme, narrow width, and browser console errors were checked by rendered fixtures.
+
+Final severity count: **P0 0 · P1 0 · P2 0**
+
+final result: passed
+
 - `npm run smoke` - passed
 - `smoke-subdesign-studio.mts` - 9 tests passed
 - `git diff --check` - passed

@@ -175,7 +175,8 @@ try {
   assert.doesNotMatch(await readFile(listedSession.piSessionFile, 'utf8'), /Keep model changes scoped to the active session/)
   host.stdin.write(`${JSON.stringify({ id: 11, method: 'sessions/fork', params: { sessionId } })}\n`)
   const forked = (await waitFor(11)).result.sessions[0]
-  assert.equal(forked.parentSessionId, sessionId)
+  assert.equal(forked.forkedFromSessionId, sessionId)
+  assert.equal(forked.parentSessionId, undefined)
   assert.equal(forked.profile.model, 'small-model')
   assert.deepEqual(forked.messages, listedSession.messages)
   const requestsBeforeStatelessTurn = requestBodies.length

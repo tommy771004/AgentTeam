@@ -1,4 +1,3 @@
-import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
 import { disposePiSession, forkPiSession } from './piCoreRuntime.ts'
 import { pageTurnRecord, workingStateFromTurnRecord } from '../src/agent/turnRecord.ts'
 import type { PiHostMessage, SessionRecord } from './piHostProtocol.ts'
@@ -85,28 +84,12 @@ export function handlePiHostSessionDomain(input: {
 
 function createSession(input: Parameters<typeof handlePiHostSessionDomain>[0], sessions: SessionRecord[]): PiHostMessage[] {
   const params = input.params || {}
-  const parentSessionId = typeof params.parentSessionId === 'string' ? params.parentSessionId : undefined
-  let sessionId = `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  let childMetadata: Pick<SessionRecord, 'parentSessionId' | 'role' | 'profile' | 'context' | 'depth'> = {}
-  if (parentSessionId) {
-    if (!sessions.some((candidate) => candidate.id === parentSessionId)) return [errorResponse(input.id, 'parentSessionId is unknown')]
-    if (typeof params.role !== 'string' || !params.profile || typeof params.profile !== 'object'
-      || !params.context || typeof params.context !== 'object' || typeof params.depth !== 'number') {
-      return [errorResponse(input.id, 'Child Pi session requires role, profile, context, and depth')]
-    }
-    try {
-      const child = createPiChildSession({ role: params.role, profile: params.profile as Record<string, unknown>, context: params.context as PiContextPacket, depth: params.depth })
-      sessionId = child.id
-      childMetadata = { parentSessionId, role: child.role, profile: child.profile, context: child.context, depth: child.depth }
-    } catch (error) {
-      return [errorResponse(input.id, error instanceof Error ? error.message : 'Invalid child Pi session')]
-    }
-  }
+  if (params.parentSessionId !== undefined) return [errorResponse(input.id, 'Child sessions must be admitted through agents/spawn')]
+  const sessionId = `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const session: SessionRecord = {
     id: sessionId,
     title: typeof params.title === 'string' ? params.title : 'New Pi session',
     threadId: typeof params.threadId === 'string' ? params.threadId : undefined,
-    ...childMetadata,
     messages: [],
   }
   const nextSessions = [...sessions, session]
@@ -126,7 +109,7 @@ function forkSession(input: Parameters<typeof handlePiHostSessionDomain>[0], ses
   const fork: SessionRecord = {
     id: `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     title: `${source.title} (fork)`,
-    parentSessionId: source.id,
+    forkedFromSessionId: source.id,
     role: source.role,
     profile: source.profile ? { ...source.profile } : undefined,
     context: source.context ? { objective: source.context.objective, facts: [...source.context.facts], constraints: [...source.context.constraints] } : undefined,

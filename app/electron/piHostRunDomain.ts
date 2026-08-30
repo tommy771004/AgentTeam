@@ -16,10 +16,12 @@ type RunDomainInput = {
   isSettlement: (value: unknown) => value is PiTurnSettlement
   handleAttachment: () => PiHostMessage[] | Promise<PiHostMessage[]> | undefined
   recordLifecycle: (sessionId: string, state: AgentLifecycleState, runId?: string, reason?: string) => boolean
+  onSettled?: (run: PiQueuedRun, settlement: PiTurnSettlement) => void
+  canClaim?: (run: PiQueuedRun) => boolean
 }
 
-function errorResponse(id: string | number, message: string): PiHostMessage {
-  return { id, error: { code: 'invalid_request', message } }
+function errorResponse(id: string | number, message: string, code: 'invalid_request' | 'conflict' | 'busy' = 'invalid_request'): PiHostMessage {
+  return { id, error: { code, message } }
 }
 
 /**
@@ -44,6 +46,8 @@ const RUN_METHODS: Record<string, RunMethodHandler> = {
   'runs/settle': settleRun,
   'runs/enqueue': enqueueRun,
   'runs/cancel': cancelRun,
+  'runs/update': updateRun,
+  'runs/reorder': reorderRuns,
 }
 
 function commitQueue(input: RunDomainInput, queue: PiRunQueue): PiQueuedRun[] {
@@ -55,8 +59,8 @@ function commitQueue(input: RunDomainInput, queue: PiRunQueue): PiQueuedRun[] {
 function claimRun(input: RunDomainInput): PiHostMessage[] {
   const runId = typeof input.params?.runId === 'string' ? input.params.runId : undefined
   const queue = new PiRunQueue(24, input.snapshot.queue)
-  const run = queue.claim(runId)
-  if (!run) return [errorResponse(input.id, runId ? 'Unknown queued Pi run' : 'No queued Pi run available')]
+  const run = queue.claim(runId, input.canClaim || (() => true))
+  if (!run) return [errorResponse(input.id, runId ? 'Queued Pi run is unavailable or its session is active' : 'No claimable queued Pi run available', 'busy')]
   if (!input.recordLifecycle(run.sessionId, 'running', run.runId)) return [errorResponse(input.id, 'Illegal agent lifecycle transition')]
   return [{ id: input.id, result: { run, queue: commitQueue(input, queue) } }]
 }
@@ -71,6 +75,7 @@ function settleRun(input: RunDomainInput): PiHostMessage[] {
   if (!input.recordLifecycle(run.sessionId, agentLifecycleFromTurnSettlement(settlement), run.runId)) {
     return [errorResponse(input.id, 'Illegal agent lifecycle transition')]
   }
+  input.onSettled?.(run, settlement)
   return [{ id: input.id, result: { run, queue: commitQueue(input, queue), settlement } }]
 }
 
@@ -103,11 +108,39 @@ function cancelRun(input: RunDomainInput): PiHostMessage[] {
   const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
   if (!runId) return [errorResponse(input.id, 'runId is required')]
   const queue = new PiRunQueue(24, input.snapshot.queue)
-  if (!queue.snapshot().some((item) => item.runId === runId)) return [errorResponse(input.id, 'Unknown queued Pi run')]
-  const run = queue.snapshot().find((item) => item.runId === runId)!
-  queue.markInterrupted(runId)
+  const existing = queue.snapshot().find((item) => item.runId === runId)
+  if (existing?.status === 'interrupted' && existing.action === 'queue') {
+    return [{ id: input.id, result: { queue: queue.snapshot(), followUp: existing, queueRevision: queue.revision() } }]
+  }
+  const expectedRevision = input.params?.expectedRevision
+  if (expectedRevision !== undefined && expectedRevision !== queue.revision()) return [errorResponse(input.id, 'Pi queue revision changed', 'conflict')]
+  const run = existing?.status === 'queued' ? existing : undefined
+  if (!run) return [errorResponse(input.id, 'Queued follow-up is immutable or unknown')]
+  const cancelled = queue.markInterrupted(runId)
   if (!input.recordLifecycle(run.sessionId, 'interrupted', runId)) return [errorResponse(input.id, 'Illegal agent lifecycle transition')]
-  return [{ id: input.id, result: { queue: commitQueue(input, queue) } }]
+  return [{ id: input.id, result: { queue: commitQueue(input, queue), followUp: cancelled, queueRevision: queue.revision() } }]
+}
+
+function updateRun(input: RunDomainInput): PiHostMessage[] {
+  const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+  const prompt = typeof input.params?.prompt === 'string' ? input.params.prompt.trim() : ''
+  const expectedRevision = input.params?.expectedRevision
+  if (!runId || !prompt || !Number.isSafeInteger(expectedRevision)) return [errorResponse(input.id, 'runId, prompt, and expectedRevision are required')]
+  const queue = new PiRunQueue(24, input.snapshot.queue)
+  const outcome = queue.update(runId, prompt, Number(expectedRevision))
+  if (!outcome.ok) return [errorResponse(input.id, outcome.code === 'conflict' ? 'Pi queue revision changed' : 'Queued follow-up is immutable', outcome.code === 'conflict' ? 'conflict' : 'invalid_request')]
+  return [{ id: input.id, result: { queue: commitQueue(input, queue), followUp: outcome.item, queueRevision: queue.revision() } }]
+}
+
+function reorderRuns(input: RunDomainInput): PiHostMessage[] {
+  const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
+  const runIds = Array.isArray(input.params?.runIds) ? input.params.runIds.filter((item): item is string => typeof item === 'string') : []
+  const expectedRevision = input.params?.expectedRevision
+  if (!sessionId || runIds.length === 0 || !Number.isSafeInteger(expectedRevision)) return [errorResponse(input.id, 'sessionId, runIds, and expectedRevision are required')]
+  const queue = new PiRunQueue(24, input.snapshot.queue)
+  const outcome = queue.reorder(sessionId, runIds, Number(expectedRevision))
+  if (!outcome.ok) return [errorResponse(input.id, outcome.code === 'conflict' ? 'Pi queue revision changed' : 'Queue order does not match mutable session items', outcome.code === 'conflict' ? 'conflict' : 'invalid_request')]
+  return [{ id: input.id, result: { queue: commitQueue(input, queue), queueRevision: queue.revision() } }]
 }
 
 /** One admission port used by public runs, follow-ups, and delegated children. */

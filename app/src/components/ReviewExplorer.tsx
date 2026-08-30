@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import type { ReviewFileManifestEntry, ReviewTarget } from '../agent/reviewContract.ts'
-import { fileReviewState, type ReviewComment, type ReviewFileState } from '../agent/reviewStateContract.ts'
+import { fileReviewState, type ReviewComment, type ReviewFeedbackBundle, type ReviewFileState } from '../agent/reviewStateContract.ts'
 import type { ReviewMutationOperation, ReviewMutationPreview } from '../agent/reviewMutationContract.ts'
 import { ReviewDeliveryPanel } from './ReviewDeliveryPanel.tsx'
 
@@ -347,7 +347,9 @@ function PinnedCommentsPanel(props: {
   onReload: () => Promise<void>
   onOpenTarget?: (target: ReviewTarget, title?: string) => void
 }) {
+  const [feedbackPreview, setFeedbackPreview] = useState<ReviewFeedbackBundle>()
   const fileComments = props.comments.filter((comment) => comment.anchor.path === props.file.path)
+  useEffect(() => setFeedbackPreview(undefined), [props.snapshotId])
   const save = () => {
     props.onError(undefined)
     const anchorInput = props.editingId || !props.selectedAnchor ? {} : { hunkId: props.selectedAnchor.hunkId, side: props.selectedAnchor.side, line: props.selectedAnchor.line }
@@ -355,9 +357,18 @@ function PinnedCommentsPanel(props: {
       .then(() => { props.onBody(''); props.onEditingId(undefined); return props.onReload() })
       .catch((error) => props.onError(error instanceof Error ? error.message : String(error)))
   }
-  const submitFeedback = () => {
+  const previewFeedback = () => {
     props.onSending(true); props.onError(undefined)
-    void import('../agent/reviewFeedbackRun.ts').then(({ submitReviewFeedback }) => submitReviewFeedback(props.snapshotId)).then((result) => {
+    void import('../agent/reviewFeedbackRun.ts').then(({ prepareReviewFeedback }) => prepareReviewFeedback(props.snapshotId))
+      .then(setFeedbackPreview)
+      .catch((error) => props.onError(error instanceof Error ? error.message : String(error)))
+      .finally(() => props.onSending(false))
+  }
+  const submitFeedback = () => {
+    if (!feedbackPreview) return
+    props.onSending(true); props.onError(undefined)
+    void import('../agent/reviewFeedbackRun.ts').then(({ submitReviewFeedback }) => submitReviewFeedback(props.snapshotId, feedbackPreview)).then((result) => {
+      setFeedbackPreview(undefined)
       if (result.comparisonTarget) props.onOpenTarget?.(result.comparisonTarget, '審查 A → B')
       if (result.run.skipped) props.onError(result.run.error || '此 bundle 已送出。')
     }).catch((error) => props.onError(error instanceof Error ? error.message : String(error))).finally(() => props.onSending(false))
@@ -373,7 +384,26 @@ function PinnedCommentsPanel(props: {
       <span className={`shrink-0 font-medium ${comment.status === 'outdated' ? 'text-orange' : 'text-accent-ink'}`}>{comment.status}</span><span className="min-w-0 flex-1 text-ink-2">{comment.body}{comment.status === 'outdated' ? <span className="mt-1 block font-[family-name:var(--font-mono)] text-ink-3">原始：{comment.anchor.originalContext}</span> : null}</span>
       {comment.status === 'draft' ? <><button type="button" onClick={() => { props.onBody(comment.body); props.onEditingId(comment.id) }} className="text-ink-3 hover:text-ink">編輯</button><button type="button" onClick={() => void window.subagents?.piHost?.review?.transitionComment(comment.id, 'submitted').then(props.onReload)} className="text-accent-ink">送出</button><button type="button" onClick={() => void window.subagents?.piHost?.review?.deleteDraft(comment.id).then(props.onReload)} className="text-red">刪除</button></> : null}
     </div>)}</div> : null}
-    {props.comments.some((comment) => comment.status === 'submitted' || comment.status === 'acknowledged') ? <div className="mt-2 flex items-center justify-between gap-3 border-t border-line pt-2"><p className="text-[9px] leading-relaxed text-ink-3">送出時由 Host 凍結 snapshot、workspace 與 anchors；外部 CLI 仍維持 reduced capability disclosure。</p><button type="button" disabled={props.sending} onClick={submitFeedback} className="shrink-0 border border-accent px-3 py-1.5 text-[10px] font-medium text-accent-ink hover:bg-selected disabled:opacity-50">{props.sending ? '送出中…' : '送交 Agent 修改'}</button></div> : null}
+    {feedbackPreview ? <FeedbackBundlePreview bundle={feedbackPreview} sending={props.sending} onCancel={() => setFeedbackPreview(undefined)} onConfirm={submitFeedback} /> : null}
+    {!feedbackPreview && props.comments.some((comment) => comment.status === 'submitted' || comment.status === 'acknowledged') ? <div className="mt-2 flex items-center justify-between gap-3 border-t border-line pt-2"><p className="text-[9px] leading-relaxed text-ink-3">先由 Host 凍結 snapshot、workspace 與 anchors，確認預覽後才建立下一個 run。</p><button type="button" disabled={props.sending} onClick={previewFeedback} className="shrink-0 border border-accent px-3 py-1.5 text-[10px] font-medium text-accent-ink hover:bg-selected disabled:opacity-50">{props.sending ? '準備中…' : '預覽送交內容'}</button></div> : null}
+  </section>
+}
+
+function FeedbackBundlePreview({ bundle, sending, onCancel, onConfirm }: { bundle: ReviewFeedbackBundle; sending: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const paths = [...new Set(bundle.comments.map((comment) => comment.anchor.path))]
+  return <section className="mt-2 border-t border-accent/40 pt-2" aria-label="Feedback bundle 預覽">
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0 text-[9px] leading-relaxed text-ink-3">
+        <p className="text-[10px] font-semibold text-ink">確認送交 {bundle.comments.length} 則 comment</p>
+        <p className="truncate font-[family-name:var(--font-mono)]">Snapshot {bundle.snapshotId} · Bundle {bundle.id}</p>
+        <p className="truncate">Workspace {bundle.workspace.projectRoot}</p>
+        <p className="truncate">{paths.join(' · ')}</p>
+      </div>
+      <div className="flex shrink-0 gap-2">
+        <button type="button" disabled={sending} onClick={onCancel} className="px-2 py-1 text-[10px] text-ink-3 hover:text-ink disabled:opacity-40">取消</button>
+        <button type="button" disabled={sending} onClick={onConfirm} className="border border-accent px-3 py-1 text-[10px] font-medium text-accent-ink hover:bg-selected disabled:opacity-40">{sending ? '送出中…' : '確認並建立 Run'}</button>
+      </div>
+    </div>
   </section>
 }
 

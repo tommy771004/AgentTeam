@@ -48,6 +48,16 @@ export type RunnerCapabilities = {
   skillPreflight: boolean
   /** Host Checkers binding completion to execution evidence. */
   checkers: boolean
+  /** Reuse one durable agent/provider conversation identity across executions. */
+  sessionReuse: boolean
+  /** Durable queue-only peer mailbox. */
+  mailbox: boolean
+  /** Authorized follow-up on the same child identity. */
+  followUp: boolean
+  /** Host can stop the execution and report a truthful terminal outcome. */
+  interrupt: boolean
+  /** Runner settlement can be delivered as an observation (never implicit DoD). */
+  completion: boolean
 }
 
 /** Full Goal/Hermes loop, owned by Pi Core orchestration. */
@@ -61,6 +71,11 @@ export const BUILTIN_RUNNER_CAPABILITIES: Readonly<RunnerCapabilities> = Object.
   workingState: true,
   skillPreflight: true,
   checkers: true,
+  sessionReuse: true,
+  mailbox: true,
+  followUp: true,
+  interrupt: true,
+  completion: true,
 })
 
 /**
@@ -79,6 +94,11 @@ export const EXTERNAL_CLI_RUNNER_CAPABILITIES: Readonly<RunnerCapabilities> = Ob
   workingState: false,
   skillPreflight: false,
   checkers: false,
+  sessionReuse: false,
+  mailbox: false,
+  followUp: false,
+  interrupt: true,
+  completion: true,
 })
 
 /** Multiple external processes coordinated by a Host-authored continuation envelope. */
@@ -92,6 +112,11 @@ export const EXTERNAL_ORCHESTRATED_RUNNER_CAPABILITIES: Readonly<RunnerCapabilit
   workingState: false,
   skillPreflight: false,
   checkers: false,
+  sessionReuse: false,
+  mailbox: false,
+  followUp: false,
+  interrupt: true,
+  completion: true,
 })
 
 /** No Host record and no frozen run snapshot means no guarantee may be inferred. */
@@ -105,6 +130,11 @@ export const UNAVAILABLE_RUNNER_CAPABILITIES: Readonly<RunnerCapabilities> = Obj
   workingState: false,
   skillPreflight: false,
   checkers: false,
+  sessionReuse: false,
+  mailbox: false,
+  followUp: false,
+  interrupt: false,
+  completion: false,
 })
 
 export type RunnerCapabilitySnapshot = Readonly<{
@@ -185,6 +215,11 @@ export function formatRunnerCapabilitiesSummary(caps: RunnerCapabilities): strin
     ['workingState', 'Verified Working State'],
     ['skillPreflight', 'Skill preflight'],
     ['checkers', 'Checkers'],
+    ['sessionReuse', 'session reuse'],
+    ['mailbox', 'durable mailbox'],
+    ['followUp', 'same-agent follow-up'],
+    ['interrupt', 'interrupt'],
+    ['completion', 'completion observation'],
   ]
   for (const [key, label] of labels) {
     if (caps[key]) on.push(label)
@@ -224,6 +259,14 @@ export type ExternalCliDelegateContract = {
   parentTranscript: 'none'
   unattended: boolean
   blockedTools: string[]
+  collaboration: {
+    identity: 'new-execution'
+    send: 'unsupported'
+    wait: 'unsupported'
+    followUp: 'new-execution'
+    interrupt: 'host-process'
+    completion: 'runner-settlement'
+  }
   continueGoal?: CliContinueGoalPromptContract
 }
 
@@ -261,6 +304,14 @@ export function buildExternalCliDelegateContract(opts: {
       opts.role === 'orchestrator'
         ? ['delegate_task']
         : [...LEAF_BLOCKED_TOOLS],
+    collaboration: {
+      identity: 'new-execution',
+      send: 'unsupported',
+      wait: 'unsupported',
+      followUp: 'new-execution',
+      interrupt: 'host-process',
+      completion: 'runner-settlement',
+    },
     continueGoal: opts.continueGoal,
   }
 }

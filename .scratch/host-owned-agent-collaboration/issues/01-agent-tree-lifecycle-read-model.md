@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** 實作完成；整體 qualification 依使用者要求延後至全部 tickets 完成後一次執行（2026-08-30）
+**Status:** resolved（2026-08-30；見 `../qualification.md`）
 
 - [x] Root 與 child 都有穩定 tree identity、canonical task path、parent edge 與 bounded display metadata
 - [x] Lifecycle 至少區分 queued、admitted、running、waiting-approval、blocked、completed、failed、cancelled、interrupted，未知或舊資料誠實降級
@@ -13,12 +13,12 @@
 - [x] Renderer 只 feature-detect 並投影 Host snapshot，不保存第二份 canonical tree
 - [x] 既有 child session 可讀且不需要破壞性資料遷移
 - [x] Protocol-level smoke 以外部行為驗證 root、child、nested child、archived/legacy session 與狀態轉移
-- [ ] 全部 tickets 完成後執行一次完整 smoke
+- [x] 全部 tickets 完成後執行一次完整 smoke
 
 ## Evidence
 
 - `app/scripts/smoke-agent-tree-read-model.mts`：negotiated `agent-tree-v1`、root-scoped protocol、nested child、live/replay lifecycle、全部狀態 projection、UTF-8 bounds、非法 transition、upcoming-turn attribution 與 legacy fail-closed projection。
 - `app/scripts/smoke-pi-host-steer-queue.mts`：active follow-up 經共用 enqueue port，並在上一輪 terminal 後以 turn 2 落盤。
 - `app/scripts/smoke-pi-delegated-goal-host.mts`：delegated child enqueue 經相同 port 寫入 child lifecycle record。
-- `app/scripts/smoke-pi-turn-record.mts`：Turn Record v13、typed `agent-lifecycle`、v12 migration boundary 與 bounded metadata。
-- `npm run build`、`npm run smoke:pi-host` 全綠；完整 `npm run smoke` 已依使用者指示停止重複執行，保留到 ticket 15 統一 qualification。
+- `app/scripts/smoke-pi-turn-record.mts`：Turn Record v14、typed `agent-lifecycle`／`agent-collaboration`、v12/v13 migration boundary 與 bounded metadata。
+- `npm run build`、`npm run smoke:pi-host` 與最後一次完整 `npm run smoke` 全綠；package-time 結果見 `../qualification.md`。

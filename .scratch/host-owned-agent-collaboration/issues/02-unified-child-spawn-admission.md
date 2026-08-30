@@ -4,13 +4,13 @@
 
 **Blocked by:** 01 — Agent tree 與 lifecycle read model.
 
-**Status:** 可交給代理
+**Status:** resolved（2026-08-30；見 `../qualification.md`）
 
-- [ ] Spawn 成功回傳穩定 agent identity、canonical path、parent edge 與 admitted/queued state
-- [ ] 缺少 objective、role、profile、context 或 depth 時 fail closed
-- [ ] Depth、concurrency、retained-agent 與 rollout budget 由 Host 以 tree scope 執行
-- [ ] Child approval、sandbox、capability、MCP、Outbound Data Gate 與 provider policy 只能比 parent 更嚴
-- [ ] Child 只取得明確 Context Packet，不繼承整份 parent transcript
-- [ ] Duplicate spawn identity 不會建立兩個 child 或兩個初始 run
-- [ ] Spawn、拒絕與 queue_full 都有 Turn Record 與 UI Projection
-- [ ] 真 Pi Host spawn smoke 證明 production path，不以 renderer executor 代替
+- [x] Spawn 成功回傳穩定 agent identity、canonical path、parent edge 與 admitted/queued state
+- [x] 缺少 objective、role、profile、context 或 depth 時 fail closed
+- [x] Depth、concurrency、retained-agent 與 rollout budget 由 Host 以 tree scope 執行
+- [x] Child approval、sandbox、capability、MCP、Outbound Data Gate 與 provider policy 只能比 parent 更嚴
+- [x] Child 只取得明確 Context Packet，不繼承整份 parent transcript
+- [x] Duplicate spawn identity 不會建立兩個 child 或兩個初始 run
+- [x] Spawn、拒絕與 queue_full 都有 Turn Record 與 UI Projection
+- [x] 真 Pi Host spawn smoke 證明 production path，不以 renderer executor 代替

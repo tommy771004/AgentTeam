@@ -12,6 +12,7 @@
  * changes upstream can no longer derail the phase display.
  */
 import type { RunLifecyclePhase } from './runLifecycle.ts'
+import type { RunActivityStore, RunTaskSnapshotItem } from '../store/runActivityStore.ts'
 
 export type PiHostEventLike = {
   event: string
@@ -21,6 +22,7 @@ export type PiHostEventLike = {
 export type PiHostActivityUpdate =
   | { kind: 'text'; runId: string; delta: string }
   | { kind: 'thought'; runId: string; delta: string }
+  | { kind: 'plan'; runId: string; tasks: RunTaskSnapshotItem[] }
   | {
       kind: 'status' | 'tool' | 'error'
       runId: string
@@ -33,6 +35,35 @@ export type PiHostActivityUpdate =
       /** Structured lifecycle signal; wins over status-line regex derivation. */
       phase?: RunLifecyclePhase
     }
+
+type PiHostActivitySink = Pick<RunActivityStore, 'appendText' | 'appendThought' | 'setTasks' | 'push' | 'setStatus'>
+
+/** Apply one typed Host update to the disposable renderer presentation. */
+export function applyPiHostActivityUpdate(activity: PiHostActivitySink, update: PiHostActivityUpdate): void {
+  if (update.kind === 'text') {
+    activity.appendText(update.delta, update.runId)
+    return
+  }
+  if (update.kind === 'thought') {
+    activity.appendThought(update.delta, update.runId)
+    return
+  }
+  if (update.kind === 'plan') {
+    activity.setTasks(update.tasks, update.runId)
+    return
+  }
+  activity.push({
+    id: update.eventId,
+    runId: update.runId,
+    kind: update.kind,
+    title: update.title,
+    detail: update.detail,
+    tool: update.tool,
+    callId: update.callId,
+    ok: update.ok,
+  })
+  activity.setStatus(update.title, update.runId, update.phase)
+}
 
 type RecordValue = Record<string, unknown>
 
@@ -75,6 +106,41 @@ function summarize(value: unknown): string | undefined {
 
 function callEventId(callId: unknown, phase: string): string | undefined {
   return typeof callId === 'string' && callId ? `pi-${callId}-${phase}` : undefined
+}
+
+function mapPlanUpdate(payload: RecordValue, runId: string): PiHostActivityUpdate | null {
+  const steps = Array.isArray(payload.steps) ? payload.steps : []
+  const tasks = steps.flatMap((value) => {
+    const step = asRecord(value)
+    const text = asText(step?.title)
+    if (!text) return []
+    const status = asText(step?.status)
+    const id = asText(step?.id)?.slice(0, 80)
+    const meta = asText(step?.meta)?.slice(0, 80)
+    const details = Array.isArray(step?.details)
+      ? step.details.slice(0, 8).flatMap((raw) => {
+          const detail = asRecord(raw)
+          const label = asText(detail?.label)?.slice(0, 200)
+          if (!label) return []
+          const detailMeta = asText(detail?.meta)?.slice(0, 80)
+          return [{ label, ...(detailMeta ? { meta: detailMeta } : {}) }]
+        })
+      : []
+    return [{
+      ...(id ? { id } : {}),
+      text: text.slice(0, 200),
+      status: status === 'done' ? 'done' as const : status === 'in_progress' ? 'active' as const : status === 'failed' ? 'failed' as const : 'pending' as const,
+      ...(meta ? { meta } : {}),
+      ...(details.length ? { details } : {}),
+    }]
+  }).slice(0, 40)
+  return tasks.length ? { kind: 'plan', runId, tasks } : null
+}
+
+function mapEarlyHostEvent(event: PiHostEventLike, payload: RecordValue, runId: string): PiHostActivityUpdate | null | undefined {
+  if (event.event === 'host/turn-item') return mapTurnItem(runId, payload.item)
+  if (event.event === 'host/plan-updated') return mapPlanUpdate(payload, runId)
+  return undefined
 }
 
 function mapTurnItem(runId: string, item: unknown): PiHostActivityUpdate | null {
@@ -149,10 +215,12 @@ function mapTurnItem(runId: string, item: unknown): PiHostActivityUpdate | null 
 
 export function mapPiHostEventToActivity(event: PiHostEventLike): PiHostActivityUpdate | null {
   const payload = asRecord(event.payload)
-  const runId = asText(payload?.runId)
+  if (!payload) return null
+  const runId = asText(payload.runId)
   if (!runId) return null
 
-  if (event.event === 'host/turn-item') return mapTurnItem(runId, payload?.item)
+  const early = mapEarlyHostEvent(event, payload, runId)
+  if (early !== undefined) return early
 
   if (event.event === 'host/pipeline-stage') {
     const stageId = asText(payload?.stageId) || 'stage'

@@ -280,6 +280,7 @@ await bounded('write project source', writeFile(projectFile, `PROJECT_OLD\n@${in
 
 let host: HostClient | undefined
 let sessionId = ''
+let stopQueuePump: (() => void) | undefined
 try {
   host = spawnHost(agentDir, stateDir, dbPath)
   await bounded('Host spawn', host.ready)
@@ -320,6 +321,20 @@ try {
           return response.result
         },
       },
+      runs: {
+        list: async () => (await host!.call('runs/list')).result,
+        claim: async (runId?: string) => {
+          const response = await host!.call('runs/claim', runId ? { runId } : {})
+          if (response.error) throw new Error(response.error.message)
+          return response.result
+        },
+        settle: async (runId: string, settlement: string) => {
+          const response = await host!.call('runs/settle', { runId, settlement })
+          if (response.error) throw new Error(response.error.message)
+          if (runId === 'run-task-host-B') bSettled.resolve(response.result)
+          return response.result
+        },
+      },
     },
   }
   Object.defineProperty(globalThis, 'window', { value: { subagents: bridge }, configurable: true })
@@ -329,8 +344,10 @@ try {
   const { useSettingsStore } = await import('../src/store/settingsStore.ts')
   const { useThreadStore } = await import('../src/store/threadStore.ts')
   const { clearRunQueue, listQueuedRuns } = await import('../src/agent/runQueue.ts')
+  const { startHostAgentQueuePump } = await import('../src/agent/hostAgentQueuePump.ts')
   useAgentStore.getState().reset()
   clearRunQueue()
+  stopQueuePump = startHostAgentQueuePump()
   useSettingsStore.setState({ settings: {
     ...useSettingsStore.getState().settings,
     maxConcurrentRuns: 1,
@@ -357,12 +374,11 @@ try {
     sourceKind: 'composer', runner: 'builtin', loopType: 'Goal-based',
     objective: 'RUN_TASK_HOST_B', runId: 'run-task-host-B', reuseThreadId: threadId,
     projectRoot: projectDir, overrides: { maxIterations: 1 },
-    onSettled: (result) => { bSettled.resolve(result) },
   })
   const queued = await runB
   assert.equal(queued.queued, true)
-  assert.equal(queued.skipReason, 'queued')
-  assert.equal(listQueuedRuns().length, 1)
+  assert.equal(queued.skipReason, 'queue')
+  assert.equal(listQueuedRuns().length, 0, 'Builtin Pi follow-up is Host-owned, never dual-written to renderer queue')
   assert.equal(providerRequests.length, 1, 'B is not submitted while A provider request is held')
 
   // A real gate pins all source mutations before B can be admitted. This is
@@ -389,7 +405,7 @@ try {
   assert.equal(resultA.status, 'success')
   await bounded('B automatic provider admission', bProviderStarted.promise)
   const settledB = await bounded('B settlement callback', bSettled.promise)
-  assert.equal(settledB.runId, 'run-task-host-B')
+  assert.equal(settledB.run.runId, 'run-task-host-B')
   assert.equal(listQueuedRuns().length, 0)
   await bounded('run registry release', new Promise<void>((resolveRelease) => setImmediate(resolveRelease)))
   assert.equal(useAgentStore.getState().activeRunIds.length, 0)
@@ -533,6 +549,7 @@ try {
   ])
   console.log(`smoke-instruction-run-task-host-queue: ok (A/B production queue, real Host records, restart replay, fake-clock trace=${clock.trace.join(' > ')})`)
 } finally {
+  stopQueuePump?.()
   clock.releaseIfWaiting('provider:A')
   clock.releaseIfWaiting('projection:stale-response')
   clock.releaseIfWaiting('restart:stale-response')

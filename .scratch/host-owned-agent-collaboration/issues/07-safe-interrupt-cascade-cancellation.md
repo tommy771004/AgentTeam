@@ -4,13 +4,13 @@
 
 **Blocked by:** 02 — 統一 Child Pi Session spawn admission; 06 — One-hop child completion delivery.
 
-**Status:** 可交給代理
+**Status:** resolved（2026-08-30；見 `../qualification.md`）
 
-- [ ] Agent 不可 interrupt 自己、sibling 或其他 root tree
-- [ ] Safe interrupt 不切斷已開始的工具 effect，並等待其 evidence settled
-- [ ] Root cancellation 預設向所有非 detached descendants cascade
-- [ ] Detached child 只在 admission snapshot 明示允許時存活，UI/read model 清楚標示
-- [ ] Repeated interrupt/cancel 冪等，terminal child 不會復活或改寫 settlement
-- [ ] waiting-approval、blocked、queued、running child 都有明確中止結果
-- [ ] 每個 descendant terminal outcome 仍走 one-hop completion
-- [ ] Fake-clock smoke 覆蓋 tool boundary、cascade、late success 與部分失敗
+- [x] Agent 不可 interrupt 自己、sibling 或其他 root tree
+- [x] Safe interrupt 不切斷已開始的工具 effect，並等待其 evidence settled
+- [x] Root cancellation 預設向所有非 detached descendants cascade
+- [x] Detached child 只在 admission snapshot 明示允許時存活，UI/read model 清楚標示
+- [x] Repeated interrupt/cancel 冪等，terminal child 不會復活或改寫 settlement
+- [x] waiting-approval、blocked、queued、running child 都有明確中止結果
+- [x] 每個 descendant terminal outcome 仍走 one-hop completion
+- [x] Fake-clock smoke 覆蓋 tool boundary、cascade、late success 與部分失敗

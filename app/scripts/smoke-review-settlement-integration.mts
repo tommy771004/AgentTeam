@@ -104,7 +104,7 @@ try {
   const coordinator = await readFile(new URL('../src/agent/taskRunCoordinator.ts', import.meta.url), 'utf8')
   const finalization = coordinator.slice(coordinator.indexOf('async function runFinalizationSequence'), coordinator.indexOf('function buildResumeSummary'))
   assert.match(finalization, /finalizeRunReviewSnapshot[\s\S]*pushRunProcessSummary/, 'Host snapshot finalizes before summary projection')
-  assert.match(coordinator, /async function legacySummaryDiff[\s\S]*input\.reviewSnapshotRef \|\| input\.producedFiles\.length === 0/, 'legacy workspaceDiff is only a no-snapshot fallback')
+  assert.match(coordinator, /async function legacySummaryDiff[\s\S]*input\.reviewAdmission\?\.canonical !== false[\s\S]*input\.reviewSnapshotRef/, 'legacy workspaceDiff is restricted to explicit non-canonical browser runs')
   assert.doesNotMatch(finalization, /workspaceDiff/, 'canonical finalization does not reread workspace diff in the lifecycle owner')
   const threadStore = await readFile(new URL('../src/store/threadStore.ts', import.meta.url), 'utf8')
   assert.match(threadStore, /reviewSnapshotRef\?: ReviewSnapshotRef/, 'summary/archive persistence carries the bounded snapshot identity')

@@ -8,6 +8,7 @@ import { RunTaskRow } from './RunTaskRow'
 import { contextSummary, groupProcessOperations } from '../lib/runPresentation'
 import { formatTokensCompact, formatUsd } from '../agent/contextUsageView'
 import { UnifiedDiffView } from './UnifiedDiffView'
+import { AgentWorkTree } from './AgentWorkTree.tsx'
 
 /**
  * The persisted operations replay through the SAME timeline renderer the live
@@ -104,6 +105,20 @@ function RunChangedFilesCard({
   )
 }
 
+function HistoricalAgentWork({ summary }: { summary: ThreadRunSummary }) {
+  if (!summary.agentWork) return null
+  return <AgentWorkTree entries={summary.agentWork.entries} originTurn={summary.agentWork.originTurn} sessionId={summary.agentWork.sessionId} />
+}
+
+function hasExecutionSummary(summary: ThreadRunSummary, itemCount: number): boolean {
+  return itemCount > 0
+    || Boolean(summary.plan?.length)
+    || Boolean(summary.agents?.length)
+    || Boolean(summary.agentWork)
+    || Boolean(summary.subDesign)
+    || summary.files.length === 0
+}
+
 /** Persisted, collapsible record of what an agent did for one answer. */
 export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
   const navigate = useNavigate()
@@ -125,9 +140,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
   })
   const outcome = summary.status ? lifecycle.label : ''
   const label = '執行過程'
-  const showExecutionSummary = Boolean(
-    items.length || summary.plan?.length || summary.agents?.length || summary.subDesign || !summary.files.length,
-  )
+  const showExecutionSummary = hasExecutionSummary(summary, items.length)
 
   return (
     <>
@@ -200,6 +213,8 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
             </div>
           ) : null}
 
+          <HistoricalAgentWork summary={summary} />
+
           {summary.plan?.length ? (
             <div className="agent-summary-section overflow-hidden rounded-card border border-line">
               <div className="border-b border-line px-2.5 py-2 text-[11px] font-medium text-ink-2">
@@ -207,7 +222,15 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
               </div>
               <ul aria-label="任務計畫">
                 {summary.plan.map((item, index) => (
-                  <RunTaskRow key={item.id} text={item.text} status={item.status} index={index} variant="list" />
+                  <RunTaskRow
+                    key={item.id}
+                    text={item.text}
+                    status={item.status}
+                    index={index}
+                    variant="list"
+                    amount={item.meta}
+                    details={item.details}
+                  />
                 ))}
               </ul>
             </div>

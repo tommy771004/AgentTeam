@@ -4,13 +4,13 @@
 
 **Blocked by:** 03 — Durable queue-only agent mailbox; 05 — Event-driven wait 與 mailbox wake-up.
 
-**Status:** 可交給代理
+**Status:** resolved（2026-08-30；見 `../qualification.md`）
 
-- [ ] completed、failed、cancelled、interrupted 都產生 bounded terminal result 與 stable result reference
-- [ ] Result 只自動投遞 direct parent，不跳過 nested parent 注入 root
-- [ ] Parent wait 被 terminal mail 喚醒，idle parent 仍保留未 consumption result
-- [ ] Duplicate settlement/recovery 不產生第二份 completion message
-- [ ] Late completion 保持 originating Chat turn attribution，不顯示成下一輪 active progress
-- [ ] Generic result 明確標成 observation，沒有 Checker evidence 時不改 Working State
-- [ ] Parent 可用 explicit relay 將整合後結果向上一層回報
-- [ ] Protocol smoke 覆蓋 direct child、grandchild、parent already terminal 與 renderer reload
+- [x] completed、failed、cancelled、interrupted 都產生 bounded terminal result 與 stable result reference
+- [x] Result 只自動投遞 direct parent，不跳過 nested parent 注入 root
+- [x] Parent wait 被 terminal mail 喚醒，idle parent 仍保留未 consumption result
+- [x] Duplicate settlement/recovery 不產生第二份 completion message
+- [x] Late completion 保持 originating Chat turn attribution，不顯示成下一輪 active progress
+- [x] Generic result 明確標成 observation，沒有 Checker evidence 時不改 Working State
+- [x] Parent 可用 explicit relay 將整合後結果向上一層回報
+- [x] Protocol smoke 覆蓋 direct child、grandchild、parent already terminal 與 renderer reload

@@ -61,8 +61,11 @@ assert.equal(conversationAnswer(appendTurnRecord(undefined, [
 assert.equal(conversationAnswer(undefined), undefined)
 assert.deepEqual(projectConversationRows(undefined), [])
 
-// Approvals and compaction are visible as notices, not silently dropped.
+// A denial and compaction are visible as notices. A successful orphan approval
+// remains in the Turn Record for audit but does not leak raw `allow` text into
+// the task conversation.
 const noticed = projectConversationRows(appendTurnRecord(undefined, [
+  { kind: 'approval', source: 'host', tool: 'read', callId: 'c8', decision: 'allow', turn: 1, step: 1, at: 0 },
   { kind: 'approval', source: 'host', tool: 'bash', callId: 'c9', decision: 'deny', reason: '未核准', turn: 1, step: 1, at: 1 },
   { kind: 'compaction', source: 'host', replaced: 4, turn: 1, step: 1, at: 2 },
 ]))
@@ -112,6 +115,18 @@ assert.equal(presentedMerged.added, 1, 'the fold keeps the diff size on the merg
 assert.equal(presentedMerged.removed, 1, 'the fold keeps the diff size on the merged line')
 assert.equal(presentedMerged.diff, presentedRow.diff, 'the fold keeps the durable code diff on the expandable line')
 
+// Terminal calls keep the command the model actually executed. Approval is a
+// decision badge, never a substitute for the invocation's subject.
+const commanded = projectConversationRows(appendTurnRecord(undefined, [
+  { kind: 'tool-call', source: 'model', tool: 'bash', callId: 'cmd-1', args: { command: 'npm run build' }, turn: 1, step: 1, at: 1 },
+  { kind: 'approval', source: 'host', tool: 'bash', callId: 'cmd-1', decision: 'allow', turn: 1, step: 1, at: 2 },
+  { kind: 'tool-result', source: 'host', tool: 'bash', callId: 'cmd-1', settlement: 'success', turn: 1, step: 1, at: 3 },
+]))
+const commandedTimeline = runTimelineRows({ rows: commanded.map((row) => ({ ...row, step: 1 })), unloadedBefore: 0, steps: [] })
+assert.equal(commandedTimeline.length, 1)
+assert.equal(commandedTimeline[0].kind === 'tool' ? commandedTimeline[0].detail : undefined, 'npm run build')
+assert.equal(commandedTimeline[0].kind === 'tool' ? commandedTimeline[0].approval : undefined, 'allow')
+
 // A `notice` entry is written precisely so the user sees it — a run whose
 // skills went unavailable, say. It must read as its own text, never as the
 // unknown-entry fallback.
@@ -145,6 +160,15 @@ const withSkillPreflight = appendTurnRecord(undefined, [{
 }])
 assert.deepEqual(projectConversationRows(withSkillPreflight), [],
   'Skill preflight audit metadata must not surface as an unknown conversation row')
+
+const internalRunMetadata = projectConversationRows(appendTurnRecord(undefined, [
+  { kind: 'agent-lifecycle', source: 'host', event: { state: 'admitted', runId: 'run-internal', agentId: 'root', parentAgentId: null, depth: 0, at: 1 } },
+  { kind: 'notice', source: 'host', topic: 'agent-mode', text: '{"requested":"build","effective":"build"}' },
+  { kind: 'instruction-snapshot', source: 'host', snapshot: {} as never },
+  { kind: 'notice', source: 'host', topic: 'instruction-context-budget', text: '{"totalBudgetBytes":196608}' },
+  { kind: 'memory-recall', source: 'host', revision: 3, items: [{ id: 'memory-1', logicalKey: 'preference', scope: 'project', memoryKind: 'memory', revision: 3 }] },
+]))
+assert.deepEqual(internalRunMetadata, [], 'internal lifecycle, JSON diagnostics, instruction evidence, and memory recall stay out of task conversation')
 
 // ── tool-evidence is known, and deliberately never becomes a row ───────────
 // The Host writes the policy/evidence lifecycle (start, decision, result,
@@ -270,10 +294,27 @@ assert.deepEqual(groupedTimeline.map((entry) => entry.type === 'group' ? entry.r
   ['read-failed', 'read-failed-2'],
 ], 'same-type activities collapse without crossing prose or mixing a failure into success')
 
+const dedupedCommands = groupTimelineItems([
+  { id: 'cmd-1', kind: 'tool', tool: 'bash', settlement: 'success', detail: 'npm run build', approval: 'allow' },
+  { id: 'cmd-2', kind: 'tool', tool: 'exec_command', settlement: 'success', detail: 'npm run build\r\n', approval: 'allow' },
+  { id: 'cmd-3', kind: 'tool', tool: 'bash', settlement: 'success', detail: 'npm run smoke', approval: 'allow' },
+])
+assert.equal(dedupedCommands.length, 1)
+assert.deepEqual(
+  dedupedCommands[0].type === 'group' ? dedupedCommands[0].rows.map((row) => row.id) : [],
+  ['cmd-1', 'cmd-3'],
+  'adjacent command groups keep distinct commands and remove normalized duplicates',
+)
+
 // Purity is a contract, not a hope: the module may not reach for I/O, stores,
 // the clock, or randomness, because it replays.
 const source = await readFile(resolve(import.meta.dirname, '../src/agent/conversationProjection.ts'), 'utf8')
 for (const forbidden of [/Date\.now/, /Math\.random/, /useState|useStore|zustand/, /require\(|await import\(/, /window\./]) {
   assert.doesNotMatch(source, forbidden, `the projection must stay pure: ${forbidden}`)
 }
+const timelineSource = await readFile(resolve(import.meta.dirname, '../src/components/RunTimelineList.tsx'), 'utf8')
+assert.match(timelineSource, /row\.approval === 'allow'\) return null/, 'successful approval protocol text stays out of the task timeline')
+const feedSource = await readFile(resolve(import.meta.dirname, '../src/components/RunProcessFeed.tsx'), 'utf8')
+assert.doesNotMatch(feedSource, /載入更早的/, 'the next turn relies on scrollback instead of an older-record control')
+assert.doesNotMatch(feedSource, /useRunTimelinePaging/, 'the task conversation does not page prior Turn Record turns into the current feed')
 console.log('The conversation is a pure projection of the Turn Record')

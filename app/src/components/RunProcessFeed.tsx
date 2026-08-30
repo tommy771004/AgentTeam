@@ -8,11 +8,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { emptyAgentLike } from '../agent/localCliRun'
 import { EXTERNAL_CLI_UI_LABEL } from '../agent/runners'
 import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
-import { runTimelineRows } from '../agent/liveTimeline'
+import { projectLiveTimeline, runTimelineRows } from '../agent/liveTimeline'
+import { latestConversationTurn } from '../agent/agentWorkTreeProjection.ts'
 import type { TurnRecordEntry } from '../agent/turnRecord'
 import { ContextUsageChip } from './ContextUsageChip'
 import { useRunUsageRefresher } from '../hooks/useRunUsageRefresher'
-import { useRunTimelinePaging } from '../hooks/useRunTimelinePaging'
 import { useAgentStore } from '../store/agentStore'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
@@ -26,6 +26,7 @@ import { ExecutionStepsProgress } from './ExecutionStepsProgress'
 import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
 import { RunTimelineList } from './RunTimelineList'
+import { AgentWorkTree } from './AgentWorkTree.tsx'
 import { ContextCards } from './ContextCards'
 import { ElapsedTime } from './primitives/ElapsedTime'
 import { useStallNotice } from '../hooks/useStallNotice'
@@ -41,22 +42,6 @@ import {
 
 function basen(p: string) {
   return p.replace(/\\/g, '/').split('/').filter(Boolean).pop() || p
-}
-
-function OlderTimelineControl({ unloadedBefore, loading, error, onLoad }: {
-  unloadedBefore: number
-  loading: boolean
-  error: string
-  onLoad: () => void
-}) {
-  return <>
-    {unloadedBefore > 0 ? (
-      <button type="button" className="agent-process-link mb-1" disabled={loading} onClick={onLoad}>
-        {loading ? '載入中…' : `載入更早的 ${Math.min(128, unloadedBefore)} 筆（尚有 ${unloadedBefore} 筆）`}
-      </button>
-    ) : null}
-    {error ? <p className="text-[11px] text-red">{error}</p> : null}
-  </>
 }
 
 type DisplayFileChange = { path: string; action: string; added?: number; removed?: number }
@@ -145,6 +130,12 @@ function ReattachmentNotices({
 const EMPTY_FILES: FileChangeRecord[] = []
 const EMPTY_TASKS: RunTaskItem[] = []
 
+function LiveAgentWork({ entries, sessionId }: { entries: readonly TurnRecordEntry[]; sessionId?: string }) {
+  const originTurn = useMemo(() => latestConversationTurn(entries), [entries])
+  if (originTurn <= 0) return null
+  return <AgentWorkTree entries={entries} originTurn={originTurn} sessionId={sessionId} live />
+}
+
 export function RunProcessFeed({
   runId,
   depthLabel,
@@ -172,7 +163,6 @@ export function RunProcessFeed({
   const fileChanges = activity?.fileChanges ?? EMPTY_FILES
   const tasks = activity?.tasks ?? EMPTY_TASKS
   const recordEntries = activity?.recordEntries ?? EMPTY_RECORD_ENTRIES
-  const recordTotal = activity?.recordTotal ?? 0
   const reattaching = activity?.reattaching ?? false
   const reattachGap = activity?.reattachGap ?? null
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -289,8 +279,15 @@ export function RunProcessFeed({
    * keeps no record at all (external CLI), and it renders only when this is
    * empty.
    */
-  const { view: recordView, loading: loadingOlder, error: olderError, loadOlder: loadOlderRecordEntries } =
-    useRunTimelinePaging(runId, recordEntries, recordTotal)
+  const currentRecordTurn = useMemo(() => latestConversationTurn(recordEntries), [recordEntries])
+  const currentTurnEntries = useMemo(
+    () => recordEntries.filter((entry) => entry.turn === currentRecordTurn),
+    [recordEntries, currentRecordTurn],
+  )
+  const recordView = useMemo(
+    () => projectLiveTimeline(currentTurnEntries, currentTurnEntries.length, Math.max(currentTurnEntries.length, 1)),
+    [currentTurnEntries],
+  )
   const recordTimeline = useMemo(
     () => runTimelineRows(recordView, draftText),
     [recordView, draftText],
@@ -519,6 +516,8 @@ export function RunProcessFeed({
 
       <ExecutionStepsProgress tasks={tasks} />
 
+      <LiveAgentWork entries={recordEntries} sessionId={agent.hostSessionId} />
+
       {/* The task conversation shows narration and actions. Reasoning remains
           in the Host Turn Record for Trajectory/audit views, but is not exposed
           as conversational content. */}
@@ -528,12 +527,6 @@ export function RunProcessFeed({
           className="agent-conversation-timeline space-y-1"
           data-run-timeline="record"
         >
-          <OlderTimelineControl
-            unloadedBefore={recordView.unloadedBefore}
-            loading={loadingOlder}
-            error={olderError}
-            onLoad={() => { void loadOlderRecordEntries() }}
-          />
           <RunTimelineList rows={recordTimeline} hideReasoning />
         </section>
       ) : null}

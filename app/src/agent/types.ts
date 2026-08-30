@@ -288,6 +288,8 @@ export interface RunContextPolicy {
 export interface RuntimeOverrides {
   /** Stable trace id assigned by runTask controller; engine adopts it as state.id */
   runId?: string
+  /** Existing Host-owned child session selected by the agent queue pump. */
+  hostSessionId?: string
   /** Explicit Host-verifiable goal contract; never inferred from model prose. */
   workingGoal?: import('./workingState.ts').WorkingGoalCompletionPredicate
   /** Host-owned durable checkpoint to resume; renderer supplies only its run id. */
@@ -437,6 +439,8 @@ export interface AgentState {
    * absent for runners that do not write a record yet.
    */
   turnRecord?: import('./turnRecord.ts').TurnRecord
+  /** Durable Pi session identity used to replay late collaboration events. */
+  hostSessionId?: string
   id: string
   objective: string
   loopConfig: LoopConfiguration
@@ -486,6 +490,11 @@ export interface AgentState {
     workingState: boolean
     skillPreflight: boolean
     checkers: boolean
+    sessionReuse: boolean
+    mailbox: boolean
+    followUp: boolean
+    interrupt: boolean
+    completion: boolean
   }
   /** External CLI kind when executionKind=external (codex / claude / …). */
   externalRunnerKind?: string

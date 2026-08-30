@@ -14,6 +14,7 @@ import { piCoreCompatibility } from './piCoreAdapter.ts'
 import { sanitizeModelRow, SUBSCRIPTION_PROVIDERS, type SubscriptionModelInfo, type SubscriptionProviderId } from '../src/agent/subscriptionCatalog.ts'
 import { bindPiSessionSkillResourceView, buildPiPackExtensionBundle, commitPiPackExtensionBundle, disposePiSkillPreflightSession, installPiSkillPreflightBatchBarrier, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, piSkillPreflightExtensionFactory, piWorkingStateWriteToolDefinition, registerPiPackSession, retirePiSkillPreflightSession, unregisterPiPackSession } from './piToolHost.ts'
 import { buildPiMcpDynamicPacks } from './piExtensionPacks/mcpBridgePack.ts'
+import { appendPiPublicCommentaryGuidance } from './piPublicCommentary.ts'
 
 type PiSessionRuntime = {
   activeToolsKey: string
@@ -461,26 +462,35 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
           },
         },
         {
-        name: 'subagents-session-context',
-        hidden: true,
-        factory: (pi: { on: (event: string, handler: (input: Record<string, unknown>) => unknown) => void }) => {
-          pi.on('before_agent_start', (event) => requestContext.value && typeof event.systemPrompt === 'string'
-            ? { systemPrompt: `${event.systemPrompt}\n\n${requestContext.value}` }
-            : undefined)
-          pi.on('context', (event) => {
-            if (requestContext.includeHistory || !Array.isArray(event.messages)) return undefined
-            let lastUser = -1
-            for (let index = event.messages.length - 1; index >= 0; index -= 1) {
-              const message = event.messages[index]
-              if (message && typeof message === 'object' && (message as { role?: unknown }).role === 'user') {
-                lastUser = index
-                break
-              }
-            }
-            return lastUser >= 0 ? { messages: event.messages.slice(lastUser) } : undefined
-          })
+          name: 'subagents-public-commentary',
+          hidden: true,
+          factory: (pi: { on: (event: string, handler: (input: Record<string, unknown>) => unknown) => void }) => {
+            pi.on('before_agent_start', (event) => typeof event.systemPrompt === 'string'
+              ? { systemPrompt: appendPiPublicCommentaryGuidance(event.systemPrompt) }
+              : undefined)
+          },
         },
-      },
+        {
+          name: 'subagents-session-context',
+          hidden: true,
+          factory: (pi: { on: (event: string, handler: (input: Record<string, unknown>) => unknown) => void }) => {
+            pi.on('before_agent_start', (event) => requestContext.value && typeof event.systemPrompt === 'string'
+              ? { systemPrompt: `${event.systemPrompt}\n\n${requestContext.value}` }
+              : undefined)
+            pi.on('context', (event) => {
+              if (requestContext.includeHistory || !Array.isArray(event.messages)) return undefined
+              let lastUser = -1
+              for (let index = event.messages.length - 1; index >= 0; index -= 1) {
+                const message = event.messages[index]
+                if (message && typeof message === 'object' && (message as { role?: unknown }).role === 'user') {
+                  lastUser = index
+                  break
+                }
+              }
+              return lastUser >= 0 ? { messages: event.messages.slice(lastUser) } : undefined
+            })
+          },
+        },
       ],
     })
     await resourceLoader.reload()

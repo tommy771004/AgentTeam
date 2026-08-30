@@ -19,6 +19,15 @@ export type CliProviderCapabilitySnapshot = Readonly<{
   maxTurns: CliCapabilitySupport
   runtimeInput: 'typed-json' | 'stdin' | 'none'
   serviceTiers: readonly string[]
+  /** Host-authored facts; never inferred from stdin/help wording. */
+  collaboration: Readonly<{
+    sessionReuse: 'unsupported'
+    mailbox: 'unsupported'
+    followUp: 'unsupported'
+    wait: 'unsupported'
+    interrupt: 'host-process'
+    completion: 'runner-settlement'
+  }>
 }>
 
 function has(help: string, value: string): boolean {
@@ -32,6 +41,7 @@ function detectedServiceTiers(help: string): string[] {
 type CapabilityDefaults = Pick<
   CliProviderCapabilitySnapshot,
   'provider' | 'binaryPath' | 'version' | 'revision' | 'detectedAt' | 'serviceTiers'
+  | 'collaboration'
 >
 
 function supportWhen(condition: boolean, supported: CliCapabilitySupport): CliCapabilitySupport {
@@ -123,6 +133,14 @@ export function capabilitiesFromCliHelp(input: {
     revision: input.revision,
     detectedAt: input.detectedAt,
     serviceTiers: detectedServiceTiers(help),
+    collaboration: Object.freeze({
+      sessionReuse: 'unsupported' as const,
+      mailbox: 'unsupported' as const,
+      followUp: 'unsupported' as const,
+      wait: 'unsupported' as const,
+      interrupt: 'host-process' as const,
+      completion: 'runner-settlement' as const,
+    }),
   }
   if (provider === 'codex') return codexCapabilities(defaults, help)
   if (provider === 'claude' || provider === 'grok') return claudeOrGrokCapabilities(defaults, help, provider)

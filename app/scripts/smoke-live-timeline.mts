@@ -363,8 +363,8 @@ for (const forbidden of [/Date\.now/, /Math\.random/, /useState|useStore|zustand
   assert.doesNotMatch(source, forbidden, `the live projection must stay pure: ${forbidden}`)
 }
 const feedSource = await readFile(resolve(import.meta.dirname, '../src/components/RunProcessFeed.tsx'), 'utf8')
-const pagingSource = await readFile(resolve(import.meta.dirname, '../src/hooks/useRunTimelinePaging.ts'), 'utf8')
-assert.match(feedSource, /unloadedBefore=\{recordView\.unloadedBefore\}/, 'the visible timeline says when an older prefix exists')
-assert.match(pagingSource, /attach\(runId, before, 128\)/, 'the visible timeline can load the older Host page')
+assert.match(feedSource, /entry\.turn === currentRecordTurn/, 'the task feed projects only the current turn')
+assert.match(feedSource, /projectLiveTimeline\(currentTurnEntries, currentTurnEntries\.length,/, 'the current turn still uses the shared record projection')
+assert.doesNotMatch(feedSource, /載入更早的/, 'prior turns stay in chat scrollback instead of a record paging control')
 
 console.log('The live timeline and the replayed one are the same projection of the same record')

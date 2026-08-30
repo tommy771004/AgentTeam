@@ -195,6 +195,7 @@ export function ContextUsagePanel({
   if (degraded) {
     return (
       <div>
+        <p className="mb-1 text-[10px] text-ink-3">本次執行累積</p>
         <p className="font-[family-name:var(--font-mono)] text-[13px] tabular-nums text-ink">
           {fallbackTokens && fallbackTokens > 0 ? `${formatTokens(fallbackTokens)} tokens` : '尚無用量資料'}
         </p>
@@ -221,7 +222,7 @@ export function ContextUsagePanel({
         </p>
         <p className="mt-2 text-[10px] leading-relaxed text-ink-3">
           {usage.runningSteps > 0
-            ? '即時活動持續更新；token 用量會在目前步驟結算後計入。'
+            ? '即時活動持續更新；token 用量會在目前步驟結算後計入本次執行累積。'
             : 'provider 未回報用量分解，面板不代為推算。'}
         </p>
       </div>
@@ -231,13 +232,13 @@ export function ContextUsagePanel({
   return (
     <div>
       {/* Two different questions, two labelled rows, so neither figure can be
-          read as the other: 用量 is what this run SPENT (summed over steps),
+          read as the other: 本次執行累積 is what this run SPENT (summed over steps),
           上下文 is how full the model's window currently is (the last prompt).
           Both labels sit in one column so the numbers line up beside them. */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex items-baseline gap-2">
-            <span className="w-10 shrink-0 text-[10px] text-ink-3">用量</span>
+            <span className="w-[4.5rem] shrink-0 text-[10px] text-ink-3">本次執行累積</span>
             <span className="font-[family-name:var(--font-mono)] text-[13px] tabular-nums text-ink">
               {formatTokens(usage.tokens.total)}
               <span className="text-ink-3"> tokens</span>
@@ -251,7 +252,7 @@ export function ContextUsagePanel({
           </div>
           {usage.contextTokens === undefined ? null : (
             <div className="flex items-baseline gap-2">
-              <span className="w-10 shrink-0 text-[10px] text-ink-3">上下文</span>
+              <span className="w-[4.5rem] shrink-0 text-[10px] text-ink-3">上下文</span>
               <span className="font-[family-name:var(--font-mono)] text-[11px] tabular-nums text-ink-2">
                 {formatTokens(usage.contextTokens)}
                 {usage.contextWindow === undefined ? (
@@ -293,11 +294,11 @@ export function ContextUsagePanel({
       {/* Every qualification the numbers need, stated rather than implied. */}
       {usage.runningSteps > 0 ? (
         <p className="mt-2 text-[10px] leading-relaxed text-ink-3">
-          {usage.runningSteps} 個步驟執行中，用量要等結算後才計入。
+          {usage.runningSteps} 個步驟執行中，尚未計入本次執行累積用量。
         </p>
       ) : null}
       <p className="mt-2 text-[10px] leading-relaxed text-ink-3">
-        分解比例為字元量估算，token、快取與成本為 provider 實測值，— 表示未回報。
+        本次執行累積會加總每次模型呼叫（包含快取讀取）。分解比例為字元量估算，token、快取與成本為 provider 實測值，— 表示未回報。
       </p>
       {usage.partial ? (
         <p className="mt-1 text-[10px] leading-relaxed text-orange">

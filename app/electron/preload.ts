@@ -158,7 +158,6 @@ const api = {
       },
       sessions: {
         create: (title?: string, threadId?: string) => ipcRenderer.invoke('pi-host:sessions:create', title, threadId) as Promise<{ sessionId: string; sessions: unknown[] }>,
-        createChild: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:sessions:create-child', input) as Promise<{ sessionId: string; sessions: unknown[] }>,
         list: () => ipcRenderer.invoke('pi-host:sessions:list') as Promise<{ sessions: unknown[] }>,
         record: (sessionId: string, before?: number, limit?: number) =>
           ipcRenderer.invoke('pi-host:sessions:record', sessionId, before, limit) as Promise<{ page: TurnRecordPage }>,
@@ -170,6 +169,16 @@ const api = {
       agents: {
         list: (scope: { rootAgentId?: string; agentId?: string }) =>
           ipcRenderer.invoke('pi-host:agents:list', scope) as Promise<AgentTreeSnapshot>,
+        spawn: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:agents:spawn', input) as Promise<Record<string, unknown>>,
+        send: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:agents:send', input) as Promise<Record<string, unknown>>,
+        mailbox: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:agents:mailbox', input) as Promise<Record<string, unknown>>,
+        ack: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:agents:ack', input) as Promise<Record<string, unknown>>,
+        followUp: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:agents:follow-up', input) as Promise<Record<string, unknown>>,
+        wait: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:agents:wait', input) as Promise<Record<string, unknown>>,
+        resolveLease: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:agents:lease:resolve', input) as Promise<Record<string, unknown>>,
+        interrupt: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:agents:interrupt', input) as Promise<Record<string, unknown>>,
+        cancel: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:agents:cancel', input) as Promise<Record<string, unknown>>,
+        close: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:agents:close', input) as Promise<Record<string, unknown>>,
       },
       runs: {
         list: () => ipcRenderer.invoke('pi-host:runs:list') as Promise<{ queue: unknown[] }>,
@@ -179,7 +188,9 @@ const api = {
         finalizeComplete: (runId: string, claimantId: string, claimEpoch: number, finalOutcome: import('../src/agent/runLearningSettlement').RunLearningFinalOutcome) => ipcRenderer.invoke('pi-host:runs:finalize-complete', runId, claimantId, claimEpoch, finalOutcome) as Promise<PiHostFinalizationCompleteResult>,
         ack: (runId: string) => ipcRenderer.invoke('pi-host:runs:ack', runId) as Promise<{ runId: string; resolved: boolean }>,
         enqueue: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:runs:enqueue', input) as Promise<{ queue: unknown[] }>,
-        cancel: (runId: string) => ipcRenderer.invoke('pi-host:runs:cancel', runId) as Promise<{ queue: unknown[] }>,
+        cancel: (runId: string, expectedRevision?: number) => ipcRenderer.invoke('pi-host:runs:cancel', runId, expectedRevision) as Promise<{ queue: unknown[]; followUp?: unknown; queueRevision?: number }>,
+        update: (input: { runId: string; prompt: string; expectedRevision: number }) => ipcRenderer.invoke('pi-host:runs:update', input) as Promise<{ queue: unknown[]; followUp?: unknown; queueRevision?: number }>,
+        reorder: (input: { sessionId: string; runIds: string[]; expectedRevision: number }) => ipcRenderer.invoke('pi-host:runs:reorder', input) as Promise<{ queue: unknown[]; queueRevision?: number }>,
         claim: (runId?: string) => ipcRenderer.invoke('pi-host:runs:claim', runId) as Promise<{ run?: unknown; queue: unknown[] }>,
         settle: (runId: string, settlement: PiTurnSettlement) => ipcRenderer.invoke('pi-host:runs:settle', runId, settlement) as Promise<{ run?: unknown; queue: unknown[]; settlement: string }>,
       },
@@ -256,7 +267,7 @@ const api = {
         uninstall: (id: string) => ipcRenderer.invoke('pi-host:extensions:uninstall', id) as Promise<{ removed?: boolean }>,
       },
       turn: {
-        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: { memoryEnabled: boolean; memoryWriteEnabled: boolean; referenceChatHistory: boolean; temporary: boolean; project?: string; contextWindowTokens?: number; deniedTools?: string[]; approvalTools?: string[]; outboundShellMode?: 'required' | 'optional' | 'demo' | 'off'; outboundConnectionId?: string; viewRoot?: string; gitPolicy?: { branchPrefix?: string; allowForcePush: boolean; draftPr: boolean }; approvalTimeoutMs?: number }; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }; pluginExecution?: SubDesignPluginExecutionProjection }>,
+        submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: { memoryEnabled: boolean; memoryWriteEnabled: boolean; referenceChatHistory: boolean; temporary: boolean; project?: string; contextWindowTokens?: number; deniedTools?: string[]; approvalTools?: string[]; outboundShellMode?: 'required' | 'optional' | 'demo' | 'off'; outboundConnectionId?: string; viewRoot?: string; gitPolicy?: { branchPrefix?: string; allowForcePush: boolean; draftPr: boolean }; approvalTimeoutMs?: number }; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; clientMessageId?: string; expectedActiveRunId?: string; pluginExecution?: SubDesignPluginExecutionRequest }) => ipcRenderer.invoke('pi-host:turn:submit', input) as Promise<{ sessionId: string; runId: string; settlement: string; queued?: 'steer' | 'queue'; followUp?: unknown; queue?: unknown[]; queueRevision?: number; items?: unknown[]; orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }; pluginExecution?: SubDesignPluginExecutionProjection }>,
         cancel: (runId: string) => ipcRenderer.invoke('pi-host:turn:cancel', runId) as Promise<{ runId: string; settlement: string }>,
         interrupt: (input: { runId: string; reason?: 'user' | 'timeout' }) =>
           ipcRenderer.invoke('pi-host:turn:interrupt', input) as Promise<{ runId: string; settlement: string; interruptReason?: 'user' | 'timeout' }>,

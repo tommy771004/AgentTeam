@@ -24,7 +24,7 @@ export function setPiPlanAnnouncer(announce: (announcement: PiPlanAnnouncement) 
   announcePlan = announce
 }
 
-const VALID_STATUS = new Set(['pending', 'in_progress', 'done'])
+const VALID_STATUS = new Set(['pending', 'in_progress', 'done', 'failed'])
 
 const askUser: PiPackTool = {
   name: 'ask_user',
@@ -73,7 +73,24 @@ function normalizeSteps(raw: unknown): PiPlanStep[] | undefined {
     const title = String(candidate.title || '').trim()
     if (!title) continue
     const status = VALID_STATUS.has(String(candidate.status || '')) ? String(candidate.status) as PiPlanStep['status'] : 'pending'
-    steps.push({ id: String(candidate.id || `step-${steps.length + 1}`), title: title.slice(0, 400), status })
+    const meta = String(candidate.meta || '').trim().slice(0, 80)
+    const details = Array.isArray(candidate.details)
+      ? candidate.details.slice(0, 8).flatMap((raw) => {
+          if (!raw || typeof raw !== 'object') return []
+          const detail = raw as Record<string, unknown>
+          const label = String(detail.label || '').trim().slice(0, 200)
+          if (!label) return []
+          const detailMeta = String(detail.meta || '').trim().slice(0, 80)
+          return [{ label, ...(detailMeta ? { meta: detailMeta } : {}) }]
+        })
+      : []
+    steps.push({
+      id: String(candidate.id || `step-${steps.length + 1}`).slice(0, 80),
+      title: title.slice(0, 400),
+      status,
+      ...(meta ? { meta } : {}),
+      ...(details.length ? { details } : {}),
+    })
   }
   return steps.length ? steps : undefined
 }
@@ -94,7 +111,21 @@ const updatePlan: PiPackTool = {
           properties: {
             id: { type: 'string' },
             title: { type: 'string' },
-            status: { type: 'string', enum: ['pending', 'in_progress', 'done'] },
+            status: { type: 'string', enum: ['pending', 'in_progress', 'done', 'failed'] },
+            meta: { type: 'string', description: 'Optional short value shown on the task row, such as "2 files".' },
+            details: {
+              type: 'array',
+              maxItems: 8,
+              description: 'Optional child steps shown when the user expands this task row.',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string' },
+                  meta: { type: 'string' },
+                },
+                required: ['label'],
+              },
+            },
           },
           required: ['title'],
         },

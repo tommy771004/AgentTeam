@@ -6,7 +6,8 @@ assert.equal(resolveBusyPolicy('review', 'steer'), 'steer')
 assert.equal(resolveBusyPolicy('review', 'queue'), 'queue')
 
 const workflow = await readFile(new URL('../src/agent/reviewFeedbackRun.ts', import.meta.url), 'utf8')
-assert.match(workflow, /prepareFeedback\(snapshotId\)[\s\S]*claimFeedback\(prepared\.id, runId\)[\s\S]*runTask\(\{/)
+assert.match(workflow, /prepareReviewFeedback\(snapshotId:[\s\S]*prepareFeedback\(snapshotId\)/, 'Host prepares the immutable bundle before UI confirmation')
+assert.match(workflow, /preview \?\? await prepareReviewFeedback\(snapshotId\)[\s\S]*claimFeedback\(prepared\.id, runId\)[\s\S]*runTask\(\{/)
 assert.equal((workflow.match(/runTask\(\{/g) || []).length, 1, 'review feedback has exactly one run ingress')
 assert.match(workflow, /sourceKind: 'review'/)
 assert.match(workflow, /reuseThreadId: claim\.bundle\.threadId/)
@@ -17,8 +18,9 @@ assert.match(workflow, /inheritState\?\.\(snapshotId, afterSnapshotId\)[\s\S]*sn
 assert.doesNotMatch(workflow, /dispatchThreadTask|startExecution|dispatchThread|enqueueExternalRun/)
 
 const explorer = await readFile(new URL('../src/components/ReviewExplorer.tsx', import.meta.url), 'utf8')
-assert.match(explorer, /送交 Agent 修改/)
-assert.match(explorer, /reduced capability disclosure/)
+assert.match(explorer, /預覽送交內容[\s\S]*FeedbackBundlePreview/, 'feedback is preview-first')
+assert.match(explorer, /Snapshot \{bundle\.snapshotId\}[\s\S]*Workspace \{bundle\.workspace\.projectRoot\}/, 'preview discloses snapshot and workspace provenance')
+assert.match(explorer, /確認並建立 Run/, 'dispatch requires a separate confirmation action')
 assert.doesNotMatch(explorer, /runTask|dispatchThreadTask|startExecution/)
 
 const store = await readFile(new URL('../electron/reviewStateStore.ts', import.meta.url), 'utf8')

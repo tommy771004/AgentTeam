@@ -179,7 +179,7 @@ export function useSlashExecutor() {
           for (const line of contextUsageReportLines(usage)) log(line)
         } else {
           // A runner that publishes no per-step usage keeps the scalar it has.
-          log(`Tokens：${agent.tokensUsed || 0}`)
+          log(`本次執行累積 Tokens：${agent.tokensUsed || 0}`)
           log(`步驟：${agent.steps.length} · 工具呼叫：${agent.toolCalls?.length || 0}`)
         }
         log(`耗時：${agent.metrics?.executionMs || 0} ms`)

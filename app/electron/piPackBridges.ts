@@ -57,12 +57,20 @@ export type PiDelegatedRunView = {
 }
 
 export type PiDelegationBridgeAccess = {
-  /** Create a child session through the same validation as `sessions/create`. */
-  createChild: (input: { parentSessionId: string; role: string; profile: Record<string, unknown>; context: PiContextPacket; depth: number }) => Promise<{ sessionId: string }>
-  /** Assign exactly one current parent goal; the Host authors the snapshot. */
-  createGoalChild: (input: { parentSessionId: string; parentRunId: string; goalId: string; role: string; profile: Record<string, unknown>; depth: number }) => Promise<{ sessionId: string; delegationId: string; objective: string }>
-  /** Queue the child's first turn on the same run queue automation claims from. */
-  enqueueChildRun: (input: { runId: string; sessionId: string; prompt: string }) => Promise<void>
+  /** Atomically admit the child and its first run through Agent Communication. */
+  spawnChild: (input: {
+    spawnId: string
+    runId: string
+    parentSessionId: string
+    parentRunId: string
+    objective: string
+    role: string
+    profile: Record<string, unknown>
+    context: PiContextPacket
+    depth: number
+    workspace?: Record<string, unknown>
+    goalId?: string
+  }) => Promise<{ sessionId: string; runId: string; delegationId?: string; objective: string }>
   /** Every background work item this Host still knows about. */
   listRuns: () => PiDelegatedRunView[]
   /** Stage parent adoption; the Host settles it only after all sibling effects. */
@@ -81,7 +89,13 @@ export function piDelegationBridge(): PiDelegationBridgeAccess | undefined {
 
 /* ── Plan snapshots ──────────────────────────────────────────────────── */
 
-export type PiPlanStep = { id: string; title: string; status: 'pending' | 'in_progress' | 'done' }
+export type PiPlanStep = {
+  id: string
+  title: string
+  status: 'pending' | 'in_progress' | 'done' | 'failed'
+  meta?: string
+  details?: Array<{ label: string; meta?: string }>
+}
 
 export type PiPlanGateCandidate = {
   runId: string
@@ -101,13 +115,20 @@ const livePlans = new Map<string, PiPlanStep[]>()
 const planGateCandidates = new Map<string, PiPlanGateCandidate>()
 const continuationItems = new Map<string, { runId: string; items: ContinuationItem[] }>()
 
+function clonePlanStep(step: PiPlanStep): PiPlanStep {
+  return {
+    ...step,
+    details: step.details?.map((detail) => ({ ...detail })),
+  }
+}
+
 export function setPiLivePlan(sessionId: string, steps: PiPlanStep[]): void {
-  livePlans.set(sessionId, steps.map((step) => ({ ...step })))
+  livePlans.set(sessionId, steps.map(clonePlanStep))
 }
 
 export function getPiLivePlan(sessionId: string): PiPlanStep[] | undefined {
   const plan = livePlans.get(sessionId)
-  return plan ? plan.map((step) => ({ ...step })) : undefined
+  return plan ? plan.map(clonePlanStep) : undefined
 }
 
 export function setPiPlanGateCandidate(sessionId: string, candidate: PiPlanGateCandidate): void {
@@ -141,4 +162,3 @@ export function clearPiContinuationItems(sessionId: string, runId?: string): voi
   if (!snapshot || (runId && snapshot.runId !== runId)) return
   continuationItems.delete(sessionId)
 }
-

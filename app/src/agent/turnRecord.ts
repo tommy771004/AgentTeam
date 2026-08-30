@@ -39,6 +39,7 @@ import { isMemoryControlPackageIdentity, MEMORY_CONTROL_COMPONENT_KEYS, type Mem
 import type { RunnerCapabilities, RunnerInstructionDelivery } from './runners/types.ts'
 import type { RecordedInstructionSnapshot } from './instructionSnapshot.ts'
 import { isAgentLifecycleEvent, type AgentLifecycleEvent } from './agentLifecycle.ts'
+import { isAgentCollaborationEvent, type AgentCollaborationEvent } from './agentCollaboration.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
@@ -55,9 +56,10 @@ import { isAgentLifecycleEvent, type AgentLifecycleEvent } from './agentLifecycl
  * Version 11 preserves exact bounded Skill redraft context after resource cleanup.
  * Version 12 records the exact Host-owned instruction snapshot and runner delivery mode.
  * Version 13 records Host-owned agent tree lifecycle transitions.
+ * Version 14 records Host-owned collaboration, mailbox, lease and result events.
  */
-export const TURN_RECORD_FORMAT_VERSION = 13
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+export const TURN_RECORD_FORMAT_VERSION = 14
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -253,6 +255,12 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         source: 'host'
         event: AgentLifecycleEvent
       }
+    | {
+        /** Durable collaboration event; transport may mirror it but never replaces it. */
+        kind: 'agent-collaboration'
+        source: 'host'
+        event: AgentCollaborationEvent
+      }
     | { kind: 'step-start'; source: 'host' }
     | {
         kind: 'step-end'
@@ -270,7 +278,13 @@ export type TurnRecordEntry = TurnRecordCoordinates &
     | { kind: 'provider-prompt'; source: 'host'; content: string }
     /** Exact persistent history handed to the provider for this turn. */
     | { kind: 'provider-history'; source: 'host'; messages: PiRecordedMessage[] }
-    | { kind: 'assistant-text'; source: 'model'; content: string }
+    | {
+        kind: 'assistant-text'
+        source: 'model'
+        content: string
+        /** Provider-authored public text phase; absent on legacy/provider-neutral messages. */
+        phase?: 'commentary' | 'final_answer'
+      }
     | {
         /**
          * What the model thought before it spoke or acted.
@@ -428,6 +442,7 @@ const KINDS = new Set([
   'turn-start',
   'turn-end',
   'agent-lifecycle',
+  'agent-collaboration',
   'step-start',
   'step-end',
   'user-text',
@@ -560,6 +575,11 @@ function isHostContextEntry(entry: Record<string, unknown>): boolean {
       && Object.keys(entry).every((key) => ['kind', 'source', 'event', 'seq', 'turn', 'step', 'at'].includes(key))
       && isAgentLifecycleEvent(entry.event)
   }
+  if (entry.kind === 'agent-collaboration') {
+    return entry.source === 'host'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'event', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isAgentCollaborationEvent(entry.event)
+  }
   if (entry.kind === 'memory-recall') return isMemoryRecallEntry(entry)
   if (entry.kind === 'instruction-snapshot') return isInstructionSnapshotEntry(entry)
   const workingStateEntry = isWorkingStateContextEntry(entry)
@@ -638,6 +658,15 @@ function isRecordedInstructionDiagnostic(value: unknown): boolean {
   return typeof diagnostic.code === 'string' && typeof diagnostic.message === 'string'
 }
 
+function isTextRecordEntry(entry: Record<string, unknown>): boolean {
+  if (entry.kind !== 'user-text' && entry.kind !== 'assistant-text' && entry.kind !== 'reasoning') return true
+  if (typeof entry.content !== 'string') return false
+  return entry.kind !== 'assistant-text'
+    || entry.phase === undefined
+    || entry.phase === 'commentary'
+    || entry.phase === 'final_answer'
+}
+
 function isEntry(value: unknown): value is TurnRecordEntry {
   if (!value || typeof value !== 'object') return false
   const entry = value as Record<string, unknown>
@@ -647,7 +676,7 @@ function isEntry(value: unknown): value is TurnRecordEntry {
     const number = entry[field]
     if (typeof number !== 'number' || !Number.isFinite(number)) return false
   }
-  if ((entry.kind === 'user-text' || entry.kind === 'assistant-text' || entry.kind === 'reasoning') && typeof entry.content !== 'string') return false
+  if (!isTextRecordEntry(entry)) return false
   if (!isProviderRecordEntry(entry)) return false
   if (!isToolRecordEntry(entry)) return false
   if (entry.kind === 'tool-evidence') {

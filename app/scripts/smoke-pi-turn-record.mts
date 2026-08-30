@@ -54,7 +54,7 @@ assert.equal(torn.tornTail, true)
 assert.equal(torn.record.entries.length, 1)
 // Absent is not damaged.
 assert.deepEqual(parseTurnRecord(undefined), { record: { version: TURN_RECORD_FORMAT_VERSION, entries: [] }, tornTail: false })
-assert.equal(TURN_RECORD_FORMAT_VERSION, 13, 'Host-owned agent lifecycle is an explicit Turn Record evolution')
+assert.equal(TURN_RECORD_FORMAT_VERSION, 14, 'Host-owned agent collaboration is an explicit Turn Record evolution')
 const migratedV1 = parseTurnRecord({ version: 1, entries: continued.entries })
 assert.equal(migratedV1.record.version, TURN_RECORD_FORMAT_VERSION)
 assert.deepEqual(migratedV1.record.entries, continued.entries, 'v1 records migrate without losing their ordered history')
@@ -92,8 +92,7 @@ assert.throws(() => parseTurnRecord({
 }), TurnRecordCorruptError, 'a final v2 entry in v1 is incompatible, not a recoverable torn append')
 assert.equal(parseTurnRecord(recalled).record.entries[0]?.kind, 'memory-recall')
 assert.equal(parseTurnRecord({ version: 2, entries: recalled.entries }).record.entries[0]?.kind, 'memory-recall')
-assert.equal(projectConversationRows(recalled)[0]?.kind, 'notice')
-assert.equal(projectConversationRows(recalled)[0]?.kind === 'notice' ? projectConversationRows(recalled)[0]?.content : '', '已召回 1 則長期記憶（revision 7）')
+assert.deepEqual(projectConversationRows(recalled), [], 'memory recall provenance stays in the record without becoming task-conversation copy')
 assert.throws(() => parseTurnRecord({
   version: TURN_RECORD_FORMAT_VERSION,
   entries: [

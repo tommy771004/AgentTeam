@@ -130,6 +130,7 @@ export function buildComposerRunInput(input: {
   objective: string
   threadId: string
   runner: ThreadRunner
+  followUpAction?: ExternalRunOpts['followUpAction']
   loopType: LoopType | null
   attachments?: ChatAttachment[]
   projectRoot?: string
@@ -159,6 +160,7 @@ export function buildComposerRunInput(input: {
     sourceKind: 'composer',
     reuseThreadId: input.threadId,
     runner: input.runner,
+    followUpAction: input.followUpAction,
     loopType: input.loopType || undefined,
     attachments: input.attachments || [],
     projectRoot: input.projectRoot?.trim() || undefined,

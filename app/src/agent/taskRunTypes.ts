@@ -69,6 +69,8 @@ export type ExternalRunOpts = {
   title?: string
   loopType?: LoopType
   runner?: ThreadRunner
+  /** Frozen interactive follow-up intent. Settings only choose this default at creation time. */
+  followUpAction?: 'steer' | 'queue' | 'takeover'
   /** Webhook/event already boolean-matched */
   eventPreMatched?: boolean
   attachedSkills?: string[]
@@ -146,6 +148,14 @@ export type ExternalRunResult = DispatchResult & {
   skipReason?: string
   queued?: boolean
   queueId?: string
+  /** Rejected Host follow-up remains recoverable without claiming acceptance. */
+  followUpRecovery?: {
+    id: string
+    text: string
+    action: 'steer' | 'queue'
+    reason: string
+    targetRunId?: string
+  }
   /** Conversation automation was recognised but awaits explicit consent. */
   suggestion?: AutomationSuggestion
 }

@@ -72,7 +72,7 @@ export class PiHostSupervisor {
     this.turnIdleTimeoutMs = options.turnIdleTimeoutMs ?? 5 * 60_000
     this.requestedCapabilities = options.requestedCapabilities
       ? [...options.requestedCapabilities]
-      : ['attachments-v1', 'tool-contract-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1']
+      : ['attachments-v1', 'tool-contract-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1']
     this.serviceHandler = options.serviceHandler
   }
 
@@ -378,12 +378,6 @@ export class PiHostSupervisor {
     return response.result
   }
 
-  async createChildSession(input: Record<string, unknown>): Promise<NonNullable<PiHostResponse['result']>> {
-    const response = await this.request('sessions/create', input)
-    if (response.error || !response.result?.sessionId) throw new Error(response.error?.message || 'Child Pi session creation failed')
-    return response.result
-  }
-
   /** One bounded page of a session's Turn Record, addressed by `seq`. */
   async readSessionRecord(sessionId: string, before?: number, limit?: number): Promise<NonNullable<PiHostResponse['result']>['page']> {
     const response = await this.request('sessions/record', {
@@ -411,6 +405,15 @@ export class PiHostSupervisor {
       ...(response.result.selectedAgentId ? { selectedAgentId: response.result.selectedAgentId } : {}),
       agents: response.result.agents,
     }
+  }
+
+  async communicateWithAgent(
+    method: Extract<PiHostRequest['method'], `agents/${string}`>,
+    input: Record<string, unknown>,
+  ): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request(method, input)
+    if (response.error || !response.result) throw new Error(response.error?.message || `Pi ${method} failed`)
+    return response.result
   }
 
   async listQueuedRuns(): Promise<NonNullable<PiHostResponse['result']>['queue']> {
@@ -474,10 +477,22 @@ export class PiHostSupervisor {
     return response.result.queue
   }
 
-  async cancelQueuedRun(runId: string): Promise<NonNullable<PiHostResponse['result']>['queue']> {
-    const response = await this.request('runs/cancel', { runId })
+  async cancelQueuedRun(runId: string, expectedRevision?: number): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('runs/cancel', { runId, ...(expectedRevision === undefined ? {} : { expectedRevision }) })
     if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queued run cancellation failed')
-    return response.result.queue
+    return response.result
+  }
+
+  async updateQueuedRun(input: { runId: string; prompt: string; expectedRevision: number }): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('runs/update', input)
+    if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queued run update failed')
+    return response.result
+  }
+
+  async reorderQueuedRuns(input: { sessionId: string; runIds: string[]; expectedRevision: number }): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('runs/reorder', input)
+    if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queued run reorder failed')
+    return response.result
   }
 
   async claimQueuedRun(runId?: string): Promise<NonNullable<PiHostResponse['result']>> {
@@ -687,7 +702,7 @@ export class PiHostSupervisor {
     return true
   }
 
-  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: unknown }): Promise<NonNullable<PiHostResponse['result']>> {
+  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; clientMessageId?: string; expectedActiveRunId?: string; pluginExecution?: unknown }): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}), ...(profile ? { profile } : {}), ...(orchestration || {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')
     return response.result

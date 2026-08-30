@@ -21,11 +21,24 @@ export type ReviewFeedbackRunResult = {
   comparisonTarget?: Extract<ReviewTarget, { kind: 'snapshot-range' }>
 }
 
-/** The sole review-feedback ingress; UI callers never dispatch a runner directly. */
-export async function submitReviewFeedback(snapshotId: string): Promise<ReviewFeedbackRunResult> {
+/** Freeze the exact Host bundle the user will review before dispatch. */
+export async function prepareReviewFeedback(snapshotId: string): Promise<ReviewFeedbackBundle> {
   const bridge = window.subagents?.piHost?.review
-  if (typeof bridge?.prepareFeedback !== 'function' || typeof bridge.claimFeedback !== 'function') throw new Error('Pi Host review feedback bridge 不可用。')
-  const { reviewFeedbackBundle: prepared } = await bridge.prepareFeedback(snapshotId)
+  if (typeof bridge?.prepareFeedback !== 'function') throw new Error('Pi Host review feedback preview bridge 不可用。')
+  return (await bridge.prepareFeedback(snapshotId)).reviewFeedbackBundle
+}
+
+async function resolveFeedbackPreview(snapshotId: string, preview?: ReviewFeedbackBundle): Promise<ReviewFeedbackBundle> {
+  const prepared = preview ?? await prepareReviewFeedback(snapshotId)
+  if (prepared.snapshotId !== snapshotId || prepared.status !== 'prepared') throw new Error('Feedback preview 已過期或不屬於目前 snapshot。')
+  return prepared
+}
+
+/** The sole review-feedback ingress; UI callers never dispatch a runner directly. */
+export async function submitReviewFeedback(snapshotId: string, preview?: ReviewFeedbackBundle): Promise<ReviewFeedbackRunResult> {
+  const bridge = window.subagents?.piHost?.review
+  if (typeof bridge?.claimFeedback !== 'function') throw new Error('Pi Host review feedback bridge 不可用。')
+  const prepared = await resolveFeedbackPreview(snapshotId, preview)
   const runId = `run_${prepared.id.slice(-24)}`
   const claim = await bridge.claimFeedback(prepared.id, runId)
   if (!claim.claimed) {

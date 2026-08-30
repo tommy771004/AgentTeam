@@ -31,8 +31,17 @@ assert.match(store, /cancelPiHostTurn\(target\)\.catch/)
 
 const app = await readFile(resolve(root, 'src/App.tsx'), 'utf8')
 assert.match(app, /mapPiHostEventToActivity/)
-assert.match(app, /activity\.appendText\(update\.delta, update\.runId\)/)
-assert.match(app, /activity\.push\(/)
+assert.match(app, /applyPiHostActivityUpdate\(useRunActivityStore\.getState\(\), update\)/)
+
+// App owns subscription/order; the typed activity translator owns every
+// disposable renderer mutation. Keep this guard pointed at the real owner so
+// extracting the seam cannot make release require duplicate inline logic.
+const hostActivity = await readFile(resolve(root, 'src/agent/piHostActivity.ts'), 'utf8')
+assert.match(hostActivity, /activity\.appendText\(update\.delta, update\.runId\)/)
+assert.match(hostActivity, /activity\.appendThought\(update\.delta, update\.runId\)/)
+assert.match(hostActivity, /activity\.setTasks\(update\.tasks, update\.runId\)/)
+assert.match(hostActivity, /activity\.push\(\{/)
+assert.match(hostActivity, /activity\.setStatus\(update\.title, update\.runId, update\.phase\)/)
 
 const processFeed = await readFile(resolve(root, 'src/components/RunProcessFeed.tsx'), 'utf8')
 const runPanel = await readFile(resolve(root, 'src/components/InlineRunPanel.tsx'), 'utf8')

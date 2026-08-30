@@ -5,7 +5,7 @@
  * outlives the coordinator's wait window. When that happens the new objective
  * takes the queue the busy policy already owns instead of being answered with
  * `busy`, and the thread bubble says which of the three things actually
- * happened. Only a steer with nothing abortable behind it may report busy.
+ * happened. Only a takeover with nothing abortable behind it may report busy.
  *
  * Real seam: this drives the shipped `runTask` admission path against the real
  * agent / thread / settings stores and the real run queue.
@@ -33,7 +33,7 @@ class MemoryStorage {
 Object.defineProperty(globalThis, 'localStorage', { value: new MemoryStorage(), configurable: true })
 Object.defineProperty(globalThis, 'window', { value: { subagents: {} }, configurable: true })
 
-const { formatSteerNotice, steerOutcomeSummary, buildSteerPartialDigest } = await import(
+const { formatTakeoverNotice, takeoverOutcomeSummary, buildTakeoverPartialDigest } = await import(
   '../src/agent/taskRunPolicy.ts',
 )
 const { runTask } = await import('../src/agent/taskRunCoordinator.ts')
@@ -78,22 +78,22 @@ console.log('smoke-steer-enqueue-fallback')
 
 await test('notice wording: every branch is honest, partial digest kept in all of them', () => {
   const partial = '目標：改寫 README\n進度：40%'
-  const tookOver = formatSteerNotice({ outcome: 'took-over', runningTitle: '舊任務', partial })
-  const queued = formatSteerNotice({
+  const tookOver = formatTakeoverNotice({ outcome: 'took-over', runningTitle: '舊任務', partial })
+  const queued = formatTakeoverNotice({
     outcome: 'queued',
     runningTitle: '舊任務',
     partial,
     queuePosition: 2,
     queueTotal: 3,
   })
-  const stuck = formatSteerNotice({ outcome: 'not-abortable', runningTitle: '舊任務', partial })
-  const refused = formatSteerNotice({ outcome: 'aborted-not-queued', runningTitle: '舊任務', partial })
+  const stuck = formatTakeoverNotice({ outcome: 'not-abortable', runningTitle: '舊任務', partial })
+  const refused = formatTakeoverNotice({ outcome: 'aborted-not-queued', runningTitle: '舊任務', partial })
   assert.match(refused, /已中止前一個任務/)
   assert.match(refused, /佇列已滿或重複/)
   for (const outcome of ['took-over', 'queued', 'aborted-not-queued', 'not-abortable'] as const) {
     const shape = { outcome, runningTitle: '舊任務', partial, queuePosition: 2, queueTotal: 3 }
     assert.ok(
-      formatSteerNotice(shape).startsWith(steerOutcomeSummary(shape)),
+      formatTakeoverNotice(shape).startsWith(takeoverOutcomeSummary(shape)),
       `${outcome}: bubble and returned sentence must not drift apart`,
     )
   }
@@ -117,20 +117,20 @@ await test('notice wording: every branch is honest, partial digest kept in all o
 })
 
 await test('notice wording: an empty digest leaves no dangling heading', () => {
-  const text = formatSteerNotice({ outcome: 'took-over' })
+  const text = formatTakeoverNotice({ outcome: 'took-over' })
   assert.ok(!/中止前摘要/.test(text), 'no heading without a summary under it')
-  assert.equal(buildSteerPartialDigest({ steps: [], toolCalls: [] } as never), '')
+  assert.equal(buildTakeoverPartialDigest({ steps: [], toolCalls: [] } as never), '')
 })
 
-await test('steer whose previous run will not stop: objective is queued, never dropped', async () => {
+await test('External CLI takeover whose process will not stop: objective is queued, never dropped', async () => {
   resetWorld('steer')
   const tid = useThreadStore.getState().createThread({ title: '轉向測試' })
   // A parked run that has not reached its tool boundary: reserved, told to
   // stop, and still holding its slot when the wait window expires.
-  assert.equal(useAgentStore.getState().reserveRun('run_stuck', tid, 'builtin'), true)
+  assert.equal(useAgentStore.getState().reserveRun('run_stuck', tid, 'codex'), true)
 
   const objective = '改成先寫測試再改實作'
-  const result = await runTask({ sourceKind: 'composer', objective, reuseThreadId: tid })
+  const result = await runTask({ sourceKind: 'composer', objective, reuseThreadId: tid, runner: 'codex', followUpAction: 'takeover' })
 
   assert.equal(result.skipReason, 'queued', `expected queued, got ${result.skipReason}`)
   assert.equal(result.queued, true)
@@ -157,7 +157,7 @@ await test('steer whose previous run will not stop: objective is queued, never d
   )
 })
 
-await test('steer with nothing abortable behind it is the one honest busy', async () => {
+await test('External CLI takeover with nothing abortable behind it is honest busy', async () => {
   resetWorld('steer')
   // Global capacity is spent by two other conversations; this thread has no
   // run of its own, so there is nothing to abort.
@@ -171,6 +171,8 @@ await test('steer with nothing abortable behind it is the one honest busy', asyn
     sourceKind: 'composer',
     objective: '這個對話沒有在跑的任務',
     reuseThreadId: tid,
+    runner: 'codex',
+    followUpAction: 'takeover',
   })
 
   assert.equal(result.skipReason, 'busy', `expected busy, got ${result.skipReason}`)
@@ -202,7 +204,7 @@ await test('automation follow-ups keep queueing, untouched by the steer branch',
   assert.equal(listQueuedRuns()[0]?.sourceKind, 'webhook')
 })
 
-await test('drift guard: the steer branch enqueues instead of falling through to busy', () => {
+await test('drift guard: the takeover branch enqueues instead of falling through to busy', () => {
   const coordinator = read('src/agent/taskRunCoordinator.ts')
   const steer = coordinator.slice(
     coordinator.indexOf("if (policy === 'steer'"),
@@ -210,21 +212,21 @@ await test('drift guard: the steer branch enqueues instead of falling through to
   )
   assert.ok(steer.length > 0, 'the steer branch must still be identifiable')
   assert.match(steer, /enqueueExternalRun/, 'the timeout fallback is the existing queue mechanism')
-  assert.match(steer, /formatSteerNotice/, 'every branch speaks through one formatter')
-  assert.match(steer, /steerOutcomeSummary/, 'and returns that same sentence to the caller')
+  assert.match(steer, /formatTakeoverNotice/, 'every branch speaks through one takeover formatter')
+  assert.match(steer, /takeoverOutcomeSummary/, 'and returns that same sentence to the caller')
   assert.ok(
     !/並行執行上限/.test(steer),
     'the steer branch must never answer with the generic capacity wording',
   )
 })
 
-await test('CLAUDE.md busy policy documents the steer timeout fallback', () => {
+await test('CLAUDE.md distinguishes true steer from External CLI takeover', () => {
   const guidance = fs.readFileSync(path.join(appRoot, '..', 'CLAUDE.md'), 'utf8')
   const busy = guidance.slice(guidance.indexOf('**Busy policy.**')).slice(0, 900)
-  assert.match(busy, /steer/i, 'the steer policy still lives here')
+  assert.match(busy, /Builtin Pi.*true steer/i, 'Builtin Pi true steer is explicit')
   assert.match(
     busy,
-    /queues instead of reporting busy|enqueue|queue fallback/i,
+    /External CLI.*中止並接手.*queue fallback/is,
     'the timeout fallback must be written down, not just the happy path',
   )
   assert.match(busy, /busy/i)

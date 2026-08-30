@@ -23,6 +23,14 @@ import { createZeroHitSkillPreflight } from '../electron/piSkillPreflight.ts'
 
 const OPERATIONS = 150 // > MAX_EVENTS(120) and > MAX_TERMINAL_EVENTS(40)
 
+const approvalRows = projectRunOperations(appendTurnRecord(undefined, [
+  { kind: 'approval', source: 'host', tool: 'read', callId: 'approved', decision: 'allow' },
+  { kind: 'approval', source: 'host', tool: 'write', callId: 'denied', decision: 'deny', reason: '未獲授權' },
+]))
+assert.equal(approvalRows.length, 1, 'successful approval is implied and does not add an allow row')
+assert.equal(approvalRows[0]?.kind, 'error', 'a denied approval remains visible')
+assert.match(approvalRows[0]?.title || '', /未獲授權/, 'the denial retains its reason')
+
 let record = appendTurnRecord(undefined, [{ kind: 'turn-start', source: 'host' }])
 const appends: TurnRecordAppend[] = []
 for (let step = 1; step <= OPERATIONS; step += 1) {

@@ -120,6 +120,7 @@ export type RunTimelineRow = {
   | {
       kind: 'assistant'
       content: string
+      phase?: 'commentary' | 'final_answer'
       /** Still being written — the current assistant line, not a settled one. */
       draft?: boolean
     }
@@ -207,7 +208,7 @@ export function runTimelineRows(view: TrajectoryView, draft?: string): RunTimeli
         rows.push({ ...base, kind: 'reasoning', content: row.content, chars: row.content.length })
         break
       case 'assistant':
-        rows.push({ ...base, kind: 'assistant', content: row.content })
+        rows.push({ ...base, kind: 'assistant', content: row.content, ...(row.phase ? { phase: row.phase } : {}) })
         break
       case 'notice':
         rows.push({ ...base, kind: 'notice', content: row.content })

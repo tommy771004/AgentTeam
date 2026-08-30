@@ -407,7 +407,7 @@ export function presentedDiff(presentation: ToolPresentation): string | undefine
 }
 
 /** The summary a timeline row shows for one tool call: title, where, how much. */
-export type PresentedToolSummary = { title?: string; path?: string; diff?: string; added?: number; removed?: number }
+export type PresentedToolSummary = { title?: string; path?: string; detail?: string; diff?: string; added?: number; removed?: number }
 
 /**
  * One tool call's presented summary, from its own declaration and nothing
@@ -436,9 +436,11 @@ export function presentedToolSummary(
   const added = stats?.reduce((total, stat) => total + stat.added, 0)
   const removed = stats?.reduce((total, stat) => total + stat.removed, 0)
   const diff = presentedDiff(presentation)
+  const detail = presentation.card === 'terminal' ? presentation.description?.trim() : undefined
   return {
     ...(presentation.title ? { title: presentation.title } : {}),
     ...(locationPath ? { path: locationPath } : {}),
+    ...(detail ? { detail } : {}),
     ...(diff ? { diff } : {}),
     ...(added !== undefined ? { added } : {}),
     ...(removed !== undefined ? { removed } : {}),

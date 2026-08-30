@@ -17,8 +17,7 @@ function errorResponse(id: string | number, message: string): PiHostMessage {
 
 /** Owns the root-scoped public agent tree read capability. */
 export function handlePiHostAgentDomain(input: AgentDomainInput): PiHostMessage[] | undefined {
-  if (!input.method.startsWith('agents/')) return undefined
-  if (input.method !== 'agents/list') return [errorResponse(input.id, `Unknown agent method: ${input.method}`)]
+  if (input.method !== 'agents/list') return undefined
   const rootAgentId = typeof input.params?.rootAgentId === 'string' ? input.params.rootAgentId : undefined
   const agentId = typeof input.params?.agentId === 'string' ? input.params.agentId : undefined
   if (!rootAgentId && !agentId) return [errorResponse(input.id, 'rootAgentId or agentId is required')]

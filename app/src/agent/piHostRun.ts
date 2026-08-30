@@ -256,10 +256,9 @@ export type PiHostRunnerApi = {
   sessions: {
     list: () => Promise<{ sessions: unknown[] }>
     create: (title?: string, threadId?: string) => Promise<{ sessionId: string; sessions: unknown[] }>
-    createChild?: (input: { title?: string; parentSessionId: string; role: string; profile: Record<string, unknown>; context: { objective: string; facts: string[]; constraints: string[] }; depth: number }) => Promise<{ sessionId: string; sessions: unknown[] }>
   }
   turn: {
-    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; workingGoal?: WorkingGoalCompletionPredicate; resumeFromRunId?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: SubDesignPluginExecutionRequest }) => Promise<{
+    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; workingGoal?: WorkingGoalCompletionPredicate; resumeFromRunId?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; clientMessageId?: string; expectedActiveRunId?: string; pluginExecution?: SubDesignPluginExecutionRequest }) => Promise<{
       sessionId: string
       runId: string
       settlement: string
@@ -269,6 +268,10 @@ export type PiHostRunnerApi = {
       interruptReason?: PiTurnInterruptReason
       orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
       pluginExecution?: SubDesignPluginExecutionProjection
+      queued?: 'steer' | 'queue'
+      followUp?: unknown
+      queue?: unknown[]
+      queueRevision?: number
     }>
   }
 }
@@ -278,6 +281,7 @@ export type SubmitPiHostRunInput = {
   title: string
   prompt: string
   runId: string
+  hostSessionId?: string
   cwd?: string
   profile?: Record<string, unknown>
   contextPolicy?: PiTurnContextPolicy
@@ -326,6 +330,27 @@ export function pickThreadPiSession(sessions: readonly unknown[], threadId: stri
   return sessions
     .map(asSession)
     .find((session) => session?.threadId === threadId && !session.archived)
+}
+
+async function resolveSubmissionSession(api: PiHostRunnerApi, input: SubmitPiHostRunInput): Promise<string> {
+  if (input.hostSessionId) return input.hostSessionId
+  const listed = await api.sessions.list()
+  return pickThreadPiSession(listed.sessions || [], input.threadId)?.id
+    || (await api.sessions.create(input.title, input.threadId)).sessionId
+}
+
+function roleOverlay(input: SubmitPiHostRunInput): { prompt: string; profile?: Record<string, unknown> } {
+  if (!input.child) return { prompt: input.prompt, profile: input.profile }
+  const sections = [
+    `## 本輪角色疊層（非獨立 child session）\n角色：${input.child.role}`,
+    input.child.context.facts.length ? `Facts:\n${input.child.context.facts.map((fact) => `- ${fact}`).join('\n')}` : '',
+    input.child.context.constraints.length ? `Constraints:\n${input.child.context.constraints.map((constraint) => `- ${constraint}`).join('\n')}` : '',
+  ].filter(Boolean)
+  const model = typeof input.child.profile.model === 'string' ? input.child.profile.model : undefined
+  return {
+    prompt: `${sections.join('\n\n')}\n\n${input.prompt}`,
+    profile: model ? { ...input.profile, model } : input.profile,
+  }
 }
 
 /**
@@ -405,18 +430,14 @@ export async function submitPiHostRun(
   api: PiHostRunnerApi,
   input: SubmitPiHostRunInput,
 ): Promise<SubmitPiHostRunResult> {
-  const listed = await api.sessions.list()
-  const existing = pickThreadPiSession(listed.sessions || [], input.threadId)
-  const parentSessionId = existing?.id || (await api.sessions.create(input.title, input.threadId)).sessionId
-  const sessionId = input.child && api.sessions.createChild
-    ? (await api.sessions.createChild({ title: input.title, parentSessionId, ...input.child })).sessionId
-    : parentSessionId
+  const sessionId = await resolveSubmissionSession(api, input)
+  const overlaid = roleOverlay(input)
   const turn = await api.turn.submit({
     sessionId,
-    prompt: input.prompt,
+    prompt: overlaid.prompt,
     runId: input.runId,
     cwd: input.cwd,
-    profile: input.profile,
+    profile: overlaid.profile,
     contextPolicy: input.contextPolicy,
     pattern: input.pattern,
     maxIterations: input.maxIterations,

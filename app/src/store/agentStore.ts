@@ -390,6 +390,7 @@ async function executePiHostTurn(
       title: text.slice(0, 48),
       prompt: text,
       runId,
+      hostSessionId: overrides.hostSessionId,
       cwd: overrides.projectRoot,
       profile,
       contextPolicy,
@@ -438,6 +439,7 @@ async function executePiHostTurn(
     const final = emptyAgentLike({
       id: runId,
       objective: text,
+      hostSessionId: result.sessionId,
       ...(result.record ? { turnRecord: result.record } : {}),
       status: settled.status,
       progress: 100,

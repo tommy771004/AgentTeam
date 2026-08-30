@@ -10,6 +10,7 @@ import type {
 import type { ReviewArtifactProjection, ReviewArtifactStore } from './reviewArtifactStore.ts'
 import { captureRunReviewSnapshot } from './reviewSnapshotCapture.ts'
 import { captureReviewWorkspaceAdmission } from './reviewWorkspaceBinding.ts'
+import { parseGitNameStatus } from './gitNameStatus.ts'
 
 const exec = promisify(execFile)
 const DEFAULT_TIMEOUT_MS = 15_000
@@ -136,31 +137,6 @@ async function resolveCommitRef(cwd: string, ref: string): Promise<string> {
   }
 }
 
-function zeroFields(value: string): string[] {
-  return value.split('\0').filter(Boolean)
-}
-
-function parseChanges(value: string): Array<{ status: ReviewFileManifestEntry['status']; path: string; oldPath?: string }> {
-  const fields = zeroFields(value)
-  const result: Array<{ status: ReviewFileManifestEntry['status']; path: string; oldPath?: string }> = []
-  for (let index = 0; index < fields.length;) {
-    const statusValue = fields[index++] || ''
-    const code = statusValue[0]
-    if (code === 'R' || code === 'C') {
-      const oldPath = fields[index++] || ''
-      const path = fields[index++] || ''
-      result.push({ status: code === 'R' ? 'renamed' : 'copied', oldPath, path })
-    } else {
-      const path = fields[index++] || ''
-      result.push({
-        status: code === 'A' ? 'added' : code === 'D' ? 'deleted' : code === 'T' ? 'type-changed' : 'modified',
-        path,
-      })
-    }
-  }
-  return result.filter((item) => item.path)
-}
-
 async function loadGitRange(
   target: Extract<ReviewTarget, { kind: 'staged' | 'branch-range' }>,
   workspace: ReviewWorkspaceBinding,
@@ -171,7 +147,7 @@ async function loadGitRange(
     ? await Promise.all([resolveCommitRef(cwd, target.baseRef), resolveCommitRef(cwd, target.headRef)])
     : undefined
   const scope = target.kind === 'staged' ? ['--cached'] : resolvedRange!
-  const changes = parseChanges(await git(cwd, ['diff', '--name-status', '-z', '--find-renames', '--find-copies', ...scope, '--']))
+  const changes = parseGitNameStatus(await git(cwd, ['diff', '--name-status', '-z', '--find-renames', '--find-copies', ...scope, '--']))
   const payloads = new Map<string, string>()
   const manifest: ReviewFileManifestEntry[] = []
   for (const change of changes) {
@@ -285,7 +261,7 @@ export class WorkspaceReviewProjection {
       throw new WorkspaceReviewProjectionError('unavailable', 'Snapshot range Git objects are unavailable in the bound workspace')
     }
     const scope = [beforeTree, afterTree]
-    const changes = parseChanges(await git(workspace.worktreeRoot, ['diff', '--name-status', '-z', '--find-renames', '--find-copies', ...scope, '--']))
+    const changes = parseGitNameStatus(await git(workspace.worktreeRoot, ['diff', '--name-status', '-z', '--find-renames', '--find-copies', ...scope, '--']))
     const manifest: ReviewFileManifestEntry[] = []
     const payloads = new Map<string, string>()
     for (const change of changes) {

@@ -4,6 +4,7 @@ import { promisify } from 'node:util'
 import type { ReviewAdmissionSnapshot, ReviewFileManifestEntry, ReviewWorkspaceBaseline } from '../src/agent/reviewContract.ts'
 import type { ReviewArtifactFinalizeInput } from './reviewArtifactStore.ts'
 import { captureReviewWorkspaceBaseline } from './reviewWorkspaceBinding.ts'
+import { parseGitNameStatus, type GitNameStatusChange } from './gitNameStatus.ts'
 
 const exec = promisify(execFile)
 const MAX_REVIEW_PAYLOAD_BYTES = 8 * 1024 * 1024
@@ -51,33 +52,7 @@ function splitZero(value: string): string[] {
   return value.split('\0').filter(Boolean)
 }
 
-type ChangedPath = { status: ReviewFileManifestEntry['status']; path: string; oldPath?: string }
 type FileStat = { additions?: number; removals?: number; binary: boolean }
-
-function parseNameStatus(value: string): ChangedPath[] {
-  const fields = splitZero(value)
-  const changes: ChangedPath[] = []
-  for (let index = 0; index < fields.length;) {
-    const token = fields[index++] || ''
-    const code = token[0]
-    if (code === 'R' || code === 'C') {
-      const oldPath = fields[index++] || ''
-      const path = fields[index++] || ''
-      changes.push({ status: code === 'R' ? 'renamed' : 'copied', path, oldPath })
-      continue
-    }
-    const path = fields[index++] || ''
-    const status: ReviewFileManifestEntry['status'] = code === 'A'
-      ? 'added'
-      : code === 'D'
-        ? 'deleted'
-        : code === 'T'
-          ? 'type-changed'
-          : 'modified'
-    changes.push({ status, path })
-  }
-  return changes.filter((change) => change.path)
-}
 
 function parseNumstat(value: string): Map<string, { additions?: number; removals?: number; binary: boolean }> {
   const result = new Map<string, { additions?: number; removals?: number; binary: boolean }>()
@@ -106,7 +81,7 @@ async function treeMode(cwd: string, ref: string, path: string): Promise<string 
   return line ? line.split(/\s+/, 1)[0] : undefined
 }
 
-async function filePatch(cwd: string, baseline: string, settlement: string, change: ChangedPath): Promise<string> {
+async function filePatch(cwd: string, baseline: string, settlement: string, change: GitNameStatusChange): Promise<string> {
   const paths = change.oldPath ? [change.oldPath, change.path] : [change.path]
   return git(cwd, ['diff', '--binary', '--no-ext-diff', '--find-renames', '--find-copies', baseline, settlement, '--', ...paths])
 }
@@ -151,7 +126,7 @@ async function captureChangedFiles(
   cwd: string,
   baselineTree: string,
   settlementTree: string,
-  changes: ChangedPath[],
+  changes: GitNameStatusChange[],
   stats: Map<string, FileStat>,
   limits: { payloadBytes: number; totalBytes: number },
 ): Promise<{ manifest: ReviewFileManifestEntry[]; payloads: ReviewArtifactFinalizeInput['payloads']; partial: boolean; diagnostics: string[] }> {
@@ -207,7 +182,7 @@ async function captureGitReview(
     git(cwd, ['ls-files', '--others', '--exclude-standard', '-z']),
   ])
   const untracked = new Set(splitZero(untrackedValue))
-  const changes = parseNameStatus(nameStatus)
+  const changes = parseGitNameStatus(nameStatus)
     .map((change) => change.status === 'added' && untracked.has(change.path) ? { ...change, status: 'untracked' as const } : change)
   const limits = input.qualificationLimits || { payloadBytes: MAX_REVIEW_PAYLOAD_BYTES, totalBytes: MAX_REVIEW_TOTAL_BYTES }
   const captured = await captureChangedFiles(cwd, baseline.workingTree, settlement.workingTree, changes, parseNumstat(numstat), limits)

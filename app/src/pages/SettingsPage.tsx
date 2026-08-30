@@ -1005,7 +1005,7 @@ export function SettingsPage() {
               />
               <SettingsRow
                 title="執行中追問行為"
-                description="代理忙碌時，新訊息要轉向目前執行或排隊"
+                description="代理忙碌時的預設動作；Builtin Pi 可引導目前執行，External CLI 會明確中止並接手"
                 control={
                   <PillSelect
                     value={settings.followUpMode || 'steer'}
@@ -1013,7 +1013,7 @@ export function SettingsPage() {
                       set({ followUpMode: v as FollowUpMode })
                     }
                   >
-                    <option value="steer">轉向（Steer）</option>
+                    <option value="steer">引導／中止並接手（依執行器能力）</option>
                     <option value="queue">排隊（Queue）</option>
                   </PillSelect>
                 }

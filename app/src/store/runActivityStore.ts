@@ -61,12 +61,29 @@ export type FileChangeRecord = {
 
 export type RunTaskStatus = 'pending' | 'active' | 'done' | 'failed'
 
+export type RunTaskDetail = {
+  label: string
+  meta?: string
+}
+
+export type RunTaskSnapshotItem = {
+  id?: string
+  text: string
+  status?: string
+  /** Short, Agent-authored value shown on the row (for example "2 files"). */
+  meta?: string
+  /** Bounded Agent-authored child steps. Never synthesized from prompt/history. */
+  details?: RunTaskDetail[]
+}
+
 /** 分析出的須執行任務項（TodoWrite / update_plan / checkbox 解析）→ 右側面板即時同步 */
 export type RunTaskItem = {
   id: string
   text: string
   status: RunTaskStatus
   at: number
+  meta?: string
+  details?: RunTaskDetail[]
 }
 
 /**
@@ -177,6 +194,8 @@ export type RunPresentation = {
   terminal: TerminalRunDigest | null
   recovery: ExternalCliRecoveryProjection | null
   interaction: ExternalCliInteractionProjection | null
+  /** Current Host-authored connector authentication blocker. */
+  authenticationRequired: boolean
 }
 
 /** IPC payload from main → renderer during CLI stream */
@@ -196,11 +215,12 @@ export type CliStreamPayload = {
   removed?: number
   action?: FileChangeRecord['action']
   /** kind=plan：完整任務清單快照 */
-  todos?: Array<{ text: string; status?: string }>
+  todos?: RunTaskSnapshotItem[]
   sequence?: number
   sessionPhase?: ExternalCliRunPhase
   terminalClassification?: ExternalCliTerminalClassification
   providerSessionId?: string
+  authenticationRequired?: boolean
 }
 
 export interface RunActivityStore {
@@ -241,13 +261,26 @@ export interface RunActivityStore {
   setStatus: (line: string, runId?: string, phase?: RunActivityPhase) => void
   setRecovery: (recovery: ExternalCliRecoveryProjection, runId?: string) => void
   setInteraction: (interaction: ExternalCliInteractionProjection | null, runId?: string) => void
+  setAuthenticationRequired: (required: boolean, runId?: string) => void
   recordFileChange: (f: Omit<FileChangeRecord, 'at'> & { at?: number }, runId?: string) => void
   /** 以完整快照取代任務清單（結構化 plan 事件） */
-  setTasks: (todos: Array<{ text: string; status?: string }>, runId?: string) => void
+  setTasks: (todos: RunTaskSnapshotItem[], runId?: string) => void
   /** 文字流 checkbox 解析 → 新增或更新單項 */
   upsertTask: (text: string, status: RunTaskStatus, runId?: string) => void
   clearDraft: (runId?: string) => void
   handleCliStream: (payload: CliStreamPayload) => void
+}
+
+function syncAuthenticationRequirement(
+  store: RunActivityStore,
+  payload: CliStreamPayload,
+  runId: string,
+): void {
+  if (payload.authenticationRequired !== undefined) {
+    store.setAuthenticationRequired(payload.authenticationRequired, runId)
+  } else if (payload.kind === 'status' && payload.sessionPhase === 'running') {
+    store.setAuthenticationRequired(false, runId)
+  }
 }
 
 let seq = 0
@@ -311,6 +344,7 @@ function emptyPresentation(runId: string, now = Date.now()): RunPresentation {
     terminal: null,
     recovery: null,
     interaction: null,
+    authenticationRequired: false,
   }
 }
 
@@ -431,6 +465,7 @@ function terminalizePresentation(
     tasks: digest.tasks,
     phase,
     terminal: digest,
+    authenticationRequired: false,
   }
 }
 
@@ -476,6 +511,17 @@ function normalizeTaskStatus(raw?: string): RunTaskStatus {
 
 function taskKey(text: string) {
   return text.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function normalizeTaskDetails(details: RunTaskDetail[] | undefined): RunTaskDetail[] | undefined {
+  if (!Array.isArray(details)) return undefined
+  const normalized = details.slice(0, 8).flatMap((detail) => {
+    const label = String(detail?.label || '').trim().slice(0, 200)
+    if (!label) return []
+    const meta = String(detail.meta || '').trim().slice(0, 80)
+    return [{ label, ...(meta ? { meta } : {}) }]
+  })
+  return normalized.length ? normalized : undefined
 }
 
 /** 逐行掃描文字流的 markdown checkbox（- [ ] / - [x]），每個 run 各自保留尾端 buffer。 */
@@ -799,6 +845,16 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     )
   },
 
+  setAuthenticationRequired: (required, runId) => {
+    const target = runId || get().runId
+    if (!target) return
+    set((s) => applyRunUpdate(s, target, (presentation) => ({
+      ...presentation,
+      authenticationRequired: required,
+      updatedAt: Date.now(),
+    })))
+  },
+
   setTasks: (todos, runId) => {
     const target = runId || get().runId
     if (!target) return
@@ -812,12 +868,17 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
       const key = taskKey(text)
       if (seen.has(key)) continue
       seen.add(key)
-      const prev = source.tasks.find((x) => taskKey(x.text) === key)
+      const suppliedId = String(t.id || '').trim().slice(0, 80)
+      const prev = source.tasks.find((x) => (suppliedId && x.id === suppliedId) || taskKey(x.text) === key)
+      const meta = String(t.meta || '').trim().slice(0, 80)
+      const details = normalizeTaskDetails(t.details)
       tasks.push({
-        id: prev?.id || nid('task'),
+        id: suppliedId || prev?.id || nid('task'),
         text: text.slice(0, 200),
         status: normalizeTaskStatus(t.status),
         at: prev?.at || now,
+        ...(meta ? { meta } : {}),
+        ...(details ? { details } : {}),
       })
     }
     if (tasks.length) {
@@ -924,6 +985,8 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
     if (!streamRunId) return
     const existing = s.presentations[streamRunId]
     if (existing?.terminal && !existing.active) return
+
+    syncAuthenticationRequirement(get(), payload, streamRunId)
 
     if (payload.sessionPhase === 'waiting_for_user' || payload.sessionPhase === 'waiting_for_approval') {
       get().setInteraction({

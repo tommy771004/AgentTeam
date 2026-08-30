@@ -1,7 +1,6 @@
 import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
 import { piDelegationBridge, type PiDelegatedRunView } from '../piPackBridges.ts'
 import { structuredFailure, structuredOk } from './packResults.ts'
-import type { PiDelegationBridgeAccess } from '../piPackBridges.ts'
 
 /**
  * Background work pack（背景工作包）— delegation and monitoring.
@@ -12,24 +11,43 @@ import type { PiDelegationBridgeAccess } from '../piPackBridges.ts'
  * role, profile, context, and depth can never be quietly defaulted.
  */
 
-async function createDelegatedChild(
-  bridge: PiDelegationBridgeAccess,
-  args: Record<string, unknown>,
-  input: { parentSessionId: string; parentRunId: string; role: string; profile: Record<string, unknown>; depth: number },
-) {
-  const goalId = typeof args.goalId === 'string' ? args.goalId.trim() : ''
-  if (goalId) return bridge.createGoalChild({ ...input, goalId })
-  return bridge.createChild({
-    parentSessionId: input.parentSessionId,
-    role: input.role,
-    profile: input.profile,
-    depth: input.depth,
-    context: {
-      objective: String(args.objective || ''),
-      facts: Array.isArray(args.facts) ? args.facts.map((fact) => String(fact)) : [],
-      constraints: Array.isArray(args.constraints) ? args.constraints.map((constraint) => String(constraint)) : [],
-    },
-  })
+function delegateArguments(args: Record<string, unknown>) {
+  const objective = String(args.objective || '').trim()
+  const role = String(args.role || '').trim()
+  const profile = args.profile && typeof args.profile === 'object' && !Array.isArray(args.profile) ? args.profile as Record<string, unknown> : undefined
+  const depth = Number(args.depth)
+  if (!role || !profile || !Number.isFinite(depth)) return { ok: false as const, reason: 'child delegation 需要 role、profile、depth' }
+  if (!objective) return { ok: false as const, reason: 'child delegation 需要 objective' }
+  return {
+    ok: true as const, objective, role, profile, depth,
+    facts: Array.isArray(args.facts) ? args.facts.map(String) : [],
+    constraints: Array.isArray(args.constraints) ? args.constraints.map(String) : [],
+    goalId: typeof args.goalId === 'string' && args.goalId.trim() ? args.goalId.trim() : undefined,
+  }
+}
+
+async function executeDelegateTask(args: Record<string, unknown>, ctx: Parameters<NonNullable<PiPackTool['execute']>>[1]) {
+  const bridge = piDelegationBridge()
+  if (!bridge) return structuredFailure('delegation 在此 Host 無法使用')
+  const parsed = delegateArguments(args)
+  if (!parsed.ok) return structuredFailure(parsed.reason)
+  const spawnId = `${ctx.runId || ctx.sessionId}:spawn:${ctx.callId || parsed.objective.slice(0, 48)}`
+  try {
+    const created = await bridge.spawnChild({
+      spawnId, runId: `${ctx.runId || ctx.sessionId}:child:${spawnId}`,
+      parentSessionId: ctx.sessionId, parentRunId: String(ctx.runId || ''),
+      objective: parsed.objective, role: parsed.role, profile: parsed.profile, depth: parsed.depth,
+      context: { objective: parsed.objective, facts: parsed.facts, constraints: parsed.constraints },
+      workspace: { mode: 'shared-readonly' },
+      ...(parsed.goalId ? { goalId: parsed.goalId } : {}),
+    })
+    return structuredOk(`已委派給子 session ${created.sessionId}`, {
+      childSessionId: created.sessionId, parentSessionId: ctx.sessionId,
+      ...('delegationId' in created ? { delegationId: created.delegationId } : {}),
+    })
+  } catch (error) {
+    return structuredFailure(error instanceof Error ? error.message : 'delegation failed')
+  }
 }
 
 const delegateTask: PiPackTool = {
@@ -51,37 +69,7 @@ const delegateTask: PiPackTool = {
     required: ['objective', 'role', 'profile', 'depth'],
   },
   approval: () => ({ need: true, reason: 'delegate_task 建立子 agent 並消耗額外執行資源' }),
-  execute: async (args, ctx) => {
-    const bridge = piDelegationBridge()
-    if (!bridge) return structuredFailure('delegation 在此 Host 無法使用')
-    const parentSessionId = ctx.sessionId
-    const role = String(args.role || '').trim()
-    const profile = (args.profile && typeof args.profile === 'object' && !Array.isArray(args.profile)) ? args.profile as Record<string, unknown> : null
-    const depth = Number(args.depth)
-    if (!role || !profile || !Number.isFinite(depth)) return structuredFailure('child delegation 需要 role、profile、depth')
-    // Fail closed on missing context pieces — a child that cannot say where
-    // it starts must not start.
-    if (!String(args.objective || '').trim()) return structuredFailure('child delegation 需要 objective')
-    try {
-      const created = await createDelegatedChild(bridge, args, {
-        parentSessionId,
-        parentRunId: String(ctx.runId || ''),
-        role,
-        profile,
-        depth,
-      })
-      const assignedObjective = 'objective' in created ? created.objective : undefined
-      const prompt = typeof assignedObjective === 'string' ? assignedObjective : String(args.objective || '')
-      await bridge.enqueueChildRun({ runId: `${ctx.runId || ctx.sessionId}-child-${created.sessionId}`, sessionId: created.sessionId, prompt })
-      return structuredOk(`已委派給子 session ${created.sessionId}`, {
-        childSessionId: created.sessionId,
-        parentSessionId,
-        ...('delegationId' in created ? { delegationId: created.delegationId } : {}),
-      })
-    } catch (error) {
-      return structuredFailure(error instanceof Error ? error.message : 'delegation failed')
-    }
-  },
+  execute: executeDelegateTask,
 }
 
 const delegateStatus: PiPackTool = {

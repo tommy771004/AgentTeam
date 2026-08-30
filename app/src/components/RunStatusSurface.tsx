@@ -1,19 +1,6 @@
 import { ElapsedTime } from './primitives/ElapsedTime.tsx'
 import type { RunSecondarySurface, RunStatusSurfaceProjection } from '../agent/runStatusSurface.ts'
-
-const MILESTONE_MARK = {
-  pending: '○',
-  current: '◉',
-  done: '✓',
-  blocked: '!',
-} as const
-
-const MILESTONE_COPY = {
-  pending: '等待中',
-  current: '進行中',
-  done: '已完成',
-  blocked: '受阻',
-} as const
+import { RunTaskRow } from './RunTaskRow.tsx'
 
 function formatUpdateTime(value: number): string {
   return new Intl.DateTimeFormat('zh-TW', {
@@ -24,24 +11,23 @@ function formatUpdateTime(value: number): string {
   }).format(value)
 }
 
-function SecondarySurface({ surface }: { surface: RunSecondarySurface }) {
+function SecondarySurface({ surface, live }: { surface: RunSecondarySurface; live: boolean }) {
   if (surface.kind === 'progress') {
     return (
       <section className="border-b border-line px-4 py-4" aria-labelledby="run-secondary-title">
         <h3 id="run-secondary-title" className="text-[12px] font-semibold text-ink">{surface.title}</h3>
-        <ol className="mt-3 space-y-2.5" aria-label="任務里程碑">
-          {surface.milestones.map((milestone) => (
-            <li key={milestone.id} className="flex min-w-0 items-start gap-2.5">
-              <span aria-hidden="true" className={`mt-px shrink-0 font-semibold ${milestone.status === 'done' ? 'text-green' : milestone.status === 'blocked' ? 'text-orange' : milestone.status === 'current' ? 'text-accent-ink' : 'text-ink-3'}`}>
-                {MILESTONE_MARK[milestone.status]}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[12px] leading-relaxed text-ink-2">
-                  <span className="sr-only">{MILESTONE_COPY[milestone.status]}：</span>{milestone.description}
-                </p>
-                {milestone.blocker ? <p className="mt-1 text-[11px] leading-relaxed text-orange">阻擋原因：{milestone.blocker}</p> : null}
-              </div>
-            </li>
+        <ol className="mt-3 space-y-2" aria-label="任務里程碑">
+          {surface.milestones.map((milestone, index) => (
+            <RunTaskRow
+              key={milestone.id}
+              text={milestone.description}
+              status={milestone.status}
+              index={index}
+              live={live}
+              detail={milestone.blocker}
+              amount={milestone.meta}
+              details={milestone.details}
+            />
           ))}
         </ol>
       </section>
@@ -88,7 +74,7 @@ export function RunStatusSurface({ projection, startedAt }: { projection: RunSta
           {projection.updatedAt ? <span className="font-[family-name:var(--font-mono)] tabular-nums">最後更新 {formatUpdateTime(projection.updatedAt)}</span> : null}
         </div>
       </section>
-      {projection.secondary ? <SecondarySurface surface={projection.secondary} /> : null}
+      {projection.secondary ? <SecondarySurface surface={projection.secondary} live={projection.live} /> : null}
     </>
   )
 }

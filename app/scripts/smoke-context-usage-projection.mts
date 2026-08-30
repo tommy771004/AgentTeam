@@ -448,6 +448,7 @@ assert.equal(formatUsd(3.5), 'US$3.50')
 
 // `/cost` prints the split, and prints NOTHING for what nobody measured.
 const report = contextUsageReportLines(full)
+assert.ok(report[0]?.startsWith('本次執行累積 Tokens：'), 'the report names the run-cumulative scope')
 assert.ok(report.some((line) => line.includes('快取讀 8,000')), 'a reported cache split is printed')
 assert.ok(report.some((line) => line.startsWith('成本：')), 'a priced run prints its cost')
 assert.ok(report.some((line) => line.includes('（6%）')), 'a known window prints the ratio')
@@ -460,8 +461,8 @@ assert.ok(contextUsageReportLines(running).some((line) => line.includes('執行�
 assert.ok(contextUsageReportLines(partial).some((line) => line.includes('未載入')))
 
 // One microcopy, so two surfaces cannot render one run two ways.
-assert.equal(contextUsageMicrocopy(loopedUsage), '40.9k tok (12%)')
-assert.equal(contextUsageMicrocopy(noWindow), '110 tok', 'no window, no ratio — but still the count')
+assert.equal(contextUsageMicrocopy(loopedUsage), '本次執行累積 40.9k tok (12%)')
+assert.equal(contextUsageMicrocopy(noWindow), '本次執行累積 110 tok', 'no window, no ratio — but still the count')
 assert.equal(contextUsageMicrocopy(cli), '', 'a runner that measured nothing shows nothing')
 
 // ── Purity is a contract, not a hope ───────────────────────────────────────
@@ -469,6 +470,9 @@ const source = await readFile(resolve(import.meta.dirname, '../src/agent/context
 for (const forbidden of [/Date\.now/, /Math\.random/, /useState|useStore|zustand/, /require\(|await import\(/, /window\./, /localStorage/]) {
   assert.doesNotMatch(source, forbidden, `the context-usage projection must stay pure: ${forbidden}`)
 }
+const panelSource = await readFile(resolve(import.meta.dirname, '../src/components/ContextUsagePanel.tsx'), 'utf8')
+assert.ok(panelSource.includes('>本次執行累積</span>'), 'the expanded panel names the cumulative scope')
+assert.ok(panelSource.includes('本次執行累積會加總每次模型呼叫'), 'the expanded panel explains how accumulation works')
 
 // ── The live refresher keeps its lifecycle contract (effort: subscription-surface-hardening #04) ──
 // Polling is a self-heal over the push stream; its writes must never resurrect

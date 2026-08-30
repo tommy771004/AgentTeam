@@ -97,7 +97,7 @@ export function createAgentLifecycleEvent(input: AgentLifecycleEvent): AgentLife
 }
 
 const SAME_RUN_TRANSITIONS: Record<AgentLifecycleState, ReadonlySet<AgentLifecycleState>> = {
-  admitted: new Set(['queued', 'running', 'cancelled', 'interrupted', 'failed']),
+  admitted: new Set(['queued', 'running', 'blocked', 'cancelled', 'interrupted', 'failed']),
   queued: new Set(['running', 'cancelled', 'interrupted', 'failed']),
   running: new Set(['waiting-approval', 'blocked', 'completed', 'failed', 'cancelled', 'interrupted']),
   'waiting-approval': new Set(['running', 'blocked', 'failed', 'cancelled', 'interrupted']),

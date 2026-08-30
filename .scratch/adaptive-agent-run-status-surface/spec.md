@@ -14,9 +14,9 @@ Agent 執行中的側欄目前把三種不同層級的資訊混在一起：短�
 
 將第一區明確命名為「執行狀態」，只由 trusted Host/runtime lifecycle 事件投影一個短句 phase，例如準備、分析、搜尋、讀取專案、修改檔案、執行工具、驗證、整理回覆、等待核准、等待輸入、等待登入、完成、取消或失敗。區塊可顯示目前動作、經過時間與最後更新時間；只有 Host 提供可確定的總量時才顯示百分比。模型自由文字、instructions、context bodies、絕對路徑與 capability revision 不得成為狀態文案來源。
 
-第二區改為自適應內容，而非永遠顯示「工作狀態」。Goal-based builtin run 且有可靠 Host Working State 時顯示「任務進度」，以穩定 milestones 呈現 pending、current、done 與 blocked；沒有可靠 goals 的 turn-based 或 External CLI run 顯示「最近活動」，列出最近三至五筆可信工具／runtime 事件；等待核准、登入或輸入時顯示「需要你處理」與唯一清楚動作；terminal run 顯示「執行摘要」，整理結果、變更、驗證與失敗原因。簡單單步任務沒有第二層資訊時，整區隱藏。
+第二區改為自適應內容，而非永遠顯示「工作狀態」。Agent 透過 Host `update_plan`／外部 runner plan event 回傳 structured run tasks 時顯示「任務進度」，以 `docs/ui/Task Rows.md` 的互動語彙呈現 pending、active、done 與 failed；沒有 structured tasks 時顯示「最近活動」，列出最近三至五筆可信工具／runtime 事件。Working State objective、admitted request、reference history 與 constraints 永遠不能退化成 task milestone。等待核准、登入或輸入時顯示「需要你處理」與唯一清楚動作；terminal run 顯示「執行摘要」，整理結果、變更、驗證與失敗原因。簡單單步任務沒有第二層資訊時，整區隱藏。
 
-建立一個純 UI Projection contract，依 frozen runner capability、run lifecycle、Host Working State 與 bounded activity/settlement events 選擇 variant。它不建立第二份 task state，也不從 transcript 或 instruction bodies 推測 goals。Builtin 的完成狀態仍以 Checker-backed Working State 為準；External CLI 只陳述觀察到的 activity 與 process outcome，不宣稱 Host 驗證。
+建立一個純 UI Projection contract，依 frozen runner capability、run lifecycle、Host-carried structured plan 與 bounded activity/settlement events 選擇 variant。它不建立第二份 task state，也不從 transcript、Working State objective 或 instruction bodies 推測 tasks。任務清單的勾選表示 Agent 回報的 plan 狀態；Builtin 是否真正完成仍以 Checker-backed Working State 為準，並保留在 owning diagnostics。External CLI 只陳述觀察到的 plan/activity 與 process outcome，不宣稱 Host 驗證。
 
 把 `Host 已驗證`、revision、runner kind、instruction source/hashes、constraints 與 evidence identities 收進收合的「執行資訊」或既有軌跡／context surface。預設狀態 UI 至多顯示 bounded 的來源數量或來源名稱，不顯示 instruction bodies。所有 live status 更新使用安靜的 status announcement；頻繁 activity 不逐筆打擾輔助科技。
 
@@ -51,10 +51,11 @@ Agent 執行中的側欄目前把三種不同層級的資訊混在一起：短�
 ## Implementation Decisions
 
 - **Two-layer information model.** The primary layer is volatile Execution Status; the optional secondary layer is durable Task Progress, bounded Recent Activity, Needs Your Attention, or Execution Summary.
-- **Projection authority.** The renderer performs a deterministic, read-only UI Projection from Host-owned lifecycle, Working State, frozen runner capability, activity, approval, authentication and settlement facts. It does not infer state from transcript text.
+- **Projection authority.** The renderer performs a deterministic, read-only UI Projection from Host-owned lifecycle, Host-carried structured Agent plan, frozen runner capability, activity, approval, authentication and settlement facts. It does not infer tasks from transcript text, admitted objective or Working State prose.
 - **Execution Status vocabulary.** Use a bounded product vocabulary for preparing, analyzing, searching, reading the project, editing, running a tool, validating, composing, waiting for approval, waiting for input, waiting for authentication, completed, cancelled and failed. Unknown live states degrade to a neutral running label.
 - **No free-text status source.** Objective, assistant messages, instruction snapshot bodies, constraints, logs and raw tool output cannot populate the primary status label.
-- **Goal-based variant.** Show Task Progress only when the frozen capability snapshot and current Host projection establish reliable Working State. Goal ordering and completion meaning remain Host-owned.
+- **Structured-plan variant.** Show Task Progress only from Agent-returned structured run tasks carried by the Host/runner plan event. The plan is presentation state, not Checker evidence; Working State keeps owning verified completion but does not supply milestone copy.
+- **Task Row lifecycle.** Live tasks use capsule rows; archived summaries use list rows. Stable task id, bounded short meta and bounded expandable child details may flow from the Agent-authored structured plan through live, reload fallback and terminal archive. Animations never advance status, and no detail may be synthesized from prompt, transcript or raw tool output.
 - **Activity variant.** When reliable goals are absent, show the most recent three to five trusted, user-comprehensible actions. Coalesce repeated low-value events and exclude reasoning text, prompts, instructions, tokens and raw output.
 - **Attention variant precedence.** Approval, authentication and user-input requirements take precedence over progress/activity because the run cannot proceed without the user. Show one explicit action and preserve detailed policy in the existing approval surface.
 - **Terminal variant precedence.** Completed, cancelled and failed runs show Execution Summary. The summary contains bounded outcomes and verification facts; it does not reinterpret External CLI process success as Checker-backed completion.

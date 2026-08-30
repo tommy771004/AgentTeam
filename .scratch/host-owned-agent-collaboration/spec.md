@@ -1,6 +1,6 @@
 # Host-owned Agent Collaboration Lifecycle
 
-> 狀態：`可交給代理`
+> 狀態：`resolved（2026-08-30；本機 qualification 完成；signed/notarized publication 仍需外部 Apple credentials）`
 
 ## Problem Statement
 
@@ -149,19 +149,19 @@ child final text 只是一份 observation。父層要把 delegated goal 標為�
 | # | Ticket | Blocked by |
 |---|---|---|
 | 01 | [Agent tree 與 lifecycle read model](issues/01-agent-tree-lifecycle-read-model.md) — 已完成 | — |
-| 02 | [統一 Child Pi Session spawn admission](issues/02-unified-child-spawn-admission.md) | 01 |
-| 03 | [Durable queue-only agent mailbox](issues/03-durable-agent-mailbox.md) | 02 |
-| 04 | [Follow-up task 與 profile continuity](issues/04-followup-profile-continuity.md) | 03 |
-| 05 | [Event-driven wait 與 mailbox wake-up](issues/05-event-driven-agent-wait.md) | 03 |
-| 06 | [One-hop child completion delivery](issues/06-one-hop-child-completion.md) | 03, 05 |
-| 07 | [Safe interrupt 與 descendant cancellation](issues/07-safe-interrupt-cascade-cancellation.md) | 02, 06 |
-| 08 | [Agent retention、ack、close 與 recovery](issues/08-agent-retention-recovery.md) | 06, 07 |
-| 09 | [Host-owned write scope 與 conflict notification](issues/09-write-scope-conflict-notification.md) | 02, 03 |
-| 10 | [Verified worktree isolation](issues/10-verified-worktree-isolation.md) | 09 |
-| 11 | [Sibling-settled Checker adoption](issues/11-sibling-settled-checker-adoption.md) | 06, 09, 10 |
-| 12 | [對話中的 Agent Work Tree UI](issues/12-agent-work-tree-ui.md) | 01, 06, 07, 09, 11 |
-| 13 | [External CLI collaboration capability honesty](issues/13-external-cli-collaboration-honesty.md) | 04, 06 |
-| 14 | [Renderer delegation expand–contract 收口](issues/14-renderer-delegation-contract.md) | 04, 07, 10, 11, 13 |
-| 15 | [真實 Pi Core collaboration release qualification](issues/15-real-pi-collaboration-qualification.md) | 08, 10, 11, 12, 14 |
+| 02 | [統一 Child Pi Session spawn admission](issues/02-unified-child-spawn-admission.md) — 實作完成 | 01 |
+| 03 | [Durable queue-only agent mailbox](issues/03-durable-agent-mailbox.md) — 實作完成 | 02 |
+| 04 | [Follow-up task 與 profile continuity](issues/04-followup-profile-continuity.md) — 實作完成 | 03 |
+| 05 | [Event-driven wait 與 mailbox wake-up](issues/05-event-driven-agent-wait.md) — 實作完成 | 03 |
+| 06 | [One-hop child completion delivery](issues/06-one-hop-child-completion.md) — 實作完成 | 03, 05 |
+| 07 | [Safe interrupt 與 descendant cancellation](issues/07-safe-interrupt-cascade-cancellation.md) — 實作完成 | 02, 06 |
+| 08 | [Agent retention、ack、close 與 recovery](issues/08-agent-retention-recovery.md) — 實作完成 | 06, 07 |
+| 09 | [Host-owned write scope 與 conflict notification](issues/09-write-scope-conflict-notification.md) — 實作完成 | 02, 03 |
+| 10 | [Verified worktree isolation](issues/10-verified-worktree-isolation.md) — 實作完成 | 09 |
+| 11 | [Sibling-settled Checker adoption](issues/11-sibling-settled-checker-adoption.md) — 實作完成 | 06, 09, 10 |
+| 12 | [對話中的 Agent Work Tree UI](issues/12-agent-work-tree-ui.md) — 實作完成 | 01, 06, 07, 09, 11 |
+| 13 | [External CLI collaboration capability honesty](issues/13-external-cli-collaboration-honesty.md) — 實作完成 | 04, 06 |
+| 14 | [Renderer delegation expand–contract 收口](issues/14-renderer-delegation-contract.md) — 實作完成 | 04, 07, 10, 11, 13 |
+| 15 | [真實 Pi Core collaboration release qualification](issues/15-real-pi-collaboration-qualification.md) — 待最終單次驗證 | 08, 10, 11, 12, 14 |
 
-**Frontier:** 01 已完成；02 已解除阻擋，可依 blocking edges 繼續推進。
+**Frontier:** 01–14 已完成實作；15 依使用者要求只在全部修改完成後執行一次完整 smoke，失敗項目再集中修復。

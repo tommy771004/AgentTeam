@@ -64,7 +64,10 @@ const verifyTaskRows = async (browser, origin) => {
         h('ul', { 'aria-label': '任務計畫', className: 'overflow-hidden rounded-xl bg-surface' },
           h(RunTaskRow, { key: 'archived', index: 0, text: '執行已結束的未完成步驟', status: 'active', variant: 'list' }),
           h(RunTaskRow, { key: 'failed', index: 1, text: '檢查檔案', status: 'failed', variant: 'list' }),
-          h(RunTaskRow, { key: 'done', index: 2, text: '載入設定', status: 'done', variant: 'list' }),
+          h(RunTaskRow, {
+            key: 'done', index: 2, text: '載入設定', status: 'done', variant: 'list', amount: '2 files',
+            details: [{ label: '讀取目前設定', meta: 'done' }, { label: '套用執行快照', meta: 'done' }],
+          }),
         ),
       ))
     }
@@ -100,6 +103,10 @@ const verifyTaskRows = async (browser, origin) => {
   const archive = page.getByRole('list', { name: '任務計畫', exact: true })
   assert.equal(await archive.locator('.animate-spin').count(), 0, 'archived active status never spins')
   assert.match(await archive.textContent(), /未完成/)
+  const archivedDone = archive.getByRole('button', { name: /載入設定/ })
+  assert.match(await archivedDone.innerText(), /2 files/)
+  await archivedDone.click()
+  assert.match(await archive.locator('[data-task-status="done"]').filter({ hasText: '載入設定' }).innerText(), /讀取目前設定.*套用執行快照/s)
   assert.match(await rows.textContent(), /已略過/)
   await first.click()
   const screenshots = await mkdtemp(join(tmpdir(), 'agentteam-task-rows-'))

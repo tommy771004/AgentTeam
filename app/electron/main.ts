@@ -322,7 +322,7 @@ const piHostSupervisor = new PiHostSupervisor(async () => {
   })
 },
   {
-    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1'],
+    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1'],
     serviceHandler: runPiHostMainService,
   },
 )
@@ -2358,10 +2358,19 @@ ipcMain.handle('pi-host:instructions:export', async () => ({ bundle: await piHos
 ipcMain.handle('pi-host:instructions:import-preview', async (_evt, bundle: unknown) => ({ preview: await piHostSupervisor.previewInstructionImport(bundle) }))
 ipcMain.handle('pi-host:instructions:import-apply', async (_evt, bundle: unknown, expectedRevision: number) => ({ instructions: await piHostSupervisor.applyInstructionImport(bundle, expectedRevision) }))
 ipcMain.handle('pi-host:sessions:create', async (_evt, title?: string, threadId?: string) => piHostSupervisor.createSession(title, threadId))
-ipcMain.handle('pi-host:sessions:create-child', async (_evt, input: Record<string, unknown>) => piHostSupervisor.createChildSession(input || {}))
 ipcMain.handle('pi-host:sessions:list', async () => ({ sessions: await piHostSupervisor.listSessions() }))
 ipcMain.handle('pi-host:sessions:record', async (_evt, sessionId: string, before?: number, limit?: number) => ({ page: await piHostSupervisor.readSessionRecord(sessionId, before, limit) }))
 ipcMain.handle('pi-host:agents:list', async (_evt, scope: { rootAgentId?: string; agentId?: string }) => piHostSupervisor.listAgentTree(scope || {}))
+ipcMain.handle('pi-host:agents:spawn', async (_evt, input: Record<string, unknown>) => piHostSupervisor.communicateWithAgent('agents/spawn', input || {}))
+ipcMain.handle('pi-host:agents:send', async (_evt, input: Record<string, unknown>) => piHostSupervisor.communicateWithAgent('agents/send', input || {}))
+ipcMain.handle('pi-host:agents:mailbox', async (_evt, input: Record<string, unknown>) => piHostSupervisor.communicateWithAgent('agents/mailbox', input || {}))
+ipcMain.handle('pi-host:agents:ack', async (_evt, input: Record<string, unknown>) => piHostSupervisor.communicateWithAgent('agents/ack', input || {}))
+ipcMain.handle('pi-host:agents:follow-up', async (_evt, input: Record<string, unknown>) => piHostSupervisor.communicateWithAgent('agents/follow-up', input || {}))
+ipcMain.handle('pi-host:agents:wait', async (_evt, input: Record<string, unknown>) => piHostSupervisor.communicateWithAgent('agents/wait', input || {}))
+ipcMain.handle('pi-host:agents:lease:resolve', async (_evt, input: Record<string, unknown>) => piHostSupervisor.communicateWithAgent('agents/lease/resolve', input || {}))
+ipcMain.handle('pi-host:agents:interrupt', async (_evt, input: Record<string, unknown>) => piHostSupervisor.communicateWithAgent('agents/interrupt', input || {}))
+ipcMain.handle('pi-host:agents:cancel', async (_evt, input: Record<string, unknown>) => piHostSupervisor.communicateWithAgent('agents/cancel', input || {}))
+ipcMain.handle('pi-host:agents:close', async (_evt, input: Record<string, unknown>) => piHostSupervisor.communicateWithAgent('agents/close', input || {}))
 ipcMain.handle('pi-host:runs:list', async () => ({ queue: await piHostSupervisor.listQueuedRuns() }))
 ipcMain.handle('pi-host:runs:active', async () => piHostSupervisor.listAttachmentRuns())
 ipcMain.handle('pi-host:runs:attach', async (_evt, runId: string, before?: number, limit?: number) => ({ page: await piHostSupervisor.attachRun(runId, before, limit) }))
@@ -2369,7 +2378,9 @@ ipcMain.handle('pi-host:runs:finalize-claim', async (_evt, runId: string, claima
 ipcMain.handle('pi-host:runs:finalize-complete', async (_evt, runId: string, claimantId: string, claimEpoch: number, finalOutcome: import('../src/agent/runLearningSettlement.ts').RunLearningFinalOutcome) => piHostSupervisor.completeRunFinalization(runId, claimantId, claimEpoch, finalOutcome))
 ipcMain.handle('pi-host:runs:ack', async (_evt, runId: string) => ({ runId, resolved: await piHostSupervisor.acknowledgeRun(runId) }))
 ipcMain.handle('pi-host:runs:enqueue', async (_evt, input: Record<string, unknown>) => ({ queue: await piHostSupervisor.enqueueRun(input || {}) }))
-ipcMain.handle('pi-host:runs:cancel', async (_evt, runId: string) => ({ queue: await piHostSupervisor.cancelQueuedRun(runId) }))
+ipcMain.handle('pi-host:runs:cancel', async (_evt, runId: string, expectedRevision?: number) => piHostSupervisor.cancelQueuedRun(runId, expectedRevision))
+ipcMain.handle('pi-host:runs:update', async (_evt, input: { runId: string; prompt: string; expectedRevision: number }) => piHostSupervisor.updateQueuedRun(input))
+ipcMain.handle('pi-host:runs:reorder', async (_evt, input: { sessionId: string; runIds: string[]; expectedRevision: number }) => piHostSupervisor.reorderQueuedRuns(input))
 ipcMain.handle('pi-host:runs:claim', async (_evt, runId?: string) => piHostSupervisor.claimQueuedRun(runId))
 ipcMain.handle('pi-host:runs:settle', async (_evt, runId: string, settlement: PiTurnSettlement) => piHostSupervisor.settleQueuedRun(runId, settlement))
 ipcMain.handle('pi-host:resources:list', async () => ({ resources: await piHostSupervisor.listResources() }))
@@ -2487,7 +2498,7 @@ ipcMain.handle('pi-host:sessions:reset', async (_evt, sessionId: string) => piHo
 ipcMain.handle('pi-host:sessions:archive', async (_evt, sessionId: string) => piHostSupervisor.archiveSession(sessionId))
 ipcMain.handle('pi-host:sessions:compact', async (_evt, sessionId: string) => piHostSupervisor.compactSession(sessionId))
 ipcMain.handle('pi-host:tools:execute', async (_evt, input: { tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash' | 'code' | 'mcp'; params?: Record<string, unknown> }) => piHostSupervisor.executeTool(input.tool, input.params || {}))
-ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; pluginExecution?: unknown }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { contextPolicy: input.contextPolicy, pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, timeoutMs: input.timeoutMs, mode: input.mode, queue: input.queue, pluginExecution: input.pluginExecution }))
+ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; clientMessageId?: string; expectedActiveRunId?: string; pluginExecution?: unknown }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { contextPolicy: input.contextPolicy, pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, timeoutMs: input.timeoutMs, mode: input.mode, queue: input.queue, clientMessageId: input.clientMessageId, expectedActiveRunId: input.expectedActiveRunId, pluginExecution: input.pluginExecution }))
 ipcMain.handle('pi-host:turn:cancel', async (_evt, runId: string) => piHostSupervisor.cancelTurn(runId))
 ipcMain.handle('pi-host:turn:interrupt', async (_evt, input: { runId: string; reason?: 'user' | 'timeout' }) => piHostSupervisor.interruptTurn(input.runId, input.reason))
 

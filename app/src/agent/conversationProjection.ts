@@ -11,12 +11,11 @@
  * it runs on live turns and on replayed records alike.
  */
 import { turnRecordEntries, type TurnRecord, type TurnRecordEntry } from './turnRecord.ts'
-import { formatMemoryRecallNotice } from './memoryRecallPresentation.ts'
 import { presentedToolSummary } from './tools/toolPresentation.ts'
 
 export type ConversationRow =
   | { kind: 'user'; id: string; seq: number; turn: number; content: string }
-  | { kind: 'assistant'; id: string; seq: number; turn: number; content: string }
+  | { kind: 'assistant'; id: string; seq: number; turn: number; content: string; phase?: 'commentary' | 'final_answer' }
   /**
    * What the model thought, in the place it thought it.
    *
@@ -53,6 +52,8 @@ type ToolCallEntry = Extract<TurnRecordEntry, { kind: 'tool-call' }>
 type ApprovalEntry = Extract<TurnRecordEntry, { kind: 'approval' }>
 
 const NON_CONVERSATION_ENTRY_KINDS = new Set<TurnRecordEntry['kind']>([
+  'agent-lifecycle',
+  'agent-collaboration',
   'provider-prompt',
   'provider-history',
   'tool-evidence',
@@ -66,6 +67,18 @@ const NON_CONVERSATION_ENTRY_KINDS = new Set<TurnRecordEntry['kind']>([
   'memory-control-lifecycle',
   'skill-invocation',
   'skill-context',
+  'instruction-snapshot',
+  'memory-recall',
+])
+
+/** Structured Host bookkeeping retained in the record, never chat copy. */
+const INTERNAL_NOTICE_TOPICS = new Set([
+  'plan-gate-passed',
+  'agent-mode-transition',
+  'continuation-selected',
+  'runtime-settings-effective',
+  'agent-mode',
+  'instruction-context-budget',
 ])
 
 function conversationToolCallRow(entry: ToolCallEntry): Extract<ConversationRow, { kind: 'tool' }> {
@@ -79,7 +92,7 @@ function conversationToolCallRow(entry: ToolCallEntry): Extract<ConversationRow,
     callId: entry.callId,
     ...(entry.path ? { detail: entry.path } : {}),
     ...(presented?.title ? { title: presented.title } : {}),
-    ...(presented?.path && !entry.path ? { detail: presented.path } : {}),
+    ...(presented?.detail ? { detail: presented.detail } : presented?.path && !entry.path ? { detail: presented.path } : {}),
     ...(presented?.diff ? { diff: presented.diff } : {}),
     ...(presented?.added !== undefined ? { added: presented.added } : {}),
     ...(presented?.removed !== undefined ? { removed: presented.removed } : {}),
@@ -93,6 +106,10 @@ function applyApprovalRow(rows: ConversationRow[], entry: ApprovalEntry): void {
     if (entry.reason) anchor.approvalReason = entry.reason
     return
   }
+  // A successful decision without its call is still retained in the Turn
+  // Record for audit, but it has no useful task-conversation content on its
+  // own. In particular, do not surface the raw protocol word `allow`.
+  if (entry.decision === 'allow') return
   rows.push({
     id: `e${entry.seq}`,
     seq: entry.seq,
@@ -120,7 +137,7 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
         rows.push({ ...base, kind: 'user', content: entry.content })
         break
       case 'assistant-text':
-        rows.push({ ...base, kind: 'assistant', content: entry.content })
+        rows.push({ ...base, kind: 'assistant', content: entry.content, ...(entry.phase ? { phase: entry.phase } : {}) })
         break
       case 'reasoning':
         rows.push({ ...base, kind: 'reasoning', content: entry.content })
@@ -152,16 +169,13 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
         // The decision belongs on the invocation's own line: same callId, one
         // action, one row. It always follows the call it decided, so the first
         // tool row with that callId is the anchor — on a live page and on a
-        // replayed one alike. A decision with no recorded call (an older
-        // build's record, a transport gap) still reports, as a notice.
+        // replayed one alike. A denial with no recorded call (an older build's
+        // record, a transport gap) still reports as a notice.
         applyApprovalRow(rows, entry)
         break
       }
       case 'compaction':
         rows.push({ ...base, kind: 'notice', content: `已壓縮 ${entry.replaced} 則上下文` })
-        break
-      case 'memory-recall':
-        rows.push({ ...base, kind: 'notice', content: formatMemoryRecallNotice(entry) })
         break
       case 'notice':
         // The entry kind whose whole purpose is to be read. It used to fall
@@ -169,7 +183,9 @@ export function projectConversationRows(record: TurnRecord | undefined): Convers
         // which hid the very fact it was written to show — a skills-unavailable
         // warning, say. A known kind reaching that arm is the guard misfiring,
         // not graceful degradation.
-        rows.push({ ...base, kind: 'notice', content: entry.text })
+        if (!INTERNAL_NOTICE_TOPICS.has(entry.topic)) {
+          rows.push({ ...base, kind: 'notice', content: entry.text })
+        }
         break
       default:
         rows.push({ ...base, kind: 'notice', content: unknownEntryLabel(entry) })
@@ -187,9 +203,9 @@ function unknownEntryLabel(entry: TurnRecordEntry): string {
 /**
  * The answer a record settled on.
  *
- * The LAST assistant row, for the same reason the Host derives it that way: a
- * tool-using turn narrates before it works and concludes after, so the first
- * thing it said is the preamble, never the answer.
+ * Prefer the LAST provider-authored final_answer. Records from providers and
+ * releases without phase metadata fall back to their last unphased assistant
+ * row. A commentary-only run has no published answer yet.
  *
  * Reasoning rows are deliberately not eligible. A thought is not an answer,
  * however confidently it ends, and letting one become the published answer
@@ -197,6 +213,7 @@ function unknownEntryLabel(entry: TurnRecordEntry): string {
  */
 export function conversationAnswer(record: TurnRecord | undefined): string | undefined {
   const answers = projectConversationRows(record).filter((row): row is Extract<ConversationRow, { kind: 'assistant' }> => row.kind === 'assistant')
-  const last = answers[answers.length - 1]
+  const last = answers.filter((row) => row.phase === 'final_answer').at(-1)
+    ?? answers.filter((row) => row.phase === undefined).at(-1)
   return last?.content.trim() ? last.content : undefined
 }

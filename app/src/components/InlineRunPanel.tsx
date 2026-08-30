@@ -11,7 +11,7 @@ import {
 import { recordRunnerDeclaration, TURN_RECORD_FORMAT_VERSION } from '../agent/turnRecord'
 import { useAgentStore } from '../store/agentStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
-import { useRunActivityStore } from '../store/runActivityStore'
+import { useRunActivityStore, type RunPresentation } from '../store/runActivityStore'
 import { ReasoningFocusPanel } from './ReasoningFocusPanel'
 import { ContextUsagePanel } from './ContextUsagePanel'
 import { TrajectoryPanel } from './TrajectoryPanel'
@@ -20,12 +20,12 @@ import { formatTokensCompact } from '../agent/contextUsageView'
 import { useRunContextUsage } from '../hooks/useRunContextUsage'
 import { useRunUsageRefresher } from '../hooks/useRunUsageRefresher'
 import type { TurnRecordEntry } from '../agent/turnRecord'
-import { useThreadStore } from '../store/threadStore'
+import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { useWorkingStateProjectionStore } from '../store/workingStateProjectionStore'
 import type { AgentState } from '../agent/types'
 import type { ReviewTarget } from '../agent/reviewContract.ts'
 import { WorkingStateDiagnostics } from './WorkingStateView'
-import { projectRunStatusSurface } from '../agent/runStatusSurface.ts'
+import { projectRunStatusSurface, type RunStatusSurfaceInput } from '../agent/runStatusSurface.ts'
 import { RunStatusSurface } from './RunStatusSurface.tsx'
 
 /**
@@ -40,7 +40,25 @@ const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 
 // selector fallback breaks Object.is identity every render and triggers
 // "Maximum update depth exceeded" (React getSnapshot-must-be-cached loop).
 const EMPTY_RECORD_ENTRIES: TurnRecordEntry[] = []
-const EMPTY_ACTIVITY = { active: false, tasks: [], events: [], fileChanges: [], statusLine: '', thought: '', startedAt: 0, updatedAt: 0, phase: 'starting' as const, terminal: null, interaction: null, stopping: false, recordEntries: EMPTY_RECORD_ENTRIES, recordTotal: 0 } as const
+const EMPTY_ACTIVITY = { active: false, tasks: [], events: [], fileChanges: [], statusLine: '', thought: '', startedAt: 0, updatedAt: 0, phase: 'starting' as const, terminal: null, interaction: null, authenticationRequired: false, stopping: false, recordEntries: EMPTY_RECORD_ENTRIES, recordTotal: 0 } as const
+
+function activityWithPersistedPlan(
+  activity: RunPresentation | typeof EMPTY_ACTIVITY,
+  persistedRunPlan?: ThreadPlanItem[],
+): RunStatusSurfaceInput['activity'] {
+  if (activity.tasks.length > 0 || !persistedRunPlan?.length) return activity
+  return {
+    ...activity,
+    tasks: persistedRunPlan.map((task) => ({
+      id: task.id,
+      text: task.text,
+      status: task.status,
+      at: Date.parse(task.at) || activity.updatedAt,
+      ...(task.meta ? { meta: task.meta } : {}),
+      ...(task.details ? { details: task.details } : {}),
+    })),
+  }
+}
 
 // The trajectory section remembers being opened across remounts — repeated
 // walks through a long run should not re-collapse it every time.
@@ -267,6 +285,7 @@ export function InlineRunPanel({
   const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
   const activity = useRunActivityStore((s) => s.presentations[runId]) || EMPTY_ACTIVITY
+  const persistedRunPlan = useThreadStore((state) => state.threads.find((thread) => thread.id === threadId)?.runPlan)
   const workingStateProjection = useWorkingStateProjectionStore((state) => state.byRunId[runId])
   const approvalPending = usePermissionAskStore((s) =>
     Boolean(
@@ -311,7 +330,7 @@ export function InlineRunPanel({
     lifecycle,
     capabilities: runnerCaps,
     isExternal,
-    activity,
+    activity: activityWithPersistedPlan(activity, persistedRunPlan),
     workingState: workingStateProjection,
     approvalPending,
   })
@@ -417,7 +436,7 @@ export function InlineRunPanel({
                   </p>
                   {isExternal ? (
                     <p className="mt-1 text-[10px] leading-snug text-orange">
-                      外部執行不代表內建 DoD、Verified Working State、Skill preflight 或 Checker 已執行。
+                      這是外部 CLI 子程序，不是具 durable mailbox 的子智慧體；send／wait 與 provider session reuse 不可用，follow-up 會建立可稽核的新 execution。外部執行也不代表內建 DoD、Verified Working State、Skill preflight 或 Checker 已執行。
                     </p>
                   ) : runnerGuarantee === 'Unavailable / degraded' ? (
                       <p className="mt-1 text-[10px] leading-snug text-orange">

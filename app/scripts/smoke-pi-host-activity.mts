@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { mapPiHostEventToActivity } from '../src/agent/piHostActivity.ts'
+import { applyPiHostActivityUpdate, mapPiHostEventToActivity } from '../src/agent/piHostActivity.ts'
+import { useRunActivityStore } from '../src/store/runActivityStore.ts'
 
 const text = mapPiHostEventToActivity({
   event: 'host/turn-item',
@@ -87,5 +88,40 @@ const turnEnd = mapPiHostEventToActivity({
   payload: { runId: 'run-1', item: { type: 'turn_end' } },
 })
 assert.equal(turnEnd?.phase, 'finalizing')
+
+const plan = mapPiHostEventToActivity({
+  event: 'host/plan-updated',
+  payload: {
+    runId: 'run-1',
+    sessionId: 'session-1',
+    steps: [
+      { id: 'inspect', title: '讀取既有投影', status: 'done' },
+      {
+        id: 'fix',
+        title: '修正任務進度',
+        status: 'in_progress',
+        meta: '2 files',
+        details: [{ label: '接上 Task Row', meta: 'done' }],
+      },
+    ],
+  },
+})
+assert.deepEqual(plan, {
+  kind: 'plan',
+  runId: 'run-1',
+  tasks: [
+    { id: 'inspect', text: '讀取既有投影', status: 'done' },
+    { id: 'fix', text: '修正任務進度', status: 'active', meta: '2 files', details: [{ label: '接上 Task Row', meta: 'done' }] },
+  ],
+})
+useRunActivityStore.getState().clear()
+useRunActivityStore.getState().begin('run-1', 'thread-1')
+applyPiHostActivityUpdate(useRunActivityStore.getState(), plan!)
+assert.deepEqual(
+  useRunActivityStore.getState().getPresentation('run-1')?.tasks.map(({ id, text, status, meta, details }) => ({ id, text, status, ...(meta ? { meta } : {}), ...(details ? { details } : {}) })),
+  plan?.kind === 'plan' ? plan.tasks : [],
+  'Host plan update reaches the run-scoped task presentation',
+)
+useRunActivityStore.getState().clear()
 
 console.log('pi host activity events map to renderer progress updates')

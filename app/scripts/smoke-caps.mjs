@@ -322,6 +322,7 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   const background = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
+  const queuePump = fs.readFileSync(path.join(appRoot, 'src/agent/hostAgentQueuePump.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
   assert.match(types, /subAgentsEnabled: boolean/)
   assert.match(llm, /subAgentsEnabled: false/)
@@ -333,8 +334,10 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   assert.match(runExternal, /opts\.sourceKind === 'delegate'/)
   assert.match(runtime, /capability\.id !== 'delegate'/)
   assert.match(decision, /Sub Agent 功能目前已關閉/)
-  assert.match(delegate, /settings\.subAgentsEnabled !== true/)
-  assert.match(background, /背景委派未排入/)
+  assert.match(delegate, /Renderer delegation lifecycle 已凍結/)
+  assert.doesNotMatch(delegate, /\brunTask\s*\(/)
+  assert.match(background, /never starts work/)
+  assert.match(queuePump, /sourceKind: 'delegate'/)
   assert.match(settings, /title="啟用 Sub Agent"/)
 })
 
@@ -553,7 +556,7 @@ await test('Phase 3 item 1: taskRunCoordinator is the canonical ingress', async 
     'src/agent/subdesign/workspaceIntegration.ts',
     'src/components/RunContinuationActions.tsx',
     'src/components/subdesign/CritiqueTheater.tsx',
-    'src/agent/hermes/backgroundJobs.ts',
+    'src/agent/hostAgentQueuePump.ts',
   ]
   assert.match(coordinator, /async function coordinateTaskRun/)
   assert.doesNotMatch(coordinator, /export async function coordinateTaskRun/)
@@ -655,6 +658,7 @@ await test('Ticket 04: lifecycle ownership drift stays blocked at module seams',
 await test('Phase 3 item 6/7: background delegate links Archive once + hidden worker thread', async () => {
   const fs = await import('node:fs')
   const bg = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
+  const pump = fs.readFileSync(path.join(appRoot, 'src/agent/hostAgentQueuePump.ts'), 'utf8')
   const thread = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
   // The sidebar now groups by project; hidden-thread exclusion moved with the
   // grouping into its own pure module (covered by smoke-thread-project-groups).
@@ -662,9 +666,10 @@ await test('Phase 3 item 6/7: background delegate links Archive once + hidden wo
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunTypes.ts'), 'utf8')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(bg, /archiveRunId/)
-  assert.match(bg, /workerThread: true/)
-  assert.match(bg, /job\.archiveRunId/)
-  assert.match(bg, /Link-only|coordinator finalization already archived/i)
+  assert.match(bg, /never starts work/)
+  assert.match(pump, /workerThread: true/)
+  assert.match(pump, /runTask\(\{/)
+  assert.match(pump, /hostSessionId: claimed\.sessionId/)
   assert.match(thread, /hidden\?: boolean/)
   assert.match(thread, /t\.hidden/)
   assert.match(sidebar, /if \(thread\.hidden\) continue/)
@@ -832,7 +837,8 @@ await test('Phase 0: workflow baseline matrix stays recorded', async () => {
   const fs = await import('node:fs')
   const scenario = fs.readFileSync(path.join(appRoot, 'scripts/smoke-scenario-e2e.mjs'), 'utf8')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
-  const background = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
+  const queuePump = fs.readFileSync(path.join(appRoot, 'src/agent/hostAgentQueuePump.ts'), 'utf8')
+  const hostDomain = fs.readFileSync(path.join(appRoot, 'electron/piAgentCommunicationDomain.ts'), 'utf8')
   const baseline = {
     twoBuiltInRuns:
       /ADR3: independent thread runs/.test(scenario) &&
@@ -844,9 +850,9 @@ await test('Phase 0: workflow baseline matrix stays recorded', async () => {
     twoHitlAsks: /HITL asks must retain the originating run and thread/.test(scenario),
     queueOverflow: /overflow should drain after a slot frees/.test(scenario),
     backgroundDelegate:
-      /sourceKind: 'delegate'/.test(background) &&
-      /runTask\(\{/.test(background) &&
-      /archiveBackgroundJob\(/.test(background),
+      /sourceKind: 'delegate'/.test(queuePump) &&
+      /runTask\(\{/.test(queuePump) &&
+      /enqueuePiHostRun\(\{/.test(hostDomain),
   }
   assert.deepEqual(
     Object.entries(baseline).filter(([, present]) => !present).map(([name]) => name),
@@ -1812,7 +1818,7 @@ await test('P3: continueGoal + steer digest + chatHistory wiring', async () => {
   // engine behind the onGoalIncomplete/onGoalCleared ports.
   assert.match(continueGoalSrc, /buildContinueGoalSnapshot/)
   assert.match(threadStoreSrc, /onGoalIncomplete|continueGoal/)
-  assert.match(runExternal, /buildSteerPartialDigest/)
+  assert.match(runExternal, /buildTakeoverPartialDigest/)
   assert.match(runExternal, /continueGoal/)
   assert.match(runExternal, /佇列第/)
   assert.match(runDispatch, /buildChatHistoryContext/)
@@ -2123,8 +2129,10 @@ await test('drift guard: remaining hook points are passive-only and wired', asyn
     assert.match(hooks, new RegExp(`${point}: \\['log', 'notify'\\]`), `${point} passive-only`)
   }
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
-  assert.match(delegate, /'delegateStart'/)
-  assert.match(delegate, /emitDelegateHook\('delegateEnd', r\.ok\)/)
+  const hostDomain = fs.readFileSync(path.join(appRoot, 'electron/piAgentCommunicationDomain.ts'), 'utf8')
+  assert.match(delegate, /Production delegation must enter through Pi Host agents\/spawn/)
+  assert.match(hostDomain, /type: 'spawned'/)
+  assert.match(hostDomain, /recordCompletion/)
   const runExternal = readTaskRunRuntimeSource(fs)
   assert.match(runExternal, /point: 'userTurn'/)
 })
@@ -2146,8 +2154,10 @@ await test('drift guard: project hooks require folder trust and stay sanitized',
 await test('drift guard: delegate capability_mode stacks on role blocks; wait primitives wired', async () => {
   const fs = await import('node:fs')
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
-  assert.match(delegate, /blockedToolsForCapabilityMode\(input\.capabilityMode\)/)
-  assert.match(delegate, /roleBlocked/)
+  const hostDomain = fs.readFileSync(path.join(appRoot, 'electron/piAgentCommunicationDomain.ts'), 'utf8')
+  assert.doesNotMatch(delegate, /\brunTask\s*\(/)
+  assert.match(hostDomain, /isRestrictiveAgentPolicy\(parentPolicy, childPolicy\)/)
+  assert.match(hostDomain, /capabilities: profile\.capabilities \?\? profile\.activeTools/)
   const jobs = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
   assert.match(jobs, /export async function waitBackgroundJobs/)
   assert.match(jobs, /wait_any/)
@@ -2177,16 +2187,20 @@ await test('drift guard: metrics recorded at coordinator settle + guard decision
 await test('drift guard: persona resolution — role > persona > parent; unknown persona fails spawn', async () => {
   const fs = await import('node:fs')
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
-  assert.match(delegate, /settings\.delegatePersonas\?\.\[input\.persona\]/)
-  assert.match(delegate, /persona「\$\{input\.persona\}」不存在/)
-  assert.match(delegate, /roleResolved\.source === 'role'\s*\?\s*roleResolved\.model\s*:\s*persona\?\.model/)
+  const hostDomain = fs.readFileSync(path.join(appRoot, 'electron/piAgentCommunicationDomain.ts'), 'utf8')
+  assert.match(delegate, /Legacy renderer delegation contract/)
+  assert.match(hostDomain, /objective, role, profile, context, and depth are required/)
+  assert.match(hostDomain, /admittedChildProfile\(profile, childPolicy\)/)
 })
 
-await test('drift guard: worktree isolation falls back safely', async () => {
+await test('drift guard: Host worktree isolation fails closed', async () => {
   const fs = await import('node:fs')
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
-  assert.match(delegate, /worktreeCreate\?\.\(/)
-  assert.match(delegate, /回退共用 workspace/)
+  const authority = fs.readFileSync(path.join(appRoot, 'electron/piAgentWorkspaceAuthority.ts'), 'utf8')
+  assert.doesNotMatch(delegate, /worktreeCreate\?\.\(/)
+  assert.match(authority, /worktree', 'add'/)
+  assert.match(authority, /Isolated worktree creation failed/)
+  assert.doesNotMatch(authority, /fallback|回退共用 workspace/i)
   const bridge = fs.readFileSync(path.join(appRoot, 'electron/projectBridge.ts'), 'utf8')
   assert.match(bridge, /git worktree add -b/)
   assert.match(bridge, /git apply --3way/, 'apply 衝突失敗而非覆蓋')
@@ -2214,14 +2228,11 @@ await test('drift guard: the Pi path\'s live timeline is the record projection, 
   // must therefore reach its rows through the shared projection and through
   // nothing else.
   const feed = fs.readFileSync(path.join(appRoot, 'src/components/RunProcessFeed.tsx'), 'utf8')
-  const paging = fs.readFileSync(path.join(appRoot, 'src/hooks/useRunTimelinePaging.ts'), 'utf8')
   const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
-  assert.match(feed, /useRunTimelinePaging\(runId, recordEntries, recordTotal\)/,
-    'the feed sends the run\'s published record entries through the paging owner')
-  assert.match(paging, /for \(const entry of tail\) bySeq\.set\(entry\.seq, entry\)/,
-    'the paging owner keeps the published tail in its ordered record input')
-  assert.match(paging, /projectLiveTimeline\(entries, total,/,
-    'the timeline view is projected from the complete visible record window')
+  assert.match(feed, /entry\.turn === currentRecordTurn/,
+    'the feed keeps prior turns in chat scrollback rather than replaying them in the current task')
+  assert.match(feed, /projectLiveTimeline\(currentTurnEntries, currentTurnEntries\.length,/,
+    'the timeline view is projected from the current Turn Record turn')
   assert.match(feed, /runTimelineRows\(recordView, draftText\)/,
     'and its rows are the fold over that projection — not a second synthesis')
   assert.match(feed, /const hasRecordTimeline = recordTimeline\.length > 0/)
@@ -2356,7 +2367,7 @@ await test('Ticket 06: delegated goals remain parent-owned and CAS-checked', asy
   assert.doesNotMatch(statusDefinition, /policyMigration/, 'delegate_status remains a pure observation')
   assert.match(working, /evidence\.parentRunId !== state\.runId/)
   assert.match(working, /stale-goal-conflict/)
-  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 13/)
+  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 14/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-delegated-working-goal\.mts/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-delegated-goal-host\.mts/)
 })
@@ -2377,7 +2388,7 @@ await test('Ticket 07: state-changing Skill preflight is contract-bound and zero
   assert.match(host, /setPiSkillPreflightBridge\(/)
   assert.match(host, /createSkillPreflight\(/)
   assert.match(host, /kind: 'skill-invocation'/)
-  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 13/)
+  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 14/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-skill-preflight-pass-through\.mts/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-working-state-completion\.mts/)
 })
@@ -2396,7 +2407,7 @@ await test('Ticket 08: Skill match blocks the original call and injects one immu
   assert.match(toolHost, /fresh call identity/)
   assert.match(host, /settlement: 'not-executed'/)
   assert.match(host, /kind: 'skill-context'/)
-  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 13/)
+  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 14/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-skill-preflight-redraft\.mts/)
 })
 
@@ -2420,7 +2431,7 @@ await test('Ticket 09: Skill preflight retries are batch-bound and block paralle
   assert.ok(runtime.indexOf('commitPiPackExtensionBundle(sessionId, packBundle)') > runtime.indexOf('await existing.session.dispose?.()')
     && runtime.indexOf('commitPiPackExtensionBundle(sessionId, packBundle)') < runtime.indexOf('sessionRuntimes.set(sessionId, runtime)'),
   'the staged preflight catalog commits only after replacement succeeds and immediately before runtime publication')
-  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 13/)
+  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 14/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-skill-preflight-batch\.mts/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-skill-preflight-stop-replay\.mts/)
 })
@@ -2441,7 +2452,7 @@ await test('Ticket 10: each Task run freezes one active Memory-Control Package r
   assert.match(host, /memory-control\/v1\/package\/get/)
   assert.match(host, /governingPackage/)
   assert.match(record, /kind: 'memory-control-package'/)
-  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 13/)
+  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 14/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-memory-control-package-lifecycle\.mts/)
 })
 

@@ -77,7 +77,7 @@ try {
   const initialized = await waitFor((message) => message.id === 1)
   assert.deepEqual(initialized.result, {
     protocolVersion: PROTOCOL_VERSION,
-    capabilities: ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'capabilities'],
+    capabilities: ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', 'capabilities'],
     status: 'ready',
   })
 

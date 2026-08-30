@@ -3,18 +3,26 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const sourceFiles = [
+const rendererIngressFiles = [
   'src/App.tsx',
   'src/hooks/useSlashExecutor.ts',
-  'src/agent/hermes/backgroundJobs.ts',
-  'src/agent/hermes/delegate.ts',
 ]
 
-for (const relativePath of sourceFiles) {
+for (const relativePath of rendererIngressFiles) {
   const source = await readFile(resolve(root, relativePath), 'utf8')
   assert.match(source, /runTask\s*\(/, `${relativePath} must submit through runTask`)
   assert.doesNotMatch(source, /runExternalObjective|AgentSessionRuntime|dispatchThreadTask\s*\(/, `${relativePath} bypasses the canonical ingress`)
 }
+
+for (const relativePath of ['src/agent/hermes/backgroundJobs.ts', 'src/agent/hermes/delegate.ts']) {
+  const source = await readFile(resolve(root, relativePath), 'utf8')
+  assert.doesNotMatch(source, /runTask\s*\(/, `${relativePath} must remain a fail-closed compatibility projection`)
+  assert.doesNotMatch(source, /runExternalObjective|AgentSessionRuntime|dispatchThreadTask\s*\(/, `${relativePath} bypasses Host delegation ownership`)
+}
+
+const hostQueuePump = await readFile(resolve(root, 'src/agent/hostAgentQueuePump.ts'), 'utf8')
+assert.match(hostQueuePump, /runTask\s*\(/, 'Host Agent queue adapter must submit through runTask')
+assert.match(hostQueuePump, /sourceKind:\s*'delegate'/, 'Host Agent queue adapter must preserve delegate ingress identity')
 
 const coordinator = await readFile(resolve(root, 'src/agent/taskRunCoordinator.ts'), 'utf8')
 assert.match(coordinator, /const runId = normalized\.runId \|\| `run_\$\{uuid\(\)/)

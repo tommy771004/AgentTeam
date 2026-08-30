@@ -1,5 +1,6 @@
 import type {
   RunActivityEvent,
+  RunTaskItem,
 } from '../store/runActivityStore.ts'
 import type { RunLifecyclePhase, RunLifecycleView } from './runLifecycle.ts'
 import type { RunnerCapabilities } from './runners/types.ts'
@@ -8,8 +9,10 @@ import type { WorkingStateProjection } from './workingStateProjection.ts'
 export type RunStatusMilestone = {
   id: string
   description: string
-  status: 'pending' | 'current' | 'done' | 'blocked'
+  status: RunTaskItem['status']
   blocker?: string
+  meta?: string
+  details?: RunTaskItem['details']
 }
 
 export type RunSecondarySurface =
@@ -36,6 +39,8 @@ export type RunStatusSurfaceInput = {
     terminal: boolean | object | null
     updatedAt: number
     interaction: { kind: 'user' | 'approval' } | null
+    authenticationRequired?: boolean
+    tasks?: readonly RunTaskItem[]
   }
   workingState?: WorkingStateProjection
   approvalPending?: boolean
@@ -102,9 +107,7 @@ function attentionSurface(input: RunStatusSurfaceInput): RunSecondarySurface | u
   if (input.approvalPending || input.activity.interaction?.kind === 'approval' || input.lifecycle.phase === 'manual_intervention') {
     return { kind: 'attention', title: '需要你處理', attentionKind: 'approval', action: '查看核准要求並做出決定。' }
   }
-  const statusEvents = input.activity.events.filter((event) => event.kind === 'status').slice(-4)
-  const authenticationRequired = statusEvents.some((event) => /auth|oauth|sign.?in|log.?in|登入|驗證身分/i.test(`${event.title || ''} ${event.detail || ''}`))
-  if (authenticationRequired) {
+  if (input.activity.authenticationRequired === true) {
     return { kind: 'attention', title: '需要你處理', attentionKind: 'authentication', action: '完成登入後再繼續。' }
   }
   if (input.activity.interaction?.kind === 'user' || input.lifecycle.phase === 'awaiting_user') {
@@ -135,19 +138,18 @@ function terminalSurface(input: RunStatusSurfaceInput): RunSecondarySurface | un
 }
 
 function progressSurface(input: RunStatusSurfaceInput): RunSecondarySurface | undefined {
-  const state = input.workingState
-  if (!input.capabilities.workingState || state?.verification !== 'verified' || state.goals.length === 0) return undefined
-  const currentId = input.lifecycle.live
-    ? state.goals.find((goal) => goal.status === 'pending')?.id
-    : undefined
+  const tasks = input.activity.tasks || []
+  if (tasks.length === 0) return undefined
   return {
     kind: 'progress',
     title: '任務進度',
-    milestones: state.goals.map((goal) => ({
-      id: goal.id,
-      description: goal.description,
-      status: goal.status === 'pending' && goal.id === currentId ? 'current' : goal.status,
-      ...(goal.blocker ? { blocker: goal.blocker } : {}),
+    milestones: tasks.map((task) => ({
+      id: task.id,
+      description: task.text,
+      status: task.status,
+      ...(task.status === 'failed' ? { blocker: 'Agent 標記此項失敗' } : {}),
+      ...(task.meta ? { meta: task.meta } : {}),
+      ...(task.details ? { details: task.details } : {}),
     })),
   }
 }

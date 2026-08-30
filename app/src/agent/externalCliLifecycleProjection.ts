@@ -28,6 +28,8 @@ export type ExternalCliStreamProjection = {
   sessionPhase?: ExternalCliRunPhase
   terminalClassification?: ExternalCliTerminalClassification
   providerSessionId?: string
+  /** Host-authored blocking fact; UI must not infer this from provider prose. */
+  authenticationRequired?: boolean
 }
 
 export function externalLifecycleToStream(event: ExternalCliLifecycleEvent): ExternalCliStreamProjection {
@@ -51,7 +53,7 @@ export function externalLifecycleToStream(event: ExternalCliLifecycleEvent): Ext
     case 'diagnostic':
       return { ...base, kind: event.severity === 'error' ? 'error' : 'log', title: 'CLI 診斷', detail: event.detail, ok: event.severity !== 'error' }
     case 'connector_authentication_required':
-      return { ...base, kind: event.required ? 'error' : 'log', title: event.required ? 'Connector 驗證阻擋執行' : 'Connector 驗證提醒', detail: event.detail, ok: !event.required }
+      return { ...base, kind: event.required ? 'error' : 'log', title: event.required ? 'Connector 驗證阻擋執行' : 'Connector 驗證提醒', detail: event.detail, ok: !event.required, authenticationRequired: event.required }
     case 'waiting_for_user':
       return { ...base, kind: 'status', title: '等待你的回覆', detail: event.detail }
     case 'waiting_for_approval':

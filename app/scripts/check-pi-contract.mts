@@ -239,13 +239,17 @@ const requestDispatcher = piHostProtocol.slice(
   piHostProtocol.indexOf('export type PiHostDispatchOutcome'),
 )
 const protocolDomains = [
-  ['Session', 'electron/piHostSessionDomain.ts', 'handlePiHostSessionDomain', 'sessions/'],
-  ['Run', 'electron/piHostRunDomain.ts', 'handlePiHostRunDomain', 'runs/'],
-  ['Tool', 'electron/piHostToolDomain.ts', 'handlePiHostToolDomain', 'tools/'],
+  ['Session', 'electron/piHostSessionDomain.ts', 'handlePiHostSessionDomain', 'sessions/', undefined],
+  ['Run', 'electron/piHostRunDomain.ts', 'handlePiHostRunDomain', 'runs/', 'handleRunRequest'],
+  ['Tool', 'electron/piHostToolDomain.ts', 'handlePiHostToolDomain', 'tools/', undefined],
 ] as const
-for (const [label, file, owner, prefix] of protocolDomains) {
+for (const [label, file, owner, prefix, routerHelper] of protocolDomains) {
   assert.match(piHostProtocol, new RegExp(`from './${file.slice('electron/'.length, -3)}\\.ts'`), `${label} domain must be imported by the protocol router`)
-  assert.match(requestDispatcher, new RegExp(`\\b${owner}\\(`), `${label} domain must own its protocol route`)
+  const routeOwner = routerHelper
+    ? piHostProtocol.slice(piHostProtocol.indexOf(`function ${routerHelper}(`), piHostProtocol.indexOf(`function ${routerHelper === 'handleRunRequest' ? 'handleAgentRequest' : 'handlePiHostRequest'}(`))
+    : requestDispatcher
+  if (routerHelper) assert.match(requestDispatcher, new RegExp(`\\b${routerHelper}\\(`), `${label} router helper must remain reachable from the main dispatcher`)
+  assert.match(routeOwner, new RegExp(`\\b${owner}\\(`), `${label} domain must own its protocol route`)
   assert.match(read(file), new RegExp(prefix.replace('/', '\\/')), `${label} domain must name the capability it deletes`)
 }
 assert.doesNotMatch(requestDispatcher, /if \(input\.method === '(?:sessions|runs|tools|approvals)\//, 'session/run/tool method branches must not return to the main dispatcher')

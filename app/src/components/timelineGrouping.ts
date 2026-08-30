@@ -30,6 +30,19 @@ function activityGroupKey(row: TimelineItem): string | null {
   }
 }
 
+function normalizedCommand(row: TimelineItem): string | null {
+  if (row.kind !== 'tool' || timelineToolKind(row.tool) !== 'command') return null
+  const command = row.detail?.trim().replace(/\r\n?/g, '\n')
+  return command || null
+}
+
+function appendUniqueActivity(grouped: TimelineItem[], seenCommands: Set<string>, row: TimelineItem): void {
+  const command = normalizedCommand(row)
+  if (command && seenCommands.has(command)) return
+  if (command) seenCommands.add(command)
+  grouped.push(row)
+}
+
 /**
  * Collapse only adjacent activities with the same semantic presentation kind.
  * Prose and notices are hard boundaries, so grouping can never reorder the
@@ -48,10 +61,12 @@ export function groupTimelineItems(rows: readonly TimelineItem[]): TimelineDispl
       continue
     }
 
-    const grouped: TimelineItem[] = [row]
+    const grouped: TimelineItem[] = []
+    const seenCommands = new Set<string>()
+    appendUniqueActivity(grouped, seenCommands, row)
     let next = cursor + 1
     while (next < rows.length && activityGroupKey(rows[next]) === key) {
-      grouped.push(rows[next])
+      appendUniqueActivity(grouped, seenCommands, rows[next])
       next += 1
     }
 

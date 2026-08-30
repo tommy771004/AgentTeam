@@ -2,6 +2,12 @@
 
 截至 2026-08-30。
 
+## 本日收口：Host-owned Agent Collaboration
+
+`.scratch/host-owned-agent-collaboration` 15/15 tickets 完成本機 qualification。Pi Core Host 現在是 agent tree、durable mailbox、queue-only message、safe-boundary follow-up、event-driven wait、one-hop completion、retention/recovery、write lease、verified worktree 與 Checker adoption 的唯一 production authority；renderer 只從 Turn Record snapshot + cursor 建立當輪／歷史 Agent Work Tree，上一輪活動不會漂移至下一輪 active surface。External CLI 維持誠實 degraded capability，不冒充 durable child agent 或 verified DoD。
+
+`npm run build`、`npx oxlint src`（exit 0，三個既有 warning）、完整 `npm run smoke`、package-time smoke 與 x64/arm64 electron-builder 都已通過。`npm run dist:mac` 只在最後的 distributable signature gate 因本機沒有 Apple Developer ID/notarization credentials fail closed；同一批 artifacts 經專案既有 `ALLOW_UNSIGNED_MAC_BUILD=1` policy 驗證為 local test build，明確不可 publish。完整 lifecycle、artifact hash 與外部 blocker 見 `.scratch/host-owned-agent-collaboration/qualification.md`；正式 signed-platform 證據仍由 INDEX 的 paid-beta residual 追蹤。
+
 ## 本日收口：SubDesign architecture deepening
 
 `.scratch/subdesign-architecture-deepening` 5/5 tickets resolved。既有 workspace controller、provider registry、streaming UI Projection 與 atomic OpenDesign pack application 之外，Pi Host public dispatcher 現在將 `sessions/*`、`runs/*`、`tools/*`／`approvals/*` 交由完整 owning domains；tool catalog、frozen contract 與 approval resolution 不再塞在主 router。Protocol 仍是唯一 Electron／Host 外部介面，cursor-based explicit commit 仍是 canonical persistence 決策，沒有新增 renderer authority。

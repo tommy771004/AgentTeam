@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import type { RunTaskStatus } from '../store/runActivityStore'
+import type { RunTaskDetail, RunTaskStatus } from '../store/runActivityStore'
 import { Icon } from './Icon'
 import { Reveal } from './primitives/Reveal'
 import { SpinnerRing } from './primitives/SpinnerRing'
@@ -23,7 +23,7 @@ function TaskStatusBadge({ status, index, live }: { status: TaskRowStatus; index
 
 /** Presentation only: recorded status is never advanced by an animation. */
 export function RunTaskRow({
-  text, status, index, live = false, variant = 'capsule', detail, meta,
+  text, status, index, live = false, variant = 'capsule', detail, meta, amount, details,
 }: {
   text: string
   status: TaskRowStatus
@@ -32,6 +32,8 @@ export function RunTaskRow({
   variant?: 'capsule' | 'list'
   detail?: string
   meta?: string
+  amount?: string
+  details?: readonly RunTaskDetail[]
 }) {
   const [open, setOpen] = useState(false)
   const detailId = useId()
@@ -54,6 +56,7 @@ export function RunTaskRow({
           <TaskStatusBadge status={status} index={index} live={live} />
         </span>
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{text}</span>
+        {amount ? <span className="shrink-0 text-[12.5px] tabular-nums text-ink-2">{amount}</span> : null}
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${tone}`}>{label}</span>
         <span aria-hidden="true" className={`inline-flex shrink-0 text-ink-3 transition-transform duration-300 motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}>
           <Icon name="expand_more" size={15} />
@@ -64,6 +67,12 @@ export function RunTaskRow({
           <div className="mb-2.5 ml-[22px] mr-3 space-y-1.5 border-l border-line pl-5 text-[12px] leading-relaxed text-ink-2">
             <p className="whitespace-pre-wrap break-words">{text}</p>
             {detail ? <p className="whitespace-pre-wrap break-words">{detail}</p> : null}
+            {details?.map((item, detailIndex) => (
+              <div key={`${detailIndex}:${item.label}:${item.meta || ''}`} className="flex min-w-0 items-start justify-between gap-3">
+                <span className="min-w-0 break-words">{item.label}</span>
+                {item.meta ? <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink-3">{item.meta}</span> : null}
+              </div>
+            ))}
             {meta ? <p className="font-mono text-[11px] tabular-nums text-ink-3">{meta}</p> : null}
           </div>
         </Reveal>

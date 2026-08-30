@@ -13,7 +13,6 @@
  * presentation (ADR-0050), never from a filename regex.
  */
 import { turnRecordEntries, type TurnRecord, type TurnRecordEntry } from './turnRecord.ts'
-import { formatMemoryRecallNotice } from './memoryRecallPresentation.ts'
 import {
   diffPaths,
   diffStats,
@@ -43,6 +42,10 @@ export type RunOperationRow = {
 export type ProducedFile = { path: string; action: 'create' | 'edit'; seq: number }
 
 const NON_OPERATION_ENTRY_KINDS = new Set<TurnRecordEntry['kind']>([
+  'agent-lifecycle',
+  'agent-collaboration',
+  'provider-prompt',
+  'provider-history',
   'tool-evidence',
   'state-proposal',
   'state-check',
@@ -54,6 +57,9 @@ const NON_OPERATION_ENTRY_KINDS = new Set<TurnRecordEntry['kind']>([
   'memory-control-lifecycle',
   'skill-invocation',
   'skill-context',
+  'instruction-snapshot',
+  'memory-recall',
+  'notice',
 ])
 
 function base(entry: TurnRecordEntry) {
@@ -174,11 +180,15 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
         break
       }
       case 'approval':
+        // An allowed invocation already appears as its tool operation. Showing
+        // a second `tool：allow` row leaks protocol vocabulary into the task UI
+        // without adding information; denials still need a visible error row.
+        if (entry.decision === 'allow') break
         rows.push({
           ...base(entry),
-          kind: entry.decision === 'deny' ? 'error' : 'status',
+          kind: 'error',
           title: `${entry.tool}：${entry.decision}${entry.reason ? ` · ${entry.reason}` : ''}`,
-          ok: entry.decision !== 'deny',
+          ok: false,
         })
         break
       case 'compaction':
@@ -206,10 +216,8 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
   return [...rows].sort((left, right) => left.seq - right.seq)
 }
 
-function unpairedRecordTitle(entry: TurnRecordEntry): string {
-  return entry.kind === 'memory-recall'
-    ? formatMemoryRecallNotice(entry)
-    : '未知的記錄項目'
+function unpairedRecordTitle(_entry: TurnRecordEntry): string {
+  return '未知的記錄項目'
 }
 
 /**

@@ -26,6 +26,7 @@ import {
   useCommandHistoryStore,
 } from '../store/commandHistoryStore'
 import type { ChatAttachment } from '../agent/types'
+import type { PendingFollowUpProjection } from '../agent/interactiveFollowUp'
 import {
   filesToAttachments,
   formatBytes,
@@ -100,6 +101,12 @@ export interface CommandComposerProps {
   /** Show the ChatGPT-style stop action while a run is active. */
   running?: boolean
   onStop?: () => void
+  /** Disposable projection of Host-accepted interactive follow-ups. */
+  pendingFollowUps?: readonly PendingFollowUpProjection[]
+  onEditPendingFollowUp?: (item: PendingFollowUpProjection, text: string) => void | Promise<void>
+  onCancelPendingFollowUp?: (item: PendingFollowUpProjection) => void | Promise<void>
+  onMovePendingFollowUp?: (item: PendingFollowUpProjection, direction: 'up' | 'down') => void | Promise<void>
+  onQueueRejectedFollowUp?: (item: PendingFollowUpProjection) => void | Promise<void>
 }
 
 function composerHasFooter(
@@ -197,6 +204,115 @@ function ComposerActionButton({
   )
 }
 
+const FOLLOW_UP_STATE_LABEL: Record<PendingFollowUpProjection['state'], string> = {
+  submitting: '送出中',
+  accepted: '已接受',
+  queued: '排隊中',
+  dispatching: '開始執行',
+  rejected: '未接受',
+  settled: '已完成',
+  cancelled: '已取消',
+}
+
+function PendingFollowUpCards({
+  items,
+  onEdit,
+  onCancel,
+  onMove,
+  onQueueRejected,
+}: {
+  items: readonly PendingFollowUpProjection[]
+  onEdit?: CommandComposerProps['onEditPendingFollowUp']
+  onCancel?: CommandComposerProps['onCancelPendingFollowUp']
+  onMove?: CommandComposerProps['onMovePendingFollowUp']
+  onQueueRejected?: CommandComposerProps['onQueueRejectedFollowUp']
+}) {
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
+  const toggleExpanded = (id: string) => setExpanded((current) => {
+    const next = new Set(current)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
+  if (items.length === 0) return null
+  return (
+    <div className="min-w-0 max-w-full border-b border-line px-2.5 py-2" aria-label="待處理的後續指令">
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        待處理後續指令 {items.length} 筆；最新狀態 {FOLLOW_UP_STATE_LABEL[items.at(-1)?.state || 'queued']}
+      </span>
+      <div className="space-y-1">
+        {items.map((item) => {
+          const movable = items.filter((candidate) => candidate.reorderable && candidate.sessionId === item.sessionId)
+          const movableIndex = movable.findIndex((candidate) => candidate.id === item.id)
+          const isExpanded = expanded.has(item.id)
+          return (
+          <div key={item.id} className="group flex min-w-0 max-w-full flex-wrap items-center gap-2 rounded-control px-2 py-1.5 hover:bg-hover-1">
+            <Icon name={item.action === 'steer' ? 'alt_route' : 'subdirectory_arrow_right'} size={15} className="shrink-0 text-ink-3" />
+            <button type="button" aria-expanded={isExpanded} onClick={() => toggleExpanded(item.id)} className={`min-h-8 min-w-0 flex-1 basis-40 text-left text-[13px] text-ink ${isExpanded ? 'basis-full whitespace-pre-wrap break-words' : 'truncate'}`} title={item.reason ? `${item.text}\n${item.reason}` : item.text}>
+              {item.text}
+            </button>
+            <span className={`shrink-0 text-[11px] ${item.action === 'steer' ? 'text-accent-ink' : 'text-ink-3'}`}>
+              {item.action === 'steer' ? '引導' : item.action === 'takeover' ? '中止並接手' : '排隊'} · {FOLLOW_UP_STATE_LABEL[item.state]}
+            </span>
+            {item.reorderable && onMove ? (
+              <span className="flex shrink-0 items-center">
+                <button type="button" disabled={movableIndex <= 0} onClick={() => void onMove(item, 'up')} className="flex size-8 items-center justify-center text-ink-3 hover:text-ink disabled:opacity-25" aria-label={`上移：${item.text}`} title="上移">
+                  <Icon name="keyboard_arrow_up" size={16} />
+                </button>
+                <button type="button" disabled={movableIndex < 0 || movableIndex === movable.length - 1} onClick={() => void onMove(item, 'down')} className="flex size-8 items-center justify-center text-ink-3 hover:text-ink disabled:opacity-25" aria-label={`下移：${item.text}`} title="下移">
+                  <Icon name="keyboard_arrow_down" size={16} />
+                </button>
+              </span>
+            ) : null}
+            {item.state === 'rejected' && item.action === 'steer' && onQueueRejected ? (
+              <button type="button" onClick={() => void onQueueRejected(item)} className="min-h-8 shrink-0 px-2 text-[12px] text-accent-ink hover:bg-hover-1" aria-label={`改為排隊：${item.text}`} title="改為排隊">
+                改排隊
+              </button>
+            ) : null}
+            {item.editable && onEdit ? (
+              <button type="button" onClick={() => {
+                const next = window.prompt('編輯排隊指令', item.text)
+                if (next?.trim() && next.trim() !== item.text) void onEdit(item, next.trim())
+              }} className="flex size-8 shrink-0 items-center justify-center text-ink-3 hover:text-ink" aria-label={`編輯：${item.text}`} title="編輯">
+                <Icon name="edit" size={14} />
+              </button>
+            ) : null}
+            {item.cancellable && onCancel ? (
+              <button type="button" onClick={() => void onCancel(item)} className="flex size-8 shrink-0 items-center justify-center text-ink-3 hover:text-red" aria-label={`刪除：${item.text}`} title="刪除">
+                <Icon name="delete" size={14} />
+              </button>
+            ) : null}
+          </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ComposerActions({
+  running,
+  canSend,
+  enterBehavior,
+  onSend,
+  onStop,
+}: {
+  running: boolean
+  canSend: boolean
+  enterBehavior: NonNullable<CommandComposerProps['enterBehavior']>
+  onSend: () => void
+  onStop?: () => void
+}) {
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <ComposerActionButton stopping={false} canSend={canSend} enterBehavior={enterBehavior} onAction={onSend} />
+      {running && onStop ? (
+        <ComposerActionButton stopping canSend enterBehavior={enterBehavior} onAction={onStop} />
+      ) : null}
+    </span>
+  )
+}
+
 /**
  * Codex / Claude Code 風格輸入列：/ 指令、↑ 歷史、Cmd+/ 聚焦、貼圖/上傳
  */
@@ -220,6 +336,11 @@ export function CommandComposer({
   allowAttachments,
   running = false,
   onStop,
+  pendingFollowUps = [],
+  onEditPendingFollowUp,
+  onCancelPendingFollowUp,
+  onMovePendingFollowUp,
+  onQueueRejectedFollowUp,
 }: CommandComposerProps) {
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -667,9 +788,6 @@ export function CommandComposer({
 
   const canSend = !disabled && !attaching && (Boolean(value.trim()) || attachments.length > 0)
 
-  // 送出／停止共用同一顆按鈕：執行中切換為停止，其餘時候是送出。
-  const stopActive = running && Boolean(onStop)
-
   // textarea 隨內容長高（上限 10 行），超過後內部捲動。
   useEffect(() => {
     const el = taRef.current
@@ -684,15 +802,12 @@ export function CommandComposer({
     el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`
   }, [value, compact])
 
-  /**
-   * 單一動態按鈕：執行中＝停止（紅），否則＝送出。
-   * 有底欄（模型選擇器所在列）時放在 footerRight 右側；無底欄的精簡模式保留在輸入列右端。
-   */
-  const actionButton = <ComposerActionButton
-    stopping={stopActive}
+  const actionButton = <ComposerActions
+    running={running}
     canSend={canSend}
     enterBehavior={enterBehavior}
-    onAction={() => stopActive ? onStop?.() : void submit()}
+    onSend={() => void submit()}
+    onStop={onStop}
   />
 
   /** 底欄是否存在（模型選擇器等 footer 內容會渲染） */
@@ -722,6 +837,13 @@ export function CommandComposer({
       onDrop={onDrop}
     >
       <ComposerLoader active={running} />
+      <PendingFollowUpCards
+        items={pendingFollowUps}
+        onEdit={onEditPendingFollowUp}
+        onCancel={onCancelPendingFollowUp}
+        onMove={onMovePendingFollowUp}
+        onQueueRejected={onQueueRejectedFollowUp}
+      />
       {showMentionMenu && (
         <div
           className="absolute bottom-full left-0 right-0 z-[80] mb-2 overflow-hidden rounded-card bg-surface p-1 shadow-raised"

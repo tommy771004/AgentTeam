@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Icon } from '../components/Icon'
 import { CommandComposer } from '../components/CommandComposer'
@@ -19,7 +19,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { resolveModelRunnerSelection } from '../agent/localCliRun'
 import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
 import { continuationAnchorBubbleId } from '../agent/conversationRunLifecycle'
-import type { AgentMode, LoopType } from '../agent/types'
+import type { AgentMode, FollowUpMode, LoopType } from '../agent/types'
 import type { ThinkingDepth } from '../agent/thinking'
 import { getThinkingDepth } from '../agent/thinking'
 import { nextPrimaryAgent } from '../agent/agentModes'
@@ -30,7 +30,7 @@ import {
   defaultGoalForAttachments,
 } from '../lib/chatAttachments'
 import { useProjectStore } from '../store/projectStore'
-import { listQueuedRuns, queueLength } from '../agent/runQueue'
+import { listQueuedRuns, moveQueuedRun, queueLength, removeQueuedRun } from '../agent/runQueue'
 import { ChatBubble } from '../components/ChatBubble'
 import { RunSummaryCard } from '../components/RunSummaryCard'
 import { RunContinuationActions } from '../components/RunContinuationActions'
@@ -51,6 +51,66 @@ import {
   beginComposerApprovalHandoff,
   finishComposerApprovalHandoff,
 } from '../agent/composerApprovalHandoff'
+import { followUpActionForRunner, projectPendingFollowUps, projectRendererQueuedFollowUps, type PendingFollowUpProjection } from '../agent/interactiveFollowUp'
+import type { ExternalRunOpts, ExternalRunResult } from '../agent/taskRunTypes'
+
+type RejectedFollowUp = {
+  projection: PendingFollowUpProjection
+  input: ExternalRunOpts
+}
+
+function visibleFollowUps(hostItems: readonly PendingFollowUpProjection[], rejected: Record<string, RejectedFollowUp>, threadId: string | null) {
+  return [...hostItems, ...Object.values(rejected).map((item) => item.projection).filter((item) => item.threadId === threadId)]
+}
+
+function composerFollowUpAction(runner: ThreadRunner, mode: FollowUpMode | undefined) {
+  return followUpActionForRunner(runner, mode === 'queue' ? 'queue' : 'steer')
+}
+
+function busyComposerPlaceholder(runner: ThreadRunner, mode: FollowUpMode | undefined): string {
+  if (mode === 'queue') return '輸入追問（將排隊）…'
+  return runner === 'builtin' ? '輸入以引導目前任務…' : '輸入後中止目前 CLI 並接手…'
+}
+
+function rejectedFollowUpFromResult(
+  result: ExternalRunResult,
+  input: ExternalRunOpts,
+  threadId: string,
+): RejectedFollowUp | undefined {
+  if (!result.followUpRecovery || !result.runId) return undefined
+  const recovery = result.followUpRecovery
+  return {
+    input: { ...input, runId: result.runId },
+    projection: {
+      id: recovery.id,
+      runId: result.runId,
+      sessionId: 'host-rejected',
+      threadId,
+      text: recovery.text,
+      action: recovery.action,
+      state: 'rejected',
+      revision: 0,
+      queueRevision: 0,
+      editable: true,
+      cancellable: true,
+      reorderable: false,
+      targetRunId: recovery.targetRunId,
+      reason: recovery.reason,
+      attachmentCount: input.attachments?.length || 0,
+    },
+  }
+}
+
+function rememberRejectedFollowUp(
+  setRejected: Dispatch<SetStateAction<Record<string, RejectedFollowUp>>>,
+  result: ExternalRunResult,
+  input: ExternalRunOpts,
+  threadId: string,
+): void {
+  const rejected = rejectedFollowUpFromResult(result, input, threadId)
+  if (!rejected) return
+  setRejected((current) => ({ ...current, [rejected.projection.id]: rejected }))
+}
 
 function DesktopThreadListButton({ visible, onClick }: { visible: boolean; onClick: () => void }) {
   if (!visible) return null
@@ -100,6 +160,8 @@ export function ProtocolsPage() {
   const [submittingByThread, setSubmittingByThread] = useState<Record<string, number>>({})
   const [showTerminal, setShowTerminal] = useState(false)
   const [composerApprovalModes, setComposerApprovalModes] = useState<Record<string, ApprovalMode>>({})
+  const [pendingFollowUps, setPendingFollowUps] = useState<PendingFollowUpProjection[]>([])
+  const [rejectedFollowUps, setRejectedFollowUps] = useState<Record<string, RejectedFollowUp>>({})
   const { run: runSlash } = useSlashExecutor()
   const settings = useSettingsStore((s) => s.settings)
   const updateSettings = useSettingsStore((s) => s.update)
@@ -216,6 +278,123 @@ export function ProtocolsPage() {
   })
   const composerApprovalMode = activeId ? composerApprovalModes[activeId] : undefined
   const composerBusy = isConversationComposerBusy(submittingByThread, activeId, lifecycle.live)
+  const visiblePendingFollowUps = visibleFollowUps(pendingFollowUps, rejectedFollowUps, activeId)
+  const refreshPendingFollowUps = useCallback(async () => {
+    const api = window.subagents?.piHost?.runs
+    if (!activeId) {
+      setPendingFollowUps([])
+      return
+    }
+    const compatibility = projectRendererQueuedFollowUps(listQueuedRuns(), activeId)
+    if (!api?.list) {
+      setPendingFollowUps(compatibility)
+      return
+    }
+    try {
+      const result = await api.list()
+      const projected = projectPendingFollowUps(Array.isArray(result.queue) ? result.queue : [], activeId)
+        .filter((item) => item.state === 'queued' || item.state === 'dispatching' || (item.action === 'steer' && lifecycle.live))
+      setPendingFollowUps([...projected, ...compatibility])
+    } catch {
+      // Host projection is optional in plain-browser mode; only show the
+      // renderer queue items that renderer itself owns.
+      setPendingFollowUps(compatibility)
+    }
+  }, [activeId, lifecycle.live])
+
+  useEffect(() => {
+    void refreshPendingFollowUps()
+    const api = window.subagents?.piHost
+    const unsubscribe = api?.onEvent?.((event) => {
+      if (event.event === 'host/queue' || event.event === 'host/agent-lifecycle') void refreshPendingFollowUps()
+    })
+    const interval = window.setInterval(() => void refreshPendingFollowUps(), 1_500)
+    return () => { unsubscribe?.(); window.clearInterval(interval) }
+  }, [refreshPendingFollowUps])
+
+  const editPendingFollowUp = useCallback(async (item: PendingFollowUpProjection, text: string) => {
+    if (item.state === 'rejected') {
+      setRejectedFollowUps((current) => {
+        const found = current[item.id]
+        if (!found) return current
+        return { ...current, [item.id]: { projection: { ...found.projection, text }, input: { ...found.input, objective: text } } }
+      })
+      return
+    }
+    try {
+      const update = window.subagents?.piHost?.runs?.update
+      if (!update) throw new Error('Pi Host queue bridge unavailable')
+      await update({ runId: item.runId, prompt: text, expectedRevision: item.queueRevision })
+      await refreshPendingFollowUps()
+    } catch (error) {
+      if (activeId) pushBubble(activeId, 'system', `排隊指令未更新：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [activeId, pushBubble, refreshPendingFollowUps])
+
+  const cancelPendingFollowUp = useCallback(async (item: PendingFollowUpProjection) => {
+    if (item.state === 'rejected') {
+      setRejectedFollowUps((current) => {
+        const { [item.id]: _removed, ...rest } = current
+        return rest
+      })
+      return
+    }
+    if (item.sessionId === 'renderer-compatibility') {
+      removeQueuedRun(item.id)
+      await refreshPendingFollowUps()
+      return
+    }
+    try {
+      const cancel = window.subagents?.piHost?.runs?.cancel
+      if (!cancel) throw new Error('Pi Host queue bridge unavailable')
+      await cancel(item.runId, item.queueRevision)
+      await refreshPendingFollowUps()
+    } catch (error) {
+      if (activeId) pushBubble(activeId, 'system', `排隊指令未刪除：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [activeId, pushBubble, refreshPendingFollowUps])
+
+  const movePendingFollowUp = useCallback(async (item: PendingFollowUpProjection, direction: 'up' | 'down') => {
+    if (item.sessionId === 'renderer-compatibility') {
+      moveQueuedRun(item.id, direction === 'up' ? -1 : 1)
+      await refreshPendingFollowUps()
+      return
+    }
+    const siblings = pendingFollowUps.filter((candidate) => candidate.sessionId === item.sessionId && candidate.reorderable)
+    const index = siblings.findIndex((candidate) => candidate.id === item.id)
+    const target = direction === 'up' ? index - 1 : index + 1
+    if (index < 0 || target < 0 || target >= siblings.length) return
+    const reordered = [...siblings]
+    ;[reordered[index], reordered[target]] = [reordered[target], reordered[index]]
+    try {
+      await window.subagents?.piHost?.runs?.reorder?.({ sessionId: item.sessionId, runIds: reordered.map((candidate) => candidate.runId), expectedRevision: item.queueRevision })
+      await refreshPendingFollowUps()
+    } catch (error) {
+      if (activeId) pushBubble(activeId, 'system', `排隊順序未更新：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [activeId, pendingFollowUps, pushBubble, refreshPendingFollowUps])
+
+  const queueRejectedFollowUp = useCallback(async (item: PendingFollowUpProjection) => {
+    const rejected = rejectedFollowUps[item.id]
+    if (!rejected) return
+    try {
+      const { runTask } = await import('../agent/taskRunCoordinator')
+      const result = await runTask({ ...rejected.input, runId: item.runId, followUpAction: 'queue' })
+      if (result.followUpRecovery) throw new Error(result.followUpRecovery.reason)
+      setRejectedFollowUps((current) => {
+        const { [item.id]: _removed, ...rest } = current
+        return rest
+      })
+      void refreshPendingFollowUps()
+      if (result.error && activeId) pushBubble(activeId, 'system', result.error)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      setRejectedFollowUps((current) => {
+        const found = current[item.id]
+        return found ? { ...current, [item.id]: { ...found, projection: { ...found.projection, reason } } } : current
+      })
+    }
+  }, [activeId, pushBubble, refreshPendingFollowUps, rejectedFollowUps])
   const runnerTransitionRevision = useRef(0)
   // Keep the latest run artifact index available for explicit handoff export.
   // Conversation UI no longer projects generic run evidence as workflow stages.
@@ -343,6 +522,7 @@ export function ProtocolsPage() {
       objective: raw,
       threadId: activeId,
       runner,
+      followUpAction: composerFollowUpAction(runner, settings.followUpMode),
       loopType: pinnedLoopType,
       attachments,
       projectRoot: projectRoot || undefined,
@@ -400,6 +580,7 @@ export function ProtocolsPage() {
       // Omit loopType when unpinned → engine auto-classifies (Chat-lite / Goal).
       const { runTask } = await import('../agent/taskRunCoordinator')
       const r = await runTask(runInput)
+      rememberRejectedFollowUp(setRejectedFollowUps, r, runInput, activeId)
       if (r.queued) {
         const n = queueLength()
         const pos =
@@ -423,6 +604,7 @@ export function ProtocolsPage() {
         `執行失敗：${e instanceof Error ? e.message : String(e)}`,
       )
     } finally {
+      void refreshPendingFollowUps()
       setSubmittingByThread((current) => {
         const nextCount = Math.max(0, (current[submissionThreadId] || 0) - 1)
         if (nextCount > 0) return { ...current, [submissionThreadId]: nextCount }
@@ -642,9 +824,7 @@ export function ProtocolsPage() {
                 disabled={false}
                 placeholder={
                   composerBusy
-                    ? settings.followUpMode === 'queue'
-                      ? '輸入追問（將排隊）…'
-                      : '輸入以轉向目前任務…'
+                    ? busyComposerPlaceholder(runner, settings.followUpMode)
                     : thread?.awaitingReply
                       ? '回覆以繼續…'
                       : '什麼都能做'
@@ -729,6 +909,11 @@ export function ProtocolsPage() {
                 )}
                 onSubmitLine={(line, atts) => void runEmbedded(line, atts)}
                 running={lifecycle.canStop}
+                pendingFollowUps={visiblePendingFollowUps}
+                onEditPendingFollowUp={editPendingFollowUp}
+                onCancelPendingFollowUp={cancelPendingFollowUp}
+                onMovePendingFollowUp={movePendingFollowUp}
+                onQueueRejectedFollowUp={queueRejectedFollowUp}
                 onStop={() => {
                   // Resolve at click time so a just-started run cannot be
                   // cancelled with the previous thread's stale projection id.

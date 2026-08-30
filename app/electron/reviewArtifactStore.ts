@@ -222,6 +222,22 @@ function importedRecord(bundle: ReviewArtifactExportBundle): StoredRecord {
   }
 }
 
+function classifyImportPreview(
+  value: unknown,
+  hasCollision: (snapshotId: string) => boolean,
+): ReviewArtifactImportPreview {
+  try {
+    const bundle = parseImportBundle(value)
+    importedRecord(bundle)
+    const collision = hasCollision(bundle.artifact.snapshotId)
+    return { status: collision ? 'collision' : 'ready', snapshotId: bundle.artifact.snapshotId, bundleHash: bundle.bundleHash, totalBytes: bundle.totalBytes, collisions: collision ? [bundle.artifact.snapshotId] : [], diagnostics: [] }
+  } catch (error) {
+    const item = error as ReviewArtifactStoreError
+    const missing = item.code === 'not_found' || /missing|no workspace baseline/i.test(item.message)
+    return { status: item.code === 'unsupported_schema' ? 'unsupported' : missing ? 'missing' : 'invalid', collisions: [], diagnostics: [item.message] }
+  }
+}
+
 function prepareFinalize(input: ReviewArtifactFinalizeInput): {
   manifest: ReviewFileManifestEntry[]
   payloads: Map<string, StoredPayload>
@@ -392,16 +408,7 @@ export class InMemoryReviewArtifactStore implements ReviewArtifactStore {
 
   async previewImport(value: unknown): Promise<ReviewArtifactImportPreview> {
     this.ensureOpen()
-    try {
-      const bundle = parseImportBundle(value)
-      importedRecord(bundle)
-      const collision = this.records.has(bundle.artifact.snapshotId)
-      return { status: collision ? 'collision' : 'ready', snapshotId: bundle.artifact.snapshotId, bundleHash: bundle.bundleHash, totalBytes: bundle.totalBytes, collisions: collision ? [bundle.artifact.snapshotId] : [], diagnostics: [] }
-    } catch (error) {
-      const item = error as ReviewArtifactStoreError
-      const missing = item.code === 'not_found' || /missing|no workspace baseline/i.test(item.message)
-      return { status: item.code === 'unsupported_schema' ? 'unsupported' : missing ? 'missing' : 'invalid', collisions: [], diagnostics: [item.message] }
-    }
+    return classifyImportPreview(value, (snapshotId) => this.records.has(snapshotId))
   }
 
   async importArtifact(value: unknown, expectedBundleHash: string) {
@@ -663,16 +670,7 @@ export class SqliteReviewArtifactStore implements ReviewArtifactStore {
 
   async previewImport(value: unknown): Promise<ReviewArtifactImportPreview> {
     this.ensureOpen()
-    try {
-      const bundle = parseImportBundle(value)
-      importedRecord(bundle)
-      const collision = Boolean(this.db.prepare('SELECT 1 AS present FROM review_snapshots WHERE snapshot_id = ?').get(bundle.artifact.snapshotId))
-      return { status: collision ? 'collision' : 'ready', snapshotId: bundle.artifact.snapshotId, bundleHash: bundle.bundleHash, totalBytes: bundle.totalBytes, collisions: collision ? [bundle.artifact.snapshotId] : [], diagnostics: [] }
-    } catch (error) {
-      const item = error as ReviewArtifactStoreError
-      const missing = item.code === 'not_found' || /missing|no workspace baseline/i.test(item.message)
-      return { status: item.code === 'unsupported_schema' ? 'unsupported' : missing ? 'missing' : 'invalid', collisions: [], diagnostics: [item.message] }
-    }
+    return classifyImportPreview(value, (snapshotId) => Boolean(this.db.prepare('SELECT 1 AS present FROM review_snapshots WHERE snapshot_id = ?').get(snapshotId)))
   }
 
   async importArtifact(value: unknown, expectedBundleHash: string) {

@@ -13,6 +13,7 @@ import { baselineMemoryControlPackageReader } from './memoryControlPackageReposi
 import type { MemoryControlEvaluationAuthority } from './memoryControlEvaluationAuthority.ts'
 import { BUILTIN_RUNNER_CAPABILITIES } from '../src/agent/runners/types.ts'
 import { agentLifecycleFromTurnSettlement, type AgentLifecycleEvent } from '../src/agent/agentLifecycle.ts'
+import { boundedAgentText, isRestrictiveAgentPolicy, normalizeAgentPolicy, type AgentAdmissionSnapshot, type AgentEffectivePolicy, type AgentMessageEnvelope } from '../src/agent/agentCollaboration.ts'
 import { piToolFailureDetail } from './piToolFailureDetail.ts'
 import { InMemoryInstructionRepository, InstructionRepositoryError, type InstructionRepository, type LegacyInstructionMigrationReport, type PersonalizationImportPreview, type PersonalizationInstructionSnapshot } from './instructionRepository.ts'
 import { resolveInstructionSnapshot, writeProjectInstruction, type InstructionSnapshot } from './instructionResolver.ts'
@@ -48,7 +49,7 @@ import type { ReviewDeliveryApproval, ReviewDeliveryIntent, ReviewDeliveryPrevie
  * field. Durable memory is available only through negotiated memory-store-v1.
  */
 export const PI_HOST_PROTOCOL_VERSION = 5 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'capabilities'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
@@ -70,7 +71,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'agents/spawn' | 'agents/send' | 'agents/mailbox' | 'agents/ack' | 'agents/follow-up' | 'agents/wait' | 'agents/lease/resolve' | 'agents/interrupt' | 'agents/cancel' | 'agents/close' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/update' | 'runs/reorder' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
     | 'review/v1/finalize' | 'review/v1/read' | 'review/v1/payload-page' | 'review/v1/describe' | 'review/v1/files' | 'review/v1/file-diff' | 'review/v1/refresh' | 'review/v1/comments/list' | 'review/v1/draft/save' | 'review/v1/draft/delete' | 'review/v1/comment/transition' | 'review/v1/file-state/list' | 'review/v1/file-state/mark' | 'review/v1/state/inherit' | 'review/v1/feedback/prepare' | 'review/v1/feedback/claim' | 'review/v1/feedback/release' | 'review/v1/verification/list' | 'review/v1/verification/run' | 'review/v1/verification/output' | 'review/v1/mutation/preview' | 'review/v1/mutation/apply' | 'review/v1/delivery/preview' | 'review/v1/delivery/apply' | 'review/v1/artifact/export' | 'review/v1/artifact/import-preview' | 'review/v1/artifact/import-apply' | 'review/v1/artifact/rebind' | 'review/v1/artifact/retention' | 'review/v1/artifact/hard-delete'
   params: Record<string, unknown>
 }
@@ -175,6 +176,8 @@ export type PiHostResponse = {
     builtinTools?: string[]
     orchestration?: { pattern: PiLoopPattern; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
     queued?: 'steer' | 'queue'
+    followUp?: PiQueuedRun
+    queueRevision?: number
     extension?: PiExtension
     extensions?: PiExtension[]
     removed?: boolean
@@ -260,6 +263,14 @@ export type PiHostEvent =
       payload: { sessionId: string; entry: TurnRecordEntry }
     }
   | {
+      event: 'host/agent-collaboration'
+      payload: { sessionId: string; entry: TurnRecordEntry }
+    }
+  | {
+      event: 'host/queue'
+      payload: { cursor: number; queueRevision: number }
+    }
+  | {
       event: 'host/tool-update'
       payload: { runId: string; tool: string; item: unknown; callId?: string }
     }
@@ -319,7 +330,7 @@ export type PiHostEvent =
   | {
       /** update_plan drove the visible plan panel; steps are the full state. */
       event: 'host/plan-updated'
-      payload: { sessionId: string; runId?: string; steps: Array<{ id: string; title: string; status: string }> }
+      payload: { sessionId: string; runId?: string; steps: Array<{ id: string; title: string; status: string; meta?: string; details?: Array<{ label: string; meta?: string }> }> }
     }
   | {
       event: 'host/approval-requested'
@@ -376,6 +387,7 @@ import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
 import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
 import { callPiMcpTool, listPiMcpTools, piMcpGenerationKey } from './piMcpClient.ts'
 import { isCompletedModelCall, isPiHostDefinitionOfDoneMet, isPiTurnSettlement, piTurnFinalAnswer, piTurnResultText, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
+import { piAssistantTextSegments } from './piPublicCommentary.ts'
 import { appendTurnRecord, asTurnRecordMemoryWrite, derivePiHistory, nextTurnRecordSeq, workingStateFromTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordEntry, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
 import {
   checkDelegatedGoalObservation,
@@ -449,7 +461,8 @@ import { setPiCapabilityBridge, setPiCodeModeExecutor } from './piExtensionPacks
 import { PiToolContractStore, schemaDigest, type PiTurnToolContract } from './piToolContract.ts'
 import { enqueuePiHostRun, handlePiHostRunDomain } from './piHostRunDomain.ts'
 import { handlePiHostAgentDomain } from './piHostAgentDomain.ts'
-import { agentLifecycleEventForSession, recordAgentLifecycle } from './piAgentLifecycleRecord.ts'
+import { PiAgentCommunicationDomain, type PiAgentCommunicationState } from './piAgentCommunicationDomain.ts'
+import { agentLifecycleEventForSession, recordAgentCollaborationEvent, recordAgentLifecycle } from './piAgentLifecycleRecord.ts'
 import { handlePiHostSessionDomain } from './piHostSessionDomain.ts'
 import { handlePiHostToolDomain } from './piHostToolDomain.ts'
 import { validatePiToolArguments } from './piToolArguments.ts'
@@ -479,6 +492,8 @@ type HostState = {
   instructionRepositoryNegotiated: boolean
   reviewNegotiated: boolean
   agentTreeNegotiated: boolean
+  agentCollaborationNegotiated: boolean
+  agentCommunication: PiAgentCommunicationDomain
   reviewArtifactStore: ReviewArtifactStore
   reviewWorkspaces: Map<string, ReviewWorkspaceBinding>
   reviewProjection: WorkspaceReviewProjection
@@ -529,7 +544,7 @@ type PreparedPiCompaction = {
   contextWindow: number
 }
 
-export type SessionRecord = { id: string; title: string; threadId?: string; parentSessionId?: string; role?: string; profile?: Record<string, unknown>; context?: PiContextPacket; depth?: number; messages: PiRecordedMessage[]; toolAudit?: PiToolAuditRecord[]; archived?: boolean; piSessionFile?: string; record?: TurnRecord; toolContracts?: PiTurnToolContract[]; toolContractRevisionFloor?: number; preparedCompaction?: PreparedPiCompaction }
+export type SessionRecord = { id: string; title: string; threadId?: string; parentSessionId?: string; forkedFromSessionId?: string; role?: string; profile?: Record<string, unknown>; context?: PiContextPacket; depth?: number; agentAdmission?: AgentAdmissionSnapshot; messages: PiRecordedMessage[]; toolAudit?: PiToolAuditRecord[]; archived?: boolean; piSessionFile?: string; record?: TurnRecord; toolContracts?: PiTurnToolContract[]; toolContractRevisionFloor?: number; preparedCompaction?: PreparedPiCompaction }
 
 function projectPiHostStateSnapshot(state: HostState, id: string | number): PiHostMessage[] {
   if (state.negotiatedProtocolVersion < 5) {
@@ -565,6 +580,17 @@ function workingStateForAdmittedTurn(
         ? { goals }
         : {}),
   })
+}
+
+function childExecutionPrompt(session: SessionRecord, prompt: string): string {
+  if (!session.agentAdmission || !session.context) return prompt
+  const context = {
+    role: session.role || session.agentAdmission.role,
+    objective: session.context.objective,
+    facts: session.context.facts,
+    constraints: session.context.constraints,
+  }
+  return `<agent_context>\n${JSON.stringify(context)}\n</agent_context>\n\n<task>\n${prompt}\n</task>`
 }
 
 function requestedWorkingGoal(input: { params?: Record<string, unknown> }): unknown {
@@ -1042,6 +1068,54 @@ function delegatedEvidenceStillApplies(recorder: ActiveTurnRecorder, assignment:
   })
 }
 
+function delegatedSiblingEffectsSettled(state: HostState, parentSessionId: string, childSessionId: string): boolean {
+  const siblings = new Set(state.snapshot.sessions
+    .filter((session) => session.parentSessionId === parentSessionId && session.id !== childSessionId)
+    .map((session) => session.id))
+  if ([...siblings].some((sessionId) => activeSessionRuns.has(sessionId))) return false
+  return !state.snapshot.queue.some((run) => siblings.has(run.sessionId) && (run.status === 'queued' || run.status === 'running'))
+}
+
+function recordDelegatedAdoptionProjection(
+  parentSessionId: string,
+  rootAgentId: string,
+  recorder: ActiveTurnRecorder,
+  assignment: DelegatedGoalAssignment,
+  childRunId: string,
+  outcome: 'pending' | 'accepted' | 'stale' | 'rejected',
+  reason: string,
+): void {
+  const resultId = `${childRunId}:result`
+  const duplicate = recorder.entries.some((entry) => entry.kind === 'agent-collaboration'
+    && entry.event.type === 'adoption'
+    && entry.event.resultId === resultId
+    && entry.event.outcome === outcome)
+  if (duplicate) return
+  const event = {
+    type: 'adoption' as const,
+    agentId: assignment.childSessionId,
+    resultId,
+    outcome,
+    reason: boundedAgentText(reason, 2_048),
+  }
+  recordTurnEntry(parentSessionId, { kind: 'agent-collaboration', source: 'host', event })
+  const message: AgentMessageEnvelope = {
+    version: 1,
+    messageId: `${resultId}:adoption:${outcome}`,
+    rootAgentId,
+    senderAgentId: assignment.childSessionId,
+    receiverAgentId: parentSessionId,
+    originTurn: recorder.turn,
+    originRunId: assignment.parentRunId,
+    kind: 'adoption',
+    content: event.reason,
+    createdAt: Date.now(),
+    deliveryState: 'queued',
+    resultRef: resultId,
+  }
+  recordTurnEntry(parentSessionId, { kind: 'agent-collaboration', source: 'host', event: { type: 'mail', message } })
+}
+
 function collectDelegatedGoalResults(
   state: HostState,
   parentSessionId: string,
@@ -1062,6 +1136,18 @@ function collectDelegatedGoalResults(
     if (checkedIds.has(assignment.delegationId)) continue
     const child = state.snapshot.sessions.find((session) => session.id === assignment.childSessionId)
     if (!child) continue
+    if (!delegatedSiblingEffectsSettled(state, parentSessionId, child.id)) {
+      recordDelegatedAdoptionProjection(
+        parentSessionId,
+        child.agentAdmission?.rootAgentId || parentSessionId,
+        recorder,
+        assignment,
+        `${child.id}:pending:${assignment.delegationId}`,
+        'pending',
+        'sibling-effects-not-settled',
+      )
+      continue
+    }
     const observation = delegatedGoalObservationFromChild(
       assignment,
       child,
@@ -1070,11 +1156,17 @@ function collectDelegatedGoalResults(
     if (!observation) continue
     recordTurnEntry(parentSessionId, { kind: 'delegation-observation', source: 'host', observation })
     const checked = checkDelegatedGoalObservation({ state: workingState, assignment, observation, enabled: recorder.memoryControl.delegatedGoalChecker })
-  recordTurnEntry(parentSessionId, {
+    recordTurnEntry(parentSessionId, {
     kind: 'delegation-check', source: 'host', check: checked.check,
     packageIdentity: recorder.governingPackage,
   })
     checks.push(checked.check)
+    const outcome = checked.check.verdict === 'accepted' || checked.check.verdict === 'rebased'
+      ? 'accepted'
+      : checked.check.reason.includes('stale') || checked.check.reason.includes('invalidated')
+        ? 'stale'
+        : 'rejected'
+    recordDelegatedAdoptionProjection(parentSessionId, child.agentAdmission?.rootAgentId || parentSessionId, recorder, assignment, observation.childRunId, outcome, checked.check.reason)
     if (!checked.state) continue
     workingState = checked.state
     recorder.delegatedWorkingState = checked.state
@@ -1123,7 +1215,7 @@ function nextTurnNumber(record: TurnRecord | undefined): number {
   // Admission/queue lifecycle can be recorded before a model turn exists;
   // those entries share the upcoming turn coordinate and must not consume it.
   return (record?.entries || []).reduce(
-    (highest, entry) => entry.kind === 'agent-lifecycle' ? highest : Math.max(highest, entry.turn),
+    (highest, entry) => entry.kind === 'agent-lifecycle' || entry.kind === 'agent-collaboration' ? highest : Math.max(highest, entry.turn),
     0,
   ) + 1
 }
@@ -1137,6 +1229,112 @@ function publishAgentLifecycleEntry(
   emit({ event: 'host/agent-lifecycle', payload: { sessionId, entry } })
   if (entry.event.runId) {
     emit({ event: 'host/record-append', payload: { runId: entry.event.runId, sessionId, entries: [entry] } })
+  }
+}
+
+function publishAgentCollaborationEntry(
+  emit: ((message: PiHostMessage) => void) | undefined,
+  sessionId: string,
+  entry: TurnRecordEntry,
+): void {
+  if (!emit || entry.kind !== 'agent-collaboration') return
+  emit({ event: 'host/agent-collaboration', payload: { sessionId, entry } })
+  const runId = entry.event.type === 'spawned'
+    ? entry.event.runId
+    : entry.event.type === 'follow-up-started'
+      ? entry.event.runId
+      : entry.event.type === 'completion'
+        ? entry.event.result.runId
+        : undefined
+  if (runId) emit({ event: 'host/record-append', payload: { runId, sessionId, entries: [entry] } })
+}
+
+function defaultAgentPolicy(settings: PiSettings): AgentEffectivePolicy {
+  return {
+    ...(settings.provider.trim() ? { provider: settings.provider } : {}),
+    ...(settings.model.trim() ? { model: settings.model } : {}),
+    approvalMode: settings.approvalMode,
+    unattended: settings.unattended,
+    sandbox: settings.approvalMode === 'full' ? 'read-only' : 'workspace-write',
+    outbound: 'off',
+    capabilities: [...settings.activeTools],
+    mcpServers: [],
+  }
+}
+
+function admittedChildTurnPolicy(
+  admission: AgentAdmissionSnapshot,
+  settings: PiSettings,
+): AgentEffectivePolicy | undefined {
+  return normalizeAgentPolicy({
+    provider: settings.provider,
+    model: settings.model,
+    approvalMode: settings.approvalMode,
+    unattended: settings.unattended,
+    sandbox: admission.policy.sandbox,
+    outbound: admission.policy.outbound,
+    capabilities: settings.activeTools,
+    mcpServers: admission.policy.mcpServers,
+  })
+}
+
+function agentCommunicationState(
+  state: HostState,
+  emit?: (message: PiHostMessage) => void,
+): PiAgentCommunicationState {
+  return {
+    sessions: state.snapshot.sessions,
+    queue: state.snapshot.queue,
+    activeSessionIds: new Set(activeSessionRuns.keys()),
+    defaultPolicy: defaultAgentPolicy(state.snapshot.settings),
+    commit: (sessions, queue) => {
+      state.snapshot.sessions = sessions
+      state.snapshot.queue = queue
+      state.snapshot.cursor += 1
+    },
+    publish: (sessionId, entry) => publishAgentCollaborationEntry(emit, sessionId, entry),
+    activeRunId: (sessionId) => activeSessionRuns.get(sessionId)?.runId,
+    steer: (sessionId, content) => steerPiTurn(sessionId, content),
+    recordCollaboration: (sessionId, event) => {
+      const recorder = activeTurnRecorders.get(sessionId)
+      if (recorder) {
+        recordTurnEntry(sessionId, { kind: 'agent-collaboration', source: 'host', event })
+        return true
+      }
+      return recordAgentCollaborationEvent(
+        state.snapshot.sessions,
+        sessionId,
+        event,
+        (entry) => publishAgentCollaborationEntry(emit, sessionId, entry),
+      )
+    },
+    recordLifecycle: (sessionId, lifecycle, runId, reason) => {
+      const recorder = activeTurnRecorders.get(sessionId)
+      if (recorder) {
+        const event = agentLifecycleEventForSession(state.snapshot.sessions, sessionId, lifecycle, runId, reason, recorder.entries)
+        if (!event) return false
+        recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event })
+        return true
+      }
+      return recordAgentLifecycle(
+        state.snapshot.sessions,
+        sessionId,
+        lifecycle,
+        runId,
+        reason,
+        (entry) => publishAgentLifecycleEntry(emit, sessionId, entry),
+      )
+    },
+    interrupt: (_sessionId, runId) => {
+      const queued = state.snapshot.queue.find((run) => run.runId === runId && run.status === 'queued')
+      if (queued) {
+        queued.status = 'interrupted'
+        return true
+      }
+      const active = [...activeSessionRuns.values()].find((run) => run.runId === runId)
+      if (active) active.interrupt = 'user'
+      return interruptPiTurn(runId, 'user') || Boolean(active)
+    },
   }
 }
 
@@ -2113,12 +2311,15 @@ function refreshIterationSettings(input: {
   sessionId: string
   runId: string
   iteration: number
+  freezeUnattended?: boolean
 }): { settings: PiSettings; revision: number } {
   if (input.latestRevision === input.effectiveRevision) {
     return { settings: input.current, revision: input.effectiveRevision }
   }
   const approvalMode = stricterApprovalMode(input.current.approvalMode, input.latest.approvalMode)
-  const unattended = input.current.unattended || input.latest.unattended
+  const unattended = input.freezeUnattended
+    ? input.current.unattended
+    : input.current.unattended || input.latest.unattended
   const settings: PiSettings = {
     ...input.current,
     ...(!('provider' in input.admittedProfile) ? { provider: input.latest.provider } : {}),
@@ -2747,6 +2948,7 @@ function handleInitialization(
   state.instructionRepositoryNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'instructions-v1')
   state.reviewNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'review-v1')
   state.agentTreeNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'agent-tree-v1')
+  state.agentCollaborationNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'agent-collaboration-v1')
   const result = readyResult(state.negotiatedProtocolVersion)
   return [
     { event: 'host/ready', payload: {
@@ -4352,6 +4554,26 @@ function executePiHostCodeRequest(execution: PiHostToolExecutionInput): PiHostMe
   })()
 }
 
+function childWorkspaceToolFailure(
+  state: HostState,
+  sessionId: string | undefined,
+  toolName: PiBuiltinToolName,
+  cwd: string,
+  args: Record<string, unknown>,
+  id: string | number,
+): PiHostMessage[] | undefined {
+  if (!sessionId || (toolName !== 'write' && toolName !== 'edit' && toolName !== 'bash')) return undefined
+  const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
+  const workspace = session?.agentAdmission?.workspace
+  if (!session || !workspace) return undefined
+  if (toolName === 'bash' && workspace.mode !== 'isolated-worktree') {
+    return [errorResponse(id, 'forbidden', 'Shared child workspace cannot prove Bash write scope; use an isolated worktree')]
+  }
+  const target = toolName === 'bash' ? cwd : typeof args.path === 'string' ? resolve(cwd, args.path) : ''
+  const access = state.agentCommunication.assertWrite(session, target)
+  return access.ok ? undefined : [errorResponse(id, 'forbidden', access.reason)]
+}
+
 function executePiHostBuiltinRequest(execution: PiHostToolExecutionInput): PiHostMessage[] | Promise<PiHostMessage[]> {
   const { state, input, id, invocationOrigin, emit } = execution
   const params = input.params || {}
@@ -4375,6 +4597,8 @@ function executePiHostBuiltinRequest(execution: PiHostToolExecutionInput): PiHos
   const args = validation.arguments
   const { envelope } = split
   const sideEffect = toolName === 'write' || toolName === 'edit' || toolName === 'bash'
+  const workspaceFailure = childWorkspaceToolFailure(state, envelope.sessionId, toolName, envelope.cwd, args, id)
+  if (workspaceFailure) return workspaceFailure
   const bashDecision = toolName === 'bash'
     ? decideBashAction(String(args.command || ''), () => 'allow', state.snapshot.settings.bashRequireAsk ? 'ask' : 'allow')
     : undefined
@@ -4392,6 +4616,222 @@ function executePiHostBuiltinRequest(execution: PiHostToolExecutionInput): PiHos
   })
 }
 
+function handleRunRequest(state: HostState, input: Partial<InternalPiHostRequest>, id: string | number, emit?: (message: PiHostMessage) => void) {
+  return handlePiHostRunDomain({
+    method: input.method!, params: input.params, id, snapshot: state.snapshot,
+    commitQueue: (queue) => {
+      state.snapshot.queue = queue
+      state.snapshot.cursor += 1
+      emit?.({ event: 'host/queue', payload: { cursor: state.snapshot.cursor, queueRevision: new PiRunQueue(24, queue).revision() } })
+    },
+    isSettlement: isPiTurnSettlement,
+    handleAttachment: () => handleAttachmentRequest(state, input, id, emit),
+    recordLifecycle: (sessionId, lifecycle, runId, reason) => {
+      const recorded = recordAgentLifecycle(state.snapshot.sessions, sessionId, lifecycle, runId, reason, (entry) => publishAgentLifecycleEntry(emit, sessionId, entry))
+      if (recorded) state.snapshot.cursor += 1
+      return recorded
+    },
+    onSettled: (run, settlement) => {
+      const communicationState = agentCommunicationState(state, emit)
+      state.agentCommunication.recordCompletion(communicationState, {
+        sessionId: run.sessionId, runId: run.runId,
+        settlement: agentLifecycleFromTurnSettlement(settlement) as 'completed' | 'failed' | 'cancelled' | 'interrupted',
+        summary: `Child run settled as ${settlement}`,
+      })
+      state.agentCommunication.drainNextFollowUp(communicationState, run.sessionId)
+    },
+    canClaim: (run) => !activeSessionRuns.has(run.sessionId),
+  })
+}
+
+function handleAgentRequest(state: HostState, input: Partial<InternalPiHostRequest>, id: string | number, emit?: (message: PiHostMessage) => void) {
+  if (!input.method?.startsWith('agents/')) return undefined
+  if (input.method === 'agents/list') {
+    if (!state.agentTreeNegotiated) return [errorResponse(id, 'protocol_mismatch', 'agent-tree-v1 capability was not negotiated')]
+    return handlePiHostAgentDomain({
+      method: input.method, params: input.params, id, sessions: state.snapshot.sessions,
+      queue: state.snapshot.queue, activeSessionIds: new Set(activeSessionRuns.keys()),
+    })
+  }
+  if (!state.agentCollaborationNegotiated) return [errorResponse(id, 'protocol_mismatch', 'agent-collaboration-v1 capability was not negotiated')]
+  return state.agentCommunication.handle({ id, method: input.method, params: input.params, state: agentCommunicationState(state, emit) })
+}
+
+type ActiveTurnSubmissionInput = {
+  state: HostState
+  request: Partial<InternalPiHostRequest>
+  id: string | number
+  sessionId: string
+  runId: string
+  prompt: string
+  activeRun: { runId: string; cancelled: boolean; interrupt?: PiTurnInterruptReason }
+  emit?: (message: PiHostMessage) => void
+}
+
+function activeFollowUpMode(request: Partial<InternalPiHostRequest>): 'steer' | 'queue' | undefined {
+  if (request.params?.followUpMode === 'steer' || request.params?.mode === 'steer') return 'steer'
+  if (request.params?.followUpMode === 'queue' || request.params?.mode === 'queue' || request.params?.queue === true) return 'queue'
+  return undefined
+}
+
+function activeFollowUpIdentity(request: Partial<InternalPiHostRequest>) {
+  const clientMessageId = typeof request.params?.clientMessageId === 'string' && request.params.clientMessageId.trim()
+    ? request.params.clientMessageId.trim().slice(0, 256)
+    : undefined
+  const expectedActiveRunId = typeof request.params?.expectedActiveRunId === 'string'
+    ? request.params.expectedActiveRunId
+    : undefined
+  return { clientMessageId, expectedActiveRunId }
+}
+
+function handleActiveSteer(input: ActiveTurnSubmissionInput): PiHostMessage[] {
+  const { state, request, id, sessionId, runId, prompt, activeRun, emit } = input
+  const { clientMessageId, expectedActiveRunId } = activeFollowUpIdentity(request)
+  if (expectedActiveRunId && expectedActiveRunId !== activeRun.runId) return [errorResponse(id, 'conflict', `Active Pi run changed: ${activeRun.runId}`)]
+  const queue = new PiRunQueue(24, state.snapshot.queue)
+  const duplicate = clientMessageId ? queue.findByClientMessageId(clientMessageId) : undefined
+  if (duplicate) return [{ id, result: { sessionId, runId: duplicate.targetRunId || activeRun.runId, settlement: 'interrupted' as const, queued: 'steer' as const, followUp: duplicate, queue: queue.snapshot(), queueRevision: queue.revision() } }]
+  try {
+    if (!steerPiTurn(sessionId, prompt)) return [errorResponse(id, 'invalid_request', 'Active Pi session cannot accept steering messages')]
+  } catch (error) {
+    return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Unable to steer active Pi session')]
+  }
+  const receipt = queue.recordAcceptedSteer({
+    runId, sessionId, prompt, trigger: 'interactive',
+    profile: request.params?.profile && typeof request.params.profile === 'object' ? { ...(request.params.profile as Record<string, unknown>) } : {},
+    ...(clientMessageId ? { clientMessageId } : {}), targetRunId: activeRun.runId,
+  })
+  state.snapshot.queue = queue.snapshot()
+  state.snapshot.cursor += 1
+  emit?.({ event: 'host/queue', payload: { cursor: state.snapshot.cursor, queueRevision: queue.revision() } })
+  state.agentCommunication.notify(sessionId, { outcome: 'steer' })
+  return [{ id, result: { sessionId, runId: activeRun.runId, settlement: 'interrupted' as const, queued: 'steer' as const, followUp: receipt, queue: state.snapshot.queue, queueRevision: queue.revision() } }]
+}
+
+function handleActiveQueue(input: ActiveTurnSubmissionInput): PiHostMessage[] {
+  const { state, request, id, sessionId, runId, prompt, emit } = input
+  const { clientMessageId } = activeFollowUpIdentity(request)
+  const queuedLifecycle = agentLifecycleEventForSession(
+    state.snapshot.sessions,
+    sessionId,
+    'queued',
+    runId,
+    undefined,
+    activeTurnRecorders.get(sessionId)?.entries,
+  )
+  if (!queuedLifecycle) return [errorResponse(id, 'invalid_request', 'Illegal agent lifecycle transition')]
+  const outcome = enqueuePiHostRun({
+    queue: state.snapshot.queue,
+    run: {
+      runId,
+      sessionId,
+      prompt,
+      trigger: 'interactive',
+      profile: request.params?.profile && typeof request.params.profile === 'object'
+        ? { ...(request.params.profile as Record<string, unknown>) }
+        : {},
+      status: 'queued',
+      action: 'queue',
+      ...(clientMessageId ? { clientMessageId } : {}),
+    },
+    recordLifecycle: () => {
+      const recorder = activeTurnRecorders.get(sessionId)
+      if (!recorder) return false
+      recorder.deferredLifecycle = [...(recorder.deferredLifecycle || []), queuedLifecycle]
+      return true
+    },
+  })
+  if (!outcome.ok) return [errorResponse(id, 'invalid_request', outcome.message)]
+  state.snapshot.queue = outcome.queue
+  state.snapshot.cursor += 1
+  emit?.({ event: 'host/queue', payload: { cursor: state.snapshot.cursor, queueRevision: new PiRunQueue(24, state.snapshot.queue).revision() } })
+  const accepted = state.snapshot.queue.find((item) => item.runId === runId)
+  return [{ id, result: { sessionId, runId, settlement: 'interrupted' as const, queued: 'queue' as const, queue: state.snapshot.queue, followUp: accepted, queueRevision: new PiRunQueue(24, state.snapshot.queue).revision() } }]
+}
+
+function handleActiveTurnSubmission(input: ActiveTurnSubmissionInput): PiHostMessage[] {
+  const mode = activeFollowUpMode(input.request)
+  if (mode === 'steer') return handleActiveSteer(input)
+  if (mode === 'queue') return handleActiveQueue(input)
+  return [errorResponse(input.id, 'invalid_request', `Pi session already has an active run: ${input.activeRun.runId}`)]
+}
+
+function admittedTurnWorkspace(
+  session: SessionRecord,
+  explicitWorkspaceRoot: string | undefined,
+): { cwd: string } | { error: string } {
+  const admittedWorkspaceRoot = session.agentAdmission?.workspace.mode === 'isolated-worktree'
+    ? session.agentAdmission.workspace.worktreePath
+    : session.agentAdmission?.workspace.projectRoot
+  if (session.agentAdmission?.workspace.mode === 'isolated-worktree'
+    && (!session.agentAdmission.workspace.verified || !admittedWorkspaceRoot)) {
+    return { error: 'Isolated child worktree has no verified workspace identity' }
+  }
+  if (admittedWorkspaceRoot && explicitWorkspaceRoot) {
+    try {
+      if (realpathSync(explicitWorkspaceRoot) !== realpathSync(admittedWorkspaceRoot)) {
+        return { error: 'Turn cwd does not match the Host-admitted child workspace' }
+      }
+    } catch {
+      return { error: 'Turn cwd cannot be verified against the admitted workspace' }
+    }
+  }
+  return { cwd: admittedWorkspaceRoot || explicitWorkspaceRoot || process.cwd() }
+}
+
+function recordRunningAgentLifecycle(state: HostState, sessionId: string, runId: string): void {
+  const event = agentLifecycleEventForSession(state.snapshot.sessions, sessionId, 'running', runId)
+  if (event) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event })
+}
+
+function recordTerminalAgentLifecycle(
+  state: HostState,
+  sessionId: string,
+  runId: string,
+  settlement: PiTurnSettlement,
+  entries: readonly { kind: string; event?: unknown }[],
+): void {
+  const event = agentLifecycleEventForSession(
+    state.snapshot.sessions,
+    sessionId,
+    agentLifecycleFromTurnSettlement(settlement),
+    runId,
+    undefined,
+    entries,
+  )
+  if (event) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event })
+}
+
+
+function duplicateFollowUpResponse(state: HostState, request: unknown): PiHostMessage[] | undefined {
+  if (!state.initialized || !request || typeof request !== 'object') return undefined
+  const input = request as Partial<InternalPiHostRequest>
+  if (input.method !== 'turn/submit' || typeof input.params?.clientMessageId !== 'string') return undefined
+  const clientMessageId = input.params.clientMessageId.trim()
+  const duplicate = state.snapshot.queue.find((item) => item.clientMessageId === clientMessageId)
+  if (!duplicate || duplicate.sessionId !== input.params?.sessionId) return undefined
+  const id = typeof input.id === 'string' || typeof input.id === 'number' ? input.id : ''
+  const queue = new PiRunQueue(24, state.snapshot.queue)
+  return [{ id, result: {
+    sessionId: duplicate.sessionId,
+    runId: duplicate.action === 'steer' ? duplicate.targetRunId || duplicate.runId : duplicate.runId,
+    settlement: 'interrupted' as const,
+    queued: duplicate.action === 'steer' ? 'steer' as const : 'queue' as const,
+    followUp: duplicate,
+    queue: queue.snapshot(),
+    queueRevision: queue.revision(),
+  } }]
+}
+
+function handlePiHostRequestWithFollowUpDedupe(
+  state: HostState,
+  request: unknown,
+  emit?: (message: PiHostMessage) => void,
+  checkpointWriter?: CompactionCheckpointWriter,
+) {
+  return duplicateFollowUpResponse(state, request)
+    ?? handlePiHostRequest(state, request, emit, checkpointWriter)
+}
 
 export function handlePiHostRequest(
   state: HostState,
@@ -4428,39 +4868,9 @@ export function handlePiHostRequest(
   if (input.method === 'state/snapshot') {
     return projectPiHostStateSnapshot(state, id)
   }
-  const runResponse = handlePiHostRunDomain({
-    method: input.method,
-    params: input.params,
-    id,
-    snapshot: state.snapshot,
-    commitQueue: (queue) => { state.snapshot.queue = queue; state.snapshot.cursor += 1 },
-    isSettlement: isPiTurnSettlement,
-    handleAttachment: () => handleAttachmentRequest(state, input, id, emit),
-    recordLifecycle: (sessionId, lifecycle, runId, reason) => {
-      const recorded = recordAgentLifecycle(
-        state.snapshot.sessions,
-        sessionId,
-        lifecycle,
-        runId,
-        reason,
-        (entry) => publishAgentLifecycleEntry(emit, sessionId, entry),
-      )
-      if (recorded) state.snapshot.cursor += 1
-      return recorded
-    },
-  })
+  const runResponse = handleRunRequest(state, input, id, emit)
   if (runResponse) return runResponse
-  if (input.method === 'agents/list' && !state.agentTreeNegotiated) {
-    return [errorResponse(id, 'protocol_mismatch', 'agent-tree-v1 capability was not negotiated')]
-  }
-  const agentResponse = handlePiHostAgentDomain({
-    method: input.method,
-    params: input.params,
-    id,
-    sessions: state.snapshot.sessions,
-    queue: state.snapshot.queue,
-    activeSessionIds: new Set(activeSessionRuns.keys()),
-  })
+  const agentResponse = handleAgentRequest(state, input, id, emit)
   if (agentResponse) return agentResponse
   const sessionResponse = handlePiHostSessionDomain({
     method: input.method,
@@ -4538,52 +4948,28 @@ export function handlePiHostRequest(
     }
     const activeRun = activeSessionRuns.get(sessionId)
     if (activeRun && activeRun.runId !== runId) {
-      const mode = input.params?.followUpMode === 'steer' || input.params?.mode === 'steer'
-        ? 'steer'
-        : input.params?.followUpMode === 'queue' || input.params?.mode === 'queue' || input.params?.queue === true
-          ? 'queue'
-          : undefined
-      if (mode === 'steer') {
-        try {
-          if (!steerPiTurn(sessionId, prompt)) return [errorResponse(id, 'invalid_request', 'Active Pi session cannot accept steering messages')]
-        } catch (error) {
-          return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Unable to steer active Pi session')]
-        }
-        return [{ id, result: { sessionId, runId: activeRun.runId, settlement: 'interrupted' as const, queued: 'steer' as const } }]
-      }
-      if (mode === 'queue') {
-        const queuedLifecycle = agentLifecycleEventForSession(
-          state.snapshot.sessions,
-          sessionId,
-          'queued',
-          runId,
-          undefined,
-          activeRun ? activeTurnRecorders.get(sessionId)?.entries : undefined,
-        )
-        if (!queuedLifecycle) return [errorResponse(id, 'invalid_request', 'Illegal agent lifecycle transition')]
-        const outcome = enqueuePiHostRun({
-          queue: state.snapshot.queue,
-          run: { runId, sessionId, prompt, trigger: 'interactive', profile: {}, status: 'queued' },
-          recordLifecycle: () => {
-            const recorder = activeTurnRecorders.get(sessionId)
-            if (!recorder) return false
-            recorder.deferredLifecycle = [...(recorder.deferredLifecycle || []), queuedLifecycle]
-            return true
-          },
-        })
-        if (!outcome.ok) return [errorResponse(id, 'invalid_request', outcome.message)]
-        state.snapshot.queue = outcome.queue; state.snapshot.cursor += 1
-        return [{ id, result: { sessionId, runId, settlement: 'interrupted' as const, queued: 'queue' as const, queue: state.snapshot.queue } }]
-      }
-      return [errorResponse(id, 'invalid_request', `Pi session already has an active run: ${activeRun.runId}`)]
+      return handleActiveTurnSubmission({ state, request: input, id, sessionId, runId, prompt, activeRun, emit })
     }
     const explicitWorkspaceRoot = typeof input.params?.cwd === 'string' && input.params.cwd.trim()
       ? input.params.cwd
       : undefined
-    const cwd = explicitWorkspaceRoot || process.cwd()
+    const workspaceAdmission = admittedTurnWorkspace(session, explicitWorkspaceRoot)
+    if ('error' in workspaceAdmission) return [errorResponse(id, 'forbidden', workspaceAdmission.error)]
+    const cwd = workspaceAdmission.cwd
     // Validate memory scope before opening an attachment/recorder. A failed
     // realpath must not leave an active run that can never settle or retry.
-    const contextPolicy = parsePiTurnContextPolicy(input.params?.contextPolicy)
+    const requestedContextPolicy = parsePiTurnContextPolicy(input.params?.contextPolicy)
+    const contextPolicy = session.agentAdmission
+      ? {
+          ...requestedContextPolicy,
+          memoryEnabled: false,
+          memoryWriteEnabled: false,
+          referenceChatHistory: false,
+          temporary: true,
+          project: cwd,
+          outboundShellMode: session.agentAdmission.policy.outbound || 'off',
+        }
+      : requestedContextPolicy
     let canonicalWorkspace
     try {
       canonicalWorkspace = canonicalProjectId(cwd)
@@ -4636,15 +5022,26 @@ export function handlePiHostRequest(
     const requestedAgentMode = admittedAgentMode(input.params?.profile)
     const planCompletionAction = admittedPlanCompletionAction(input.params?.profile)
     let effectiveAgentMode: PiAgentMode = requestedAgentMode
-    const admittedProfile = admittedProfileObject(input.params?.profile)
+    const requestedProfile = admittedProfileObject(input.params?.profile)
+    const admittedProfile = session.agentAdmission
+      ? { ...(session.profile || {}), ...requestedProfile }
+      : requestedProfile
     let effectiveSettingsRevision = state.snapshot.cursor
-    let turnSettings = state.snapshot.settings
+    let turnSettings = session.agentAdmission
+      ? compileEffectiveAgentProfile(state.snapshot.settings, session.profile as Partial<PiSettings>, {})
+      : state.snapshot.settings
     if (input.params?.profile && typeof input.params.profile === 'object') {
       try {
         const profilePatch = validatePiSettingsPatch(input.params.profile as Record<string, unknown>)
-        turnSettings = compileEffectiveAgentProfile(state.snapshot.settings, profilePatch, {})
+        turnSettings = compileEffectiveAgentProfile(turnSettings, profilePatch, {})
       } catch (error) {
         return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid Pi turn profile')]
+      }
+    }
+    if (session.agentAdmission) {
+      const turnPolicy = admittedChildTurnPolicy(session.agentAdmission, turnSettings)
+      if (!turnPolicy || !isRestrictiveAgentPolicy(session.agentAdmission.policy, turnPolicy)) {
+        return [errorResponse(id, 'forbidden', 'Child turn profile would widen its Host-admitted policy')]
       }
     }
     // Pi historically interprets an empty activeTools array as unrestricted.
@@ -4652,6 +5049,7 @@ export function handlePiHostRequest(
     // that becomes empty remains restrictive instead of widening to all tools.
     let turnActiveToolsRestricted = turnSettings.activeTools.length > 0
       || Object.prototype.hasOwnProperty.call(admittedProfile, 'activeTools')
+      || Boolean(session.agentAdmission)
     const instructionSnapshotPromise = rawInstructionSnapshotPromise.then((snapshot) =>
       sanitizeInstructionSnapshotForProvider({
         snapshot,
@@ -4736,8 +5134,7 @@ export function handlePiHostRequest(
       capabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
       instructionDelivery: { mode: 'explicit', exactSnapshot: true, detail: 'Pi Host admission snapshot' },
     })
-    const runningLifecycle = agentLifecycleEventForSession(state.snapshot.sessions, sessionId, 'running', runId)
-    if (runningLifecycle) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event: runningLifecycle })
+    recordRunningAgentLifecycle(state, sessionId, runId)
     recordTurnEntry(sessionId, {
       kind: 'notice',
       source: 'host',
@@ -4802,7 +5199,7 @@ export function handlePiHostRequest(
       else turnEvents.push(event)
     }
     let memoryContext = ''
-    let executionPrompt = prompt
+    let executionPrompt = childExecutionPrompt(session, prompt)
     let contextPreflightComplete = false
     let resolvedContextWindow = contextPolicy.contextWindowTokens
     activeSessionRuns.set(sessionId, { runId, cancelled: false })
@@ -5037,6 +5434,7 @@ export function handlePiHostRequest(
           sessionId,
           runId,
           iteration,
+          freezeUnattended: Boolean(session.agentAdmission),
         })
         turnSettings = refreshedSettings.settings
         effectiveSettingsRevision = refreshedSettings.revision
@@ -5114,19 +5512,17 @@ export function handlePiHostRequest(
             flushReasoning(sessionId)
             const message = (event as { message?: { role?: unknown; content?: unknown } }).message
             if (message?.role === 'assistant') {
-              const text = Array.isArray(message.content)
-                ? message.content
-                    .filter((part): part is { type: string; text: string } => Boolean(
-                      part && typeof part === 'object'
-                      && (part as { type?: unknown }).type === 'text'
-                      && typeof (part as { text?: unknown }).text === 'string',
-                    ))
-                    .map((part) => part.text)
-                    .join('')
-                : typeof message.content === 'string' ? message.content : ''
-              if (text.trim()) {
+              const segments = piAssistantTextSegments(message.content)
+              if (segments.length > 0) {
                 spokenThisStep = true
-                recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: text })
+                for (const segment of segments) {
+                  recordTurnEntry(sessionId, {
+                    kind: 'assistant-text',
+                    source: 'model',
+                    content: segment.content,
+                    ...(segment.phase ? { phase: segment.phase } : {}),
+                  })
+                }
               }
             }
           }
@@ -5310,7 +5706,7 @@ export function handlePiHostRequest(
           }
           const answer = piTurnFinalAnswer(turn.items)
           if (turn.settlement === 'answered' && !spokenThisStep) {
-            recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: answer })
+            recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: answer, phase: 'final_answer' })
           }
           // A step whose thinking was never followed by a message or a tool
           // still thought; closing the step is the last ordered boundary it has.
@@ -5378,15 +5774,7 @@ export function handlePiHostRequest(
           : orchestration.settlement,
       )
       recorder.step = orchestration.iterations || recorder.step
-      const terminalLifecycle = agentLifecycleEventForSession(
-        state.snapshot.sessions,
-        sessionId,
-        agentLifecycleFromTurnSettlement(orchestration.settlement),
-        runId,
-        undefined,
-        recorder.entries,
-      )
-      if (terminalLifecycle) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event: terminalLifecycle })
+      recordTerminalAgentLifecycle(state, sessionId, runId, orchestration.settlement, recorder.entries)
       recordTurnEntry(sessionId, {
         kind: 'turn-end',
         source: 'host',
@@ -5545,7 +5933,7 @@ async function dispatchPiHostRequest(
   checkpointWriter?: CompactionCheckpointWriter,
 ): Promise<PiHostDispatchOutcome> {
   const cursorBefore = state.snapshot.cursor
-  const messages = await handlePiHostRequest(state, request, emit, checkpointWriter)
+  const messages = await handlePiHostRequestWithFollowUpDedupe(state, request, emit, checkpointWriter)
   const cursorAfter = state.snapshot.cursor
   return {
     messages,
@@ -5782,6 +6170,70 @@ function handleBoundedHostRead(
     || handleMemoryControlPackageRead(state, input as Partial<PiHostRequest>, id)
 }
 
+function resolveDelegatedSpawnGoal(input: {
+  parentSessionId: string
+  parentRunId: string
+  objective: string
+  context: PiContextPacket
+  goalId?: string
+}): { objective: string; context: PiContextPacket; parentState?: WorkingState } {
+  if (!input.goalId) return { objective: input.objective, context: input.context }
+  const recorder = activeTurnRecorders.get(input.parentSessionId)
+  if (!recorder || recorder.proposalState.runId !== input.parentRunId) {
+    throw new Error('parent delegated goal is not active')
+  }
+  const parentState = recorder.delegatedWorkingState || recorder.proposalState
+  const goal = parentState.goals.find((candidate) => candidate.id === input.goalId)
+  if (!goal || goal.status !== 'pending' || !goal.completionPredicate) {
+    throw new Error('assigned parent goal is not pending and verifiable')
+  }
+  return {
+    objective: goal.description,
+    context: {
+      objective: boundedAgentText(goal.description, 800),
+      facts: [],
+      constraints: parentState.constraints.map((constraint) => boundedAgentText(constraint, 400)),
+    },
+    parentState,
+  }
+}
+
+function finalizeDelegatedSpawn(input: {
+  state: HostState
+  parentSessionId: string
+  childSessionId: string
+  runId: string
+  objective: string
+  context: PiContextPacket
+  goalId?: string
+  parentState?: WorkingState
+}): { sessionId: string; runId: string; objective: string; delegationId?: string } {
+  const child = input.state.snapshot.sessions.find((session) => session.id === input.childSessionId)
+  if (!child) throw new Error('child session was not persisted')
+  if (!input.goalId || !input.parentState) {
+    return { sessionId: input.childSessionId, runId: input.runId, objective: input.objective }
+  }
+  const rawAssignment = createDelegatedGoalAssignment({
+    state: input.parentState,
+    goalId: input.goalId,
+    parentSessionId: input.parentSessionId,
+    childSessionId: input.childSessionId,
+  })
+  const assignment = {
+    ...rawAssignment,
+    constraints: rawAssignment.constraints.map((constraint) => boundedAgentText(constraint, 400)),
+    goal: { ...rawAssignment.goal, description: boundedAgentText(rawAssignment.goal.description, 800) },
+  }
+  child.context = { ...input.context, delegatedGoal: assignment }
+  recordTurnEntry(input.parentSessionId, { kind: 'delegation-assignment', source: 'host', assignment })
+  return {
+    sessionId: input.childSessionId,
+    runId: input.runId,
+    delegationId: assignment.delegationId,
+    objective: assignment.goal.description,
+  }
+}
+
 export function createPiHostServer(
   send: (message: PiHostMessage) => void,
   initialSnapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; extensions?: PiExtension[]; attachments?: PiHostAttachment[] } = {
@@ -5841,6 +6293,8 @@ export function createPiHostServer(
     instructionRepositoryNegotiated: false,
     reviewNegotiated: false,
     agentTreeNegotiated: false,
+    agentCollaborationNegotiated: false,
+    agentCommunication: new PiAgentCommunicationDomain(),
     reviewArtifactStore,
     reviewWorkspaces,
     reviewProjection,
@@ -5864,6 +6318,7 @@ export function createPiHostServer(
   // the Host honest across process restart; renderer reloads do not recreate
   // this server and therefore preserve their active records.
   attachmentJournal.recoverOrphanedActive()
+  state.agentCommunication.recover(agentCommunicationState(state))
   for (const session of snapshot.sessions) {
     state.toolContracts.reserveNextRevision(session.id, session.toolContractRevisionFloor || 1)
   }
@@ -5878,75 +6333,26 @@ export function createPiHostServer(
     (sessionId, entry) => recordTurnEntry(sessionId, entry),
   ))
   setPiDelegationBridge({
-    createChild: async ({ parentSessionId, role, profile, context, depth }) => {
-      const request = {
-        id: `pack-child-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        method: 'sessions/create' as const,
-        params: { parentSessionId, role, profile, context, depth },
-      }
-      const responses = await Promise.resolve(handlePiHostRequest(state, request))
+    spawnChild: async ({ spawnId, runId, parentSessionId, parentRunId, objective, role, profile, context, depth, workspace, goalId }) => {
+      const assigned = resolveDelegatedSpawnGoal({ parentSessionId, parentRunId, objective, context, goalId })
+      const responses = await Promise.resolve(state.agentCommunication.handle({
+        id: `pack-child-${spawnId}`,
+        method: 'agents/spawn',
+        params: {
+          spawnId, runId, parentAgentId: parentSessionId, originRunId: parentRunId,
+          objective: assigned.objective, role, profile, context: assigned.context, depth,
+          workspace: workspace || { mode: 'shared-readonly' },
+        },
+        state: agentCommunicationState(state, send),
+      }))
       const response = (Array.isArray(responses) ? responses : []).find((message) => !('event' in message)) as PiHostResponse | undefined
       if (!response || response.error) throw new Error(response?.error?.message || 'child session failed')
-      return { sessionId: String(response.result?.sessionId) }
-    },
-    createGoalChild: async ({ parentSessionId, parentRunId, goalId, role, profile, depth }) => {
-      const recorder = activeTurnRecorders.get(parentSessionId)
-      if (!recorder || recorder.proposalState.runId !== parentRunId) throw new Error('parent delegated goal is not active')
-      const parentState = recorder.delegatedWorkingState || recorder.proposalState
-      const goal = parentState.goals.find((candidate) => candidate.id === goalId)
-      if (!goal || goal.status !== 'pending' || !goal.completionPredicate) throw new Error('assigned parent goal is not pending and verifiable')
-      const request = {
-        id: `pack-goal-child-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        method: 'sessions/create' as const,
-        params: {
-          parentSessionId,
-          role,
-          profile,
-          depth,
-          context: {
-            objective: goal.description,
-            facts: [],
-            constraints: [...parentState.constraints],
-          },
-        },
-      }
-      const responses = await Promise.resolve(handlePiHostRequest(state, request))
-      const response = (Array.isArray(responses) ? responses : []).find((message) => !('event' in message)) as PiHostResponse | undefined
-      if (!response || response.error) throw new Error(response?.error?.message || 'goal child session failed')
-      const childSessionId = String(response.result?.sessionId || '')
-      const child = state.snapshot.sessions.find((session) => session.id === childSessionId)
-      if (!child) throw new Error('goal child session was not persisted')
-      const assignment = createDelegatedGoalAssignment({
-        state: parentState,
-        goalId,
-        parentSessionId,
-        childSessionId,
+      const result = response.result as (Record<string, unknown> & { sessionId?: string; runId?: string }) | undefined
+      const childSessionId = String(result?.sessionId || '')
+      return finalizeDelegatedSpawn({
+        state, parentSessionId, childSessionId, runId: String(result?.runId || runId),
+        objective: assigned.objective, context: assigned.context, goalId, parentState: assigned.parentState,
       })
-      child.context = {
-        objective: assignment.goal.description,
-        facts: [],
-        constraints: [...assignment.constraints],
-        delegatedGoal: assignment,
-      }
-      recordTurnEntry(parentSessionId, { kind: 'delegation-assignment', source: 'host', assignment })
-      return { sessionId: childSessionId, delegationId: assignment.delegationId, objective: assignment.goal.description }
-    },
-    enqueueChildRun: async ({ runId, sessionId, prompt }) => {
-      const outcome = enqueuePiHostRun({
-        queue: state.snapshot.queue,
-        run: { runId, sessionId, prompt, trigger: 'interactive', profile: {}, status: 'queued' },
-        recordLifecycle: (targetSessionId, lifecycle, targetRunId, reason) => recordAgentLifecycle(
-          state.snapshot.sessions,
-          targetSessionId,
-          lifecycle,
-          targetRunId,
-          reason,
-          (entry) => publishAgentLifecycleEntry(send, targetSessionId, entry),
-        ),
-      })
-      if (!outcome.ok) throw new Error(outcome.message)
-      state.snapshot.queue = outcome.queue
-      state.snapshot.cursor += 1
     },
     listRuns: () => [
       ...state.snapshot.queue.map((run) => ({

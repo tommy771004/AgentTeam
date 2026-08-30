@@ -20,7 +20,7 @@ import { UnifiedDiffView } from './UnifiedDiffView'
 
 export type TimelineItem =
   | { id: string; kind: 'reasoning'; content: string; chars: number }
-  | { id: string; kind: 'assistant'; content: string; draft?: boolean }
+  | { id: string; kind: 'assistant'; content: string; phase?: 'commentary' | 'final_answer'; draft?: boolean }
   | { id: string; kind: 'notice'; content: string }
   | { id: string; kind: 'context'; summary: string; operations: ProcessOperation[] }
   | {
@@ -85,7 +85,11 @@ function ContextTimelineRow({ row, open, toggle, index }: { row: Extract<Timelin
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineItem, { kind: 'assistant' }> }) {
   return (
-    <div className={row.draft ? 'agent-streaming-answer py-2' : 'py-2'} data-timeline-row={row.draft ? 'assistant-draft' : 'assistant'}>
+    <div
+      className={row.draft ? 'agent-streaming-answer py-2' : 'py-2'}
+      data-assistant-phase={row.phase || 'legacy'}
+      data-timeline-row={row.draft ? 'assistant-draft' : 'assistant'}
+    >
       <div className={row.draft ? 'agent-streaming-body' : ''} style={row.draft ? { animation: 'stream-in 420ms cubic-bezier(0.22,0.61,0.25,1) both' } : undefined}>
         <MarkdownBody content={row.content} streaming={row.draft} />
       </div>
@@ -104,8 +108,11 @@ function ToolDiffStats({ row }: { row: Extract<TimelineItem, { kind: 'tool' }> }
 }
 
 function ToolApproval({ row }: { row: Extract<TimelineItem, { kind: 'tool' }> }) {
-  if (!row.approval) return null
-  return <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${row.approval === 'deny' ? 'bg-red-tint text-red' : 'bg-inset text-ink-3'}`} title={row.approvalReason || row.approval}>{row.approval}</span>
+  // Successful admission is already implied by the tool having run. Keep the
+  // durable approval on the row for audit/replay, but do not repeat the raw
+  // protocol word `allow` in the task conversation. A denial remains visible.
+  if (!row.approval || row.approval === 'allow') return null
+  return <span className="shrink-0 rounded bg-red-tint px-1.5 py-0.5 text-[10px] font-medium text-red" title={row.approvalReason || row.approval}>{row.approval}</span>
 }
 
 function isSearchTool(tool: string): boolean {
@@ -192,9 +199,9 @@ function ToolTimelineRow({ row, open, toggle, index, grouped = false }: { row: E
     <>
       <ToolRowIcon row={row} pending={pending} failed={failed} expandable={expandable} open={open} />
       <ShimmerLabel active={pending} className="shrink-0 font-medium">{label}</ShimmerLabel>
+      {row.detail ? <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink-3 font-[family-name:var(--font-mono)]" title={row.detail}>{row.detail}</span> : null}
       <ToolDiffStats row={row} />
       <ToolApproval row={row} />
-      {row.detail ? <span className="min-w-0 max-w-full shrink truncate text-[11.5px] text-ink-3 font-[family-name:var(--font-mono)]">{row.detail}</span> : null}
     </>
   )
   return (
