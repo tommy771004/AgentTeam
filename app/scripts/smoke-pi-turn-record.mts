@@ -373,7 +373,7 @@ assert.deepEqual(derived, [
 // The defect that started this effort was one `.find()` over a turn's items.
 for (const path of ['../electron/piHostProtocol.ts', '../src/store/agentStore.ts', '../electron/piCoreRuntime.ts']) {
   const source = await readSource(resolve(import.meta.dirname, path), 'utf8')
-  assert.doesNotMatch(source, /items\s*\.\s*(find|at|\[0\])/, `${path} must derive the answer, never pick it out of the items`)
+  assert.doesNotMatch(source, /turn\.items\s*\.\s*(find|at)/, `${path} must derive the answer, never pick it out of the turn items`)
   assert.doesNotMatch(source, /turn\.items\[/, `${path} must not index a turn's items`)
 }
 

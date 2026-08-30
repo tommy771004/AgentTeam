@@ -16,6 +16,16 @@ const workspace = await mkdtemp(join(tmpdir(), 'pi-mcp-native-workspace-'))
 const fixtureLog = join(stateDir, 'fixture-calls.jsonl')
 const requests: ModelRequest[] = []
 const dynamicName = 'mcp_fixture-mcp_inspect-item'
+const sceneActiveTools = ['load_capability', 'tool_search']
+const turnProfile = {
+  provider: 'loopback',
+  model: 'smoke-model',
+  thinkingLevel: 'off',
+  activeTools: sceneActiveTools,
+  approvalMode: 'full',
+  unattended: false,
+  compaction: 'manual',
+} as const
 const scripts: Array<{ name: string; args: Record<string, unknown> } | undefined> = [
   { name: 'tool_search', args: { query: 'inspect controlled MCP' } },
   { name: 'load_capability', args: { id: 'mcp-bridge' } },
@@ -60,17 +70,28 @@ const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-elec
 const output = createInterface({ input: host.stdout })
 const messages: Message[] = []
 output.on('line', (line) => messages.push(JSON.parse(line) as Message))
-const wait = async (id: number) => {
+const hostExited = new Promise<void>((resolveExit) => host.once('exit', () => resolveExit()))
+const wait = async (id: number, timeoutMs = 25_000) => {
+  const deadline = Date.now() + timeoutMs
   for (;;) {
     const found = messages.find((message) => message.id === id)
     if (found) return found
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) throw new Error(`timeout waiting for ${id}: ${JSON.stringify(messages.slice(-5))}`)
     await new Promise<Array<unknown>>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`timeout waiting for ${id}: ${JSON.stringify(messages.slice(-5))}`)), 25_000)
-      once(output, 'line').then((value) => { clearTimeout(timer); resolve(value) }, (error) => { clearTimeout(timer); reject(error) })
+      let timer: NodeJS.Timeout
+      const onLine = (...value: Array<unknown>) => { clearTimeout(timer); output.off('line', onLine); resolve(value) }
+      timer = setTimeout(() => { output.off('line', onLine); reject(new Error(`timeout waiting for ${id}: ${JSON.stringify(messages.slice(-5))}`)) }, remaining)
+      output.once('line', onLine)
     })
   }
 }
-const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+const send = (id: number, method: string, params: Record<string, unknown> = {}) => {
+  if (host.exitCode !== null || host.stdin.destroyed || host.stdin.writableEnded) return false
+  return host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+}
+let turnStarted = false
+let turnSettled = false
 
 try {
   send(1, 'initialize', { protocolVersion: 2, capabilities: ['tool-contract-v1'] })
@@ -90,11 +111,25 @@ try {
   assert.equal(beforeEntry?.extensionId, 'fixture-mcp')
   assert.equal(beforeEntry?.upstreamToolName, 'inspect-item')
 
-  send(5, 'turn/submit', {
+  send(5, 'settings/update', turnProfile)
+  const settingsAck = await wait(5)
+  assert.equal(settingsAck.error, undefined, `settings/update failed: ${settingsAck.error?.message}`)
+  const acknowledgedSettings = settingsAck.result?.settings
+  assert.equal(acknowledgedSettings?.provider, turnProfile.provider)
+  assert.equal(acknowledgedSettings?.model, turnProfile.model)
+  assert.equal(acknowledgedSettings?.thinkingLevel, turnProfile.thinkingLevel)
+  assert.deepEqual(acknowledgedSettings?.activeTools, turnProfile.activeTools)
+  assert.equal(acknowledgedSettings?.approvalMode, turnProfile.approvalMode)
+  assert.equal(acknowledgedSettings?.unattended, turnProfile.unattended)
+  assert.equal(acknowledgedSettings?.compaction, turnProfile.compaction)
+
+  turnStarted = true
+  send(6, 'turn/submit', {
     sessionId, runId: 'mcp-native-run', cwd: workspace, prompt: 'Load and exercise the MCP native tool.',
-    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false },
+    profile: turnProfile,
   })
-  const settled = await wait(5)
+  const settled = await wait(6)
+  turnSettled = settled.result?.settlement !== undefined
   assert.equal(settled.error, undefined)
   assert.equal(settled.result?.settlement, 'answered', 'expected and transport failures remain recoverable tool results')
   assert.equal(requests.length, 6)
@@ -140,7 +175,8 @@ try {
     assert.equal(result.schemaDigest, call.schemaDigest)
   }
   const evidence = entries.filter((entry: any) => entry.kind === 'tool-evidence' && entry.tool === dynamicName)
-  assert.ok(evidence.some((entry: any) => entry.phase === 'decision' && entry.decision === 'allow'))
+  assert.equal(messages.some((message) => message.event === 'host/approval-requested'), false, 'full attended MCP run should not request interactive approval')
+  assert.equal(evidence.filter((entry: any) => entry.phase === 'decision' && entry.decision === 'allow').length, 3, 'each MCP call has one Host allow decision')
   assert.ok(evidence.every((entry: any) => entry.runId === 'mcp-native-run' && typeof entry.callId === 'string'))
   const preflights = entries.filter((entry: any) => entry.kind === 'skill-invocation'
     && entry.invocation?.toolIdentity?.tool === dynamicName)
@@ -157,8 +193,8 @@ try {
   }
 
   const revision = calls[0].contractRevision
-  send(6, 'tools/contract', { sessionId, revision, toolName: dynamicName })
-  const described = await wait(6)
+  send(7, 'tools/contract', { sessionId, revision, toolName: dynamicName })
+  const described = await wait(7)
   assert.equal(described.error, undefined)
   assert.equal(described.result?.contract?.contractDigest, calls[0].contractDigest)
   assert.equal(described.result?.contractTool?.schemaDigest, calls[0].schemaDigest)
@@ -166,8 +202,18 @@ try {
   assert.equal(described.result?.contractTool?.upstreamToolName, 'inspect-item')
   console.log('MCP native dynamic tool freezes schema, activates same-turn, reuses Host transport, and records policy identity')
 } finally {
-  host.stdin.end()
-  if (host.exitCode === null) await once(host, 'exit').catch(() => host.kill())
-  modelServer.close()
+  if (turnStarted && !turnSettled) {
+    send(90, 'turn/cancel', { runId: 'mcp-native-run' })
+    await wait(90, 2_000).catch(() => undefined)
+  }
+  if (host.exitCode === null && !host.stdin.destroyed) host.stdin.end()
+  if (host.exitCode === null) {
+    await Promise.race([hostExited, new Promise((resolveExit) => setTimeout(resolveExit, 4_000))])
+    if (host.exitCode === null) host.kill()
+    await Promise.race([hostExited, new Promise((resolveExit) => setTimeout(resolveExit, 2_000))])
+    if (host.exitCode === null) host.kill('SIGKILL')
+  }
+  output.close()
+  await new Promise<void>((resolveClose) => modelServer.close(() => resolveClose()))
   await Promise.all([rm(agentDir, { recursive: true, force: true }), rm(stateDir, { recursive: true, force: true }), rm(workspace, { recursive: true, force: true })])
 }

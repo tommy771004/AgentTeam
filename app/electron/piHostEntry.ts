@@ -18,6 +18,9 @@ import { JsonMemoryControlPackageRepository } from './memoryControlPackageReposi
 import { loadMemoryControlEvaluationAuthority } from './memoryControlEvaluationAuthority.ts'
 import { configurePiHostServiceTransport, resolvePiHostServiceResponse } from './piHostServices.ts'
 import { InstructionRepositoryError, SqliteInstructionRepository, UnavailableInstructionRepository } from './instructionRepository.ts'
+import { SqliteReviewArtifactStore } from './reviewArtifactStore.ts'
+import { SqliteReviewStateStore } from './reviewStateStore.ts'
+import { SqliteReviewVerificationStore } from './reviewVerificationStore.ts'
 
 type ParentPort = {
   on(event: 'message', listener: (event: { data: unknown }) => void): void
@@ -56,6 +59,10 @@ const checkpointDir = process.env.SUBAGENTS_PI_CHECKPOINT_DIR || path.join(path.
 const compactionCheckpoints = new JsonCompactionCheckpointStore(checkpointDir)
 const durableMemoryPath = process.env.SUBAGENTS_DURABLE_MEMORY_DB_PATH || path.join(path.dirname(statePath), 'durable-memory.sqlite')
 const instructionRepositoryPath = process.env.SUBAGENTS_INSTRUCTION_DB_PATH || path.join(path.dirname(statePath), 'instructions.sqlite')
+const reviewArtifactStorePath = process.env.SUBAGENTS_REVIEW_ARTIFACT_DB_PATH || path.join(path.dirname(statePath), 'review-artifacts.sqlite')
+const reviewStateStorePath = process.env.SUBAGENTS_REVIEW_STATE_DB_PATH || path.join(path.dirname(statePath), 'review-state.sqlite')
+const reviewVerificationStorePath = process.env.SUBAGENTS_REVIEW_VERIFICATION_DB_PATH || path.join(path.dirname(statePath), 'review-verification.sqlite')
+const reviewMutationRecoveryDir = process.env.SUBAGENTS_REVIEW_MUTATION_RECOVERY_DIR || path.join(path.dirname(statePath), 'review-mutation-recovery')
 const memoryControlPackagePath = process.env.SUBAGENTS_MEMORY_CONTROL_PACKAGE_PATH
   || path.join(path.dirname(statePath), 'memory-control-packages.json')
 const publishStorageFailure = (error: unknown) => {
@@ -80,6 +87,11 @@ const instructionRepository = await SqliteInstructionRepository.open(instruction
   }
   return new UnavailableInstructionRepository(failure)
 })
+// Review artifacts use their own WAL database and schema; they never share
+// memory or personalization tables/protocol methods.
+const reviewArtifactStore = await SqliteReviewArtifactStore.open(reviewArtifactStorePath)
+const reviewStateStore = await SqliteReviewStateStore.open(reviewStateStorePath)
+const reviewVerificationStore = await SqliteReviewVerificationStore.open(reviewVerificationStorePath)
 // Deliberately separate from DurableMemoryStore/SQLite: package lineage has
 // its own fail-closed repository and does not share memory migrations or CRUD.
 const memoryControlPackages = await JsonMemoryControlPackageRepository.open(memoryControlPackagePath)
@@ -209,7 +221,7 @@ const createConfiguredHost = (
   persist: Persist,
   refreshSubscriptionConfig: RefreshSubscriptionConfig,
   compactionCheckpoints: CompactionCheckpoints,
-) => createPiHostServer(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints, durableMemoryStore, memoryControlPackages, memoryControlMaintenanceToken, memoryControlEvaluationAuthority, instructionRepository)
+) => createPiHostServer(send, initialSnapshot, persist, refreshSubscriptionConfig, compactionCheckpoints, durableMemoryStore, memoryControlPackages, memoryControlMaintenanceToken, memoryControlEvaluationAuthority, instructionRepository, reviewArtifactStore, reviewStateStore, reviewVerificationStore, reviewMutationRecoveryDir)
 const createEntryHost = (
   send: HostSend,
   initialSnapshot: InitialSnapshot,
@@ -251,6 +263,9 @@ if (parentPort) {
       await disposeAllPiSessions()
       await durableMemoryStore.close()
       await instructionRepository.close()
+      await reviewArtifactStore.close()
+      await reviewStateStore.close()
+      await reviewVerificationStore.close()
     } catch (error) {
       process.exitCode = 1
       console.error('[pi-host] bounded shutdown failed', publishStorageFailure(error))

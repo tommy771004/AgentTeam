@@ -1,22 +1,34 @@
-import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
-import { storePiToolOutput, readPiStoredOutput } from '../piPackBridges.ts'
+import { registerPiExtensionPack, type PiPackTool, type PiToolContext } from '../piToolHost.ts'
+import { readToolOutputSpill, writeToolOutputSpill } from '../attachmentStore.ts'
 import { jsonOk, structuredFailure } from './packResults.ts'
 
 /** Shared helper for tools whose full output may exceed one model-visible page. */
-export function pagedText(text: string, maxChars: number): { content: Array<{ type: 'text'; text: string }>; details: Record<string, unknown> } {
-  const id = storePiToolOutput('tool_output_read', text)
+export function pagedText(text: string, maxChars: number, ctx: PiToolContext): { content: Array<{ type: 'text'; text: string }>; details: Record<string, unknown> } {
   if (text.length <= maxChars) {
-    return { content: [{ type: 'text', text }], details: { ok: true, outputId: id, truncated: false, totalChars: text.length } }
+    return { content: [{ type: 'text', text }], details: { ok: true, truncated: false, totalChars: text.length } }
   }
+  if (!ctx.runId?.trim()) {
+    return {
+      content: [{ type: 'text', text: '工具輸出超過頁面上限，但缺少 run identity，已拒絕建立未隔離的輸出 locator。' }],
+      details: { ok: false, truncated: true, totalChars: text.length, error: 'runId required for spilled output' },
+    }
+  }
+  const spill = writeToolOutputSpill({
+    runId: ctx.runId,
+    threadId: ctx.sessionId,
+    tool: 'tool_output_read',
+    output: text,
+    projectRoot: ctx.cwd,
+  })
   return {
-    content: [{ type: 'text', text: `${text.slice(0, maxChars)}\n…（已截斷；用 tool_output_read({ outputId: "${id}" }) 讀取全文）` }],
-    details: { ok: true, outputId: id, truncated: true, totalChars: text.length },
+    content: [{ type: 'text', text: `${text.slice(0, maxChars)}\n…（已截斷；用 tool_output_read({ outputId: "${spill.locator}" }) 讀取全文）` }],
+    details: { ok: true, outputId: spill.locator, truncated: true, totalChars: text.length, totalBytes: spill.bytes },
   }
 }
 
-const pagedJson = (prefix: string, data: unknown) => {
+const pagedJson = (prefix: string, data: unknown, ctx: PiToolContext) => {
   const text = `${prefix} ${JSON.stringify(data, null, 1)}`
-  const { content, details } = pagedText(text, 12_000)
+  const { content, details } = pagedText(text, 12_000, ctx)
   return { content, details }
 }
 
@@ -33,7 +45,7 @@ const tableParse: PiPackTool = {
     },
     required: ['text'],
   },
-  execute: async (args) => {
+  execute: async (args, ctx) => {
     const text = String(args.text || '')
     const delimiter = typeof args.delimiter === 'string' && args.delimiter.length === 1
       ? args.delimiter
@@ -45,7 +57,7 @@ const tableParse: PiPackTool = {
       const cells = line.split(delimiter)
       return Object.fromEntries(headers.map((header, index) => [header, (cells[index] ?? '').trim()]))
     })
-    return pagedJson(`解析 ${rows.length} 列 × ${headers.length} 欄`, rows)
+    return pagedJson(`解析 ${rows.length} 列 × ${headers.length} 欄`, rows, ctx)
   },
 }
 
@@ -62,7 +74,7 @@ const jsonExtractLite: PiPackTool = {
     },
     required: ['json'],
   },
-  execute: async (args) => {
+  execute: async (args, ctx) => {
     let document: unknown
     try {
       document = JSON.parse(String(args.json || ''))
@@ -70,7 +82,7 @@ const jsonExtractLite: PiPackTool = {
       return structuredFailure(error instanceof Error ? error.message : 'invalid JSON')
     }
     const path = String(args.path || '').trim()
-    if (!path) return pagedJson('讀取整份 JSON', document)
+    if (!path) return pagedJson('讀取整份 JSON', document, ctx)
     let current: unknown = document
     for (const segment of path.split('.')) {
       if (current == null || typeof current !== 'object') return structuredFailure(`路徑中斷於：${segment}`)
@@ -79,7 +91,7 @@ const jsonExtractLite: PiPackTool = {
       if (!(key in container)) return structuredFailure(`找不到鍵：${segment}`)
       current = container[key as keyof typeof container]
     }
-    return pagedJson(`${path} =`, current)
+    return pagedJson(`${path} =`, current, ctx)
   },
 }
 
@@ -91,24 +103,30 @@ const toolOutputRead: PiPackTool = {
   parameters: {
     type: 'object',
     properties: {
-      outputId: { type: 'string', description: 'Id returned by the truncated output' },
-      offset: { type: 'integer', description: 'Character offset to start from', default: 0 },
-      chars: { type: 'integer', description: 'Characters per page', default: 8000 },
+      outputId: { type: 'string', description: 'Run-scoped locator returned by the truncated output' },
+      offset: { type: 'integer', description: 'Byte offset to start from', default: 0 },
+      chars: { type: 'integer', description: 'Maximum bytes per page', default: 8000 },
     },
     required: ['outputId'],
   },
-  execute: async (args) => {
-    const stored = readPiStoredOutput(String(args.outputId || '').trim())
-    if (!stored) return structuredFailure(`查無工具輸出：${String(args.outputId || '')}`)
-    const offset = Math.max(0, Math.min(stored.text.length, Number(args.offset) || 0))
-    const chars = Math.max(200, Math.min(50_000, Number(args.chars) || 8000))
-    const slice = stored.text.slice(offset, offset + chars)
+  execute: async (args, ctx) => {
+    const runId = ctx.runId?.trim()
+    if (!runId) return structuredFailure('讀取工具輸出需要 admitted run identity')
+    const page = readToolOutputSpill({
+      locator: String(args.outputId || '').trim(),
+      runId,
+      projectRoot: ctx.cwd,
+      offset: Number(args.offset) || 0,
+      maxBytes: Number(args.chars) || 8000,
+    })
+    if (!page.ok) return structuredFailure(`查無工具輸出：${page.error || String(args.outputId || '')}`)
     return {
-      content: [{ type: 'text', text: slice }],
+      content: [{ type: 'text', text: page.output || '' }],
       details: {
         ok: true,
-        totalChars: stored.text.length,
-        nextOffset: offset + chars < stored.text.length ? offset + chars : undefined,
+        totalBytes: page.bytes,
+        offset: page.offset,
+        nextOffset: page.nextOffset,
       },
     }
   },

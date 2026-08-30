@@ -2,7 +2,6 @@ import { strict as assert } from 'node:assert'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { once } from 'node:events'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -231,6 +230,8 @@ const agentDir = await mkdtemp(join(tmpdir(), 'pi-working-state-agent-'))
 const statePath = join(stateDir, 'state.json')
 const checkpointDir = join(stateDir, 'run-checkpoints')
 let completions = 0
+let requestCount = 0
+let lastEvent = '<none>'
 let regressionPlan: Array<Array<{ path: string; content: string }> | null> | undefined
 const chunk = (delta: Record<string, unknown>, finish: string | null) => `data: ${JSON.stringify({
   id: 'chatcmpl-working-state',
@@ -246,6 +247,8 @@ const modelServer = createServer(async (request, response) => {
     return
   }
   for await (const part of request) void part
+  requestCount++
+  lastEvent = `provider-request-${requestCount}`
   if (regressionPlan) {
     const calls = regressionPlan.shift()
     response.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -390,6 +393,9 @@ const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-elec
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 let hostStopped = false
+let restarted: ReturnType<typeof spawn> | undefined
+let activeSessionId = ''
+let activeRunId = ''
 const messages: Array<Record<string, any>> = []
 let stdout = ''
 host.stdout.on('data', (buffer) => {
@@ -399,31 +405,102 @@ host.stdout.on('data', (buffer) => {
     if (newline < 0) break
     const line = stdout.slice(0, newline).trim()
     stdout = stdout.slice(newline + 1)
-    if (line) messages.push(JSON.parse(line))
+    if (line) {
+      const message = JSON.parse(line)
+      messages.push(message)
+      lastEvent = message.event || (message.id === undefined ? '<notification>' : `response-${message.id}`)
+    }
   }
 })
-const waitFor = async (id: number) => {
-  const timeoutAt = Date.now() + 20_000
-  for (;;) {
-    const message = messages.find((candidate) => candidate.id === id)
-    if (message) return message
-    if (Date.now() > timeoutAt) throw new Error(`timed out waiting for response ${id}`)
-    await new Promise((done) => setTimeout(done, 10))
-  }
+const suiteDeadline = Date.now() + 120_000
+const waitFor = async (id: number, stage = `response:${id}`) => {
+  const found = messages.find((candidate) => candidate.id === id)
+  if (found) return found
+  return new Promise<Record<string, any>>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (error?: Error, message?: Record<string, any>) => {
+      if (timer) clearTimeout(timer)
+      host.stdout.removeListener('data', onData)
+      host.removeListener('exit', onExit)
+      if (error) reject(error)
+      else if (message) resolve(message)
+    }
+    const onData = () => {
+      const response = messages.find((candidate) => candidate.id === id)
+      if (response) finish(undefined, response)
+    }
+    const onExit = () => finish(new Error(
+      `Host exited while waiting for response ${id}; run=${activeRunId || '<none>'}; requestCount=${requestCount}; lastEvent=${lastEvent}; pending=${stage}`,
+    ))
+    host.stdout.on('data', onData)
+    host.once('exit', onExit)
+    const remaining = suiteDeadline - Date.now()
+    timer = setTimeout(() => finish(new Error(
+      `timed out waiting for response ${id}; run=${activeRunId || '<none>'}; requestCount=${requestCount}; lastEvent=${lastEvent}; pending=${stage}`,
+    )), Math.max(1, remaining))
+  })
 }
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => {
+  if (typeof params.sessionId === 'string') activeSessionId = params.sessionId
+  if (typeof params.runId === 'string') activeRunId = params.runId
   host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+}
+
+const waitForExit = async (child: ReturnType<typeof spawn>, timeoutMs: number) => {
+  if (child.exitCode !== null || child.signalCode !== null) return true
+  return new Promise<boolean>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (exited: boolean) => {
+      if (timer) clearTimeout(timer)
+      child.removeListener('exit', onExit)
+      resolve(exited)
+    }
+    const onExit = () => finish(true)
+    child.once('exit', onExit)
+    timer = setTimeout(() => finish(false), timeoutMs)
+  })
+}
+
+const stopChild = async (child: ReturnType<typeof spawn> | undefined, cancelRun: boolean) => {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  if (cancelRun && child === host && activeSessionId && activeRunId && !host.stdin.destroyed) {
+    try {
+      host.stdin.write(`${JSON.stringify({ id: 99, method: 'turn/cancel', params: { sessionId: activeSessionId, runId: activeRunId } })}\n`)
+    } catch { /* best effort */ }
+  }
+  if (!child.stdin.destroyed) child.stdin.end()
+  if (!(await waitForExit(child, 2_000))) child.kill('SIGTERM')
+  if (!(await waitForExit(child, 2_000))) child.kill('SIGKILL')
+  await waitForExit(child, 2_000)
+}
+
+const closeModelServer = async () => {
+  if (!modelServer.listening) return
+  await Promise.race([
+    new Promise<void>((done) => modelServer.close(() => done())),
+    new Promise<void>((done) => setTimeout(done, 2_000)),
+  ])
 }
 
 try {
   send(1, 'initialize', { protocolVersion: 2 })
-  await waitFor(1)
+  await waitFor(1, 'initialize')
   send(2, 'sessions/create', { title: 'Checker-backed completion' })
-  const successSessionId = String((await waitFor(2)).result?.sessionId)
+  const successSessionId = String((await waitFor(2, 'success-session')).result?.sessionId)
   const profile = {
     provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off',
     activeTools: ['write'], approvalMode: 'full', unattended: false, compaction: 'manual',
   }
+  send(100, 'settings/update', profile)
+  const persistedSettings = await waitFor(100, 'settings-update')
+  assert.equal(persistedSettings.error, undefined, JSON.stringify(persistedSettings))
+  assert.equal(persistedSettings.result?.settings?.provider, profile.provider)
+  assert.equal(persistedSettings.result?.settings?.model, profile.model)
+  assert.equal(persistedSettings.result?.settings?.thinkingLevel, profile.thinkingLevel)
+  assert.deepEqual(persistedSettings.result?.settings?.activeTools, profile.activeTools)
+  assert.equal(persistedSettings.result?.settings?.approvalMode, profile.approvalMode)
+  assert.equal(persistedSettings.result?.settings?.unattended, profile.unattended)
+  assert.equal(persistedSettings.result?.settings?.compaction, profile.compaction)
   send(3, 'turn/submit', {
     sessionId: successSessionId,
     runId: 'working-success-run',
@@ -435,7 +512,7 @@ try {
     definitionOfDone: 'result.txt contains the exact requested content',
     workingGoal: { kind: 'file-content', path: 'result.txt', sha256: sha256('verified\n') },
   })
-  const completed = await waitFor(3)
+  const completed = await waitFor(3, 'working-success-turn')
   assert.equal(completed.result?.settlement, 'answered', JSON.stringify(completed.result?.record?.entries || []))
   assert.equal(await readFile(join(workspace, 'result.txt'), 'utf8'), 'verified\n')
   assert.equal(completed.result?.orchestration?.dodMet, true)
@@ -671,10 +748,9 @@ try {
   assert.ok(regression.result.record.entries.some((entry: any) => entry.kind === 'state-check' && entry.check.reason === 'completed-predicate-invalidated'))
   regressionPlan = undefined
 
-  host.stdin.end()
-  await once(host, 'exit')
+  await stopChild(host, true)
   hostStopped = true
-  const restarted = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
+  restarted = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
     env: {
       ...process.env,
       SUBAGENTS_PI_HOST_STATE_PATH: statePath,
@@ -692,15 +768,20 @@ try {
       if (newline < 0) break
       const line = restartedStdout.slice(0, newline).trim()
       restartedStdout = restartedStdout.slice(newline + 1)
-      if (line) restartedMessages.push(JSON.parse(line))
+      if (line) {
+        const message = JSON.parse(line)
+        restartedMessages.push(message)
+        lastEvent = message.event || (message.id === undefined ? '<restart-notification>' : `restart-response-${message.id}`)
+      }
     }
   })
-  const restartedWaitFor = async (id: number) => {
-    const timeoutAt = Date.now() + 20_000
+  const restartedWaitFor = async (id: number, stage = `restart-response:${id}`) => {
     for (;;) {
       const message = restartedMessages.find((candidate) => candidate.id === id)
       if (message) return message
-      if (Date.now() > timeoutAt) throw new Error(`timed out waiting for restarted response ${id}`)
+      if (Date.now() > suiteDeadline) {
+        throw new Error(`timed out waiting for restarted response ${id}; run=${activeRunId || '<none>'}; requestCount=${requestCount}; lastEvent=${lastEvent}; pending=${stage}`)
+      }
       await new Promise((done) => setTimeout(done, 10))
     }
   }
@@ -754,12 +835,11 @@ try {
     profile,
   } })}\n`)
   assert.match((await restartedWaitFor(20)).error?.message || '', /checkpoint is missing/)
-  restarted.stdin.end()
-  await once(restarted, 'exit')
+  await stopChild(restarted, false)
 } finally {
-  if (!hostStopped) host.stdin.end()
-  if (!hostStopped && host.exitCode === null && host.signalCode === null) await once(host, 'exit')
-  modelServer.close()
+  if (!hostStopped) await stopChild(host, true)
+  await stopChild(restarted, false)
+  await closeModelServer()
   await rm(workspace, { recursive: true, force: true })
   await rm(stateDir, { recursive: true, force: true })
   await rm(agentDir, { recursive: true, force: true })

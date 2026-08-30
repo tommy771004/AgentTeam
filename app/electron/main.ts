@@ -316,7 +316,7 @@ const piHostSupervisor = new PiHostSupervisor(async () => {
   })
 },
   {
-    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1', 'instructions-v1'],
+    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1'],
     serviceHandler: runPiHostMainService,
   },
 )
@@ -2155,6 +2155,59 @@ ipcMain.handle('pi-host:health', async () => piHostSupervisor.health())
 ipcMain.handle('pi-host:settings:get', async () => piHostSupervisor.getSettingsSnapshot())
 ipcMain.handle('pi-host:settings:update', async (_evt, patch: Record<string, unknown>) => piHostSupervisor.updateSettingsSnapshot(patch || {}))
 ipcMain.handle('pi-host:settings:profile', async (_evt, role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) => ({ profile: await piHostSupervisor.profile(role, taskOverride) }))
+ipcMain.handle('pi-host:review:admit', async (_evt, input: { runId?: string; threadId?: string; projectRoot?: string; runnerKind?: 'builtin' | 'external' }) => ({
+  reviewAdmission: await piHostSupervisor.admitReviewWorkspace({
+    runId: typeof input?.runId === 'string' ? input.runId : '',
+    threadId: typeof input?.threadId === 'string' ? input.threadId : '',
+    projectRoot: typeof input?.projectRoot === 'string' ? input.projectRoot : '',
+    runnerKind: input?.runnerKind === 'external' ? 'external' : 'builtin',
+  }),
+}))
+ipcMain.handle('pi-host:review:finalize', async (_evt, input: { snapshotId?: string; runId?: string; settlementKind?: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash' }) => ({
+  reviewSnapshotRef: await piHostSupervisor.finalizeReviewWorkspace({
+    ...(typeof input?.snapshotId === 'string' && input.snapshotId ? { snapshotId: input.snapshotId } : {}),
+    ...(typeof input?.runId === 'string' && input.runId ? { runId: input.runId } : {}),
+    settlementKind: input?.settlementKind || 'failed',
+  }),
+}))
+ipcMain.handle('pi-host:review:read', async (_evt, snapshotId: string) => ({
+  reviewArtifact: await piHostSupervisor.readReviewArtifact(String(snapshotId || '')),
+}))
+ipcMain.handle('pi-host:review:payload-page', async (_evt, input: { snapshotId?: string; payloadId?: string; offset?: number; maxBytes?: number }) => ({
+  reviewPayloadPage: await piHostSupervisor.readReviewPayloadPage({
+    snapshotId: String(input?.snapshotId || ''),
+    payloadId: String(input?.payloadId || ''),
+    offset: input?.offset,
+    maxBytes: input?.maxBytes,
+  }),
+}))
+ipcMain.handle('pi-host:review:describe', async (_evt, target) => ({ reviewTargetDescription: await piHostSupervisor.describeReviewTarget(target) }))
+ipcMain.handle('pi-host:review:files', async (_evt, input) => ({ reviewFiles: await piHostSupervisor.listReviewFiles(input) }))
+ipcMain.handle('pi-host:review:file-diff', async (_evt, input) => ({ reviewDiff: await piHostSupervisor.readReviewFileDiff(input) }))
+ipcMain.handle('pi-host:review:refresh', async (_evt, target) => ({ reviewTargetDescription: await piHostSupervisor.refreshReviewTarget(target) }))
+ipcMain.handle('pi-host:review:comments:list', async (_evt, snapshotId) => ({ reviewComments: await piHostSupervisor.listReviewComments(String(snapshotId || '')) }))
+ipcMain.handle('pi-host:review:draft:save', async (_evt, input) => ({ reviewComment: await piHostSupervisor.saveReviewDraft(input) }))
+ipcMain.handle('pi-host:review:draft:delete', async (_evt, id) => { await piHostSupervisor.deleteReviewDraft(String(id || '')); return {} })
+ipcMain.handle('pi-host:review:comment:transition', async (_evt, id, status) => ({ reviewComment: await piHostSupervisor.transitionReviewComment(String(id || ''), status) }))
+ipcMain.handle('pi-host:review:file-state:list', async (_evt, snapshotId) => ({ reviewFileStates: await piHostSupervisor.listReviewFileStates(String(snapshotId || '')) }))
+ipcMain.handle('pi-host:review:file-state:mark', async (_evt, input) => ({ reviewFileState: await piHostSupervisor.markReviewFile(input) }))
+ipcMain.handle('pi-host:review:feedback:prepare', async (_evt, snapshotId) => ({ reviewFeedbackBundle: await piHostSupervisor.prepareReviewFeedback(String(snapshotId || '')) }))
+ipcMain.handle('pi-host:review:feedback:claim', async (_evt, id, runId) => piHostSupervisor.claimReviewFeedback(String(id || ''), String(runId || '')))
+ipcMain.handle('pi-host:review:feedback:release', async (_evt, id, runId) => { await piHostSupervisor.releaseReviewFeedback(String(id || ''), String(runId || '')); return {} })
+ipcMain.handle('pi-host:review:state:inherit', async (_evt, fromSnapshotId, toSnapshotId) => piHostSupervisor.inheritReviewState(String(fromSnapshotId || ''), String(toSnapshotId || '')))
+ipcMain.handle('pi-host:review:verification:list', async (_evt, snapshotId) => ({ reviewVerifications: await piHostSupervisor.listReviewVerifications(String(snapshotId || '')) }))
+ipcMain.handle('pi-host:review:verification:run', async (_evt, snapshotId, kind) => ({ reviewVerification: await piHostSupervisor.runReviewVerification(String(snapshotId || ''), kind) }))
+ipcMain.handle('pi-host:review:verification:output', async (_evt, input) => ({ reviewVerificationOutput: await piHostSupervisor.readReviewVerificationOutput(input) }))
+ipcMain.handle('pi-host:review:mutation:preview', async (_evt, intent) => ({ reviewMutationPreview: await piHostSupervisor.previewReviewMutation(intent) }))
+ipcMain.handle('pi-host:review:mutation:apply', async (_evt, previewId) => ({ reviewMutationReceipt: await piHostSupervisor.applyReviewMutation(String(previewId || '')) }))
+ipcMain.handle('pi-host:review:delivery:preview', async (_evt, intent) => ({ reviewDeliveryPreview: await piHostSupervisor.previewReviewDelivery(intent) }))
+ipcMain.handle('pi-host:review:delivery:apply', async (_evt, previewId) => ({ reviewDeliveryReceipt: await piHostSupervisor.applyReviewDelivery(String(previewId || '')) }))
+ipcMain.handle('pi-host:review:artifact:export', async (_evt, snapshotId) => ({ reviewArtifactExport: await piHostSupervisor.exportReviewArtifact(String(snapshotId || '')) }))
+ipcMain.handle('pi-host:review:artifact:import-preview', async (_evt, bundle) => ({ reviewArtifactImportPreview: await piHostSupervisor.previewReviewArtifactImport(bundle) }))
+ipcMain.handle('pi-host:review:artifact:import-apply', async (_evt, bundle, expectedBundleHash) => ({ reviewArtifact: await piHostSupervisor.applyReviewArtifactImport(bundle, String(expectedBundleHash || '')) }))
+ipcMain.handle('pi-host:review:artifact:rebind', async (_evt, snapshotId, projectRoot) => ({ reviewArtifact: await piHostSupervisor.rebindReviewArtifact(String(snapshotId || ''), String(projectRoot || '')) }))
+ipcMain.handle('pi-host:review:artifact:retention', async (_evt, input) => ({ reviewArtifactRetention: await piHostSupervisor.applyReviewArtifactRetention(input) }))
+ipcMain.handle('pi-host:review:artifact:hard-delete', async (_evt, snapshotId) => { await piHostSupervisor.hardDeleteReviewArtifact(String(snapshotId || '')); return { reviewArtifactHardDeleted: true } })
 ipcMain.handle('pi-host:instructions:get', async () => ({ instructions: await piHostSupervisor.getInstructions() }))
 ipcMain.handle('pi-host:instructions:save', async (_evt, input: Record<string, unknown>) => ({ instructions: await piHostSupervisor.saveInstructions(input || {}) }))
 ipcMain.handle('pi-host:instructions:migrate-legacy', async (_evt, input: Record<string, unknown>) => piHostSupervisor.migrateLegacyInstructions(input || {}))

@@ -1,6 +1,6 @@
 # Codex-aligned 個人化自訂指令與專案上下文
 
-Status: 可交給代理
+Status: 待補資訊
 
 ## Problem Statement
 
@@ -157,4 +157,5 @@ Pi resource discovery 是唯一的 instruction discovery owner。Renderer 只編
 - The sample instruction begins with an absolute local include and then contains a very large design law. It is the motivating compatibility case for bounded include expansion, visible context-budget diagnostics and deduplication; the sample content itself is reference data, not a command executed while producing this spec.
 - Large instructions should be supported but not encouraged as one monolithic prompt. The UI should expose byte and budget pressure, while reusable procedural content may later be moved into Skills through the existing Pi resource system. That later authoring recommendation does not change this effort's requirement to preserve the user's current instruction faithfully.
 - The test seam is considered confirmed from the conversation because the user requested direct synthesis with no interview: admission through the real Pi Host is the single highest seam that can prove the promised behavior end to end.
-- This spec uses `Status: 可交給代理`, the repository mapping for `ready-for-agent`.
+- 2026-08-30 本機 implementation、build、完整 smoke、real Pi Host E2E 與 anti-slop UI qualification 已完成；一 hop 證據見 [qualification.md](qualification.md)。
+- 本 spec 維持 `Status: 待補資訊`：[#11](issues/11-external-cli-instruction-delivery-modes.md) 尚缺外部 native-discovery 真機證據（Codex `native_discovery_unproven`；Claude `auth_unavailable`），因此 tracker 與 DEV_STATE 均不得提前標為 resolved。

@@ -63,6 +63,60 @@ function isRunnerAuthorized(kind: LocalRunnerKind, settings: LlmSettings): boole
   )
 }
 
+type ExternalPromptThread = { bubbles?: Array<{ role: string; content: string }> }
+
+/** Assemble the exact external prompt from the admitted snapshot. */
+async function assembleExternalCliPrompt(input: {
+  snapshot: RunDispatchSnapshot
+  raw: string
+  text: string
+  thread?: ExternalPromptThread
+  settings: LlmSettings
+  projectRoot: string
+  subDesignContext: string
+}): Promise<string> {
+  const { snapshot, raw, text, thread, settings, projectRoot, subDesignContext } = input
+  let cliPrompt = subDesignContext ? `${subDesignContext}\n\n## Current request\n${text}` : text
+  const continueContract = buildCliContinueGoalContract(snapshot.overrides, {
+    projectRoot,
+    approvalMode: settings.approvalMode,
+  })
+  if (isCompleteCliContinueGoalContract(continueContract)) {
+    cliPrompt = [
+      formatCliContinueGoalPrompt(continueContract),
+      subDesignContext,
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+  }
+  if (settings.referenceChatHistory !== false && thread?.bubbles?.length) {
+    const { dropCurrentObjectiveFromHistory } = await import('./chatHistory.ts')
+    const history = dropCurrentObjectiveFromHistory(thread.bubbles, raw)
+      .filter((b) => b.role === 'user' || b.role === 'assistant')
+      .slice(-12)
+      .map((b) => `${b.role === 'user' ? 'User' : 'Assistant'}: ${b.content.slice(0, 600)}`)
+      .join('\n')
+    if (history) {
+      cliPrompt = [
+        '## 近期對話歷史（Reference chat history）',
+        history,
+        cliPrompt,
+      ]
+        .join('\n\n')
+      if (cliPrompt.length > 12_000) cliPrompt = cliPrompt.slice(-12_000)
+    }
+  }
+  // The coordinator freezes Host-owned instructions in extraSystemContext.
+  // External runners receive that exact admitted wrapper in the actual CLI
+  // prompt; recording a snapshot without this join would be false delivery.
+  if (snapshot.overrides.extraSystemContext?.trim()) {
+    cliPrompt = [snapshot.overrides.extraSystemContext.trim(), cliPrompt]
+      .filter(Boolean)
+      .join('\n\n')
+  }
+  return cliPrompt
+}
+
 /**
  * Dispatch from a coordinator-built snapshot.
  * Capacity and attachments must already be prepared — never re-check / re-I/O.
@@ -215,47 +269,15 @@ export async function dispatchThreadTask(
     if (tid) useThreadStore.getState().setExternalRun(tid, initialExternalRun)
     // Keep CLI follow-ups coherent with builtin runs. The current request is
     // deliberately last so instruction hierarchy cannot be reversed by old chat.
-    let cliPrompt = subDesignContext ? `${subDesignContext}\n\n## Current request\n${text}` : text
-    const continueContract = buildCliContinueGoalContract(snapshot.overrides, {
+    const cliPrompt = await assembleExternalCliPrompt({
+      snapshot,
+      raw,
+      text,
+      thread,
+      settings,
       projectRoot,
-      approvalMode: settings.approvalMode,
+      subDesignContext,
     })
-    if (isCompleteCliContinueGoalContract(continueContract)) {
-      cliPrompt = [
-        formatCliContinueGoalPrompt(continueContract),
-        subDesignContext,
-      ]
-        .filter(Boolean)
-        .join('\n\n')
-    }
-    if (settings.referenceChatHistory !== false && thread?.bubbles?.length) {
-      const { dropCurrentObjectiveFromHistory } = await import('./chatHistory.ts')
-      const history = dropCurrentObjectiveFromHistory(thread.bubbles, raw)
-        .filter((b) => b.role === 'user' || b.role === 'assistant')
-        .slice(-12)
-        .map(
-          (b) =>
-            `${b.role === 'user' ? 'User' : 'Assistant'}: ${b.content.slice(0, 600)}`,
-        )
-        .join('\n')
-      if (history) {
-        cliPrompt = [
-          '## 近期對話歷史（Reference chat history）',
-          history,
-          cliPrompt,
-        ]
-          .join('\n\n')
-        if (cliPrompt.length > 12_000) cliPrompt = cliPrompt.slice(-12_000)
-      }
-    }
-    // The coordinator freezes Host-owned instructions in extraSystemContext.
-    // External runners receive that exact admitted wrapper in the actual CLI
-    // prompt; recording a snapshot without this join would be false delivery.
-    if (snapshot.overrides.extraSystemContext?.trim()) {
-      cliPrompt = [snapshot.overrides.extraSystemContext.trim(), cliPrompt]
-        .filter(Boolean)
-        .join('\n\n')
-    }
     await agent.startLocalCliExecution({
       kind,
       prompt: cliPrompt,

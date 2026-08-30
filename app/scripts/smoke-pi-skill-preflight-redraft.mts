@@ -67,6 +67,8 @@ const modelServer = createServer(async (request, response) => {
   request.on('data', (part) => { body += part })
   await once(request, 'end')
   requests.push(JSON.parse(body))
+  requestCount += 1
+  lastEvent = `provider-request-${requestCount}`
   completion += 1
   const chunk = (delta: unknown, finish: string | null) => sse({
     id: `redraft-${completion}`,
@@ -112,6 +114,10 @@ const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-elec
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 const messages: Array<Record<string, any>> = []
+let requestCount = 0
+let lastEvent = '<none>'
+let activeSessionId = ''
+let activeRunId = ''
 let stdout = ''
 host.stdout.on('data', (buffer) => {
   stdout += String(buffer)
@@ -120,35 +126,103 @@ host.stdout.on('data', (buffer) => {
     if (newline < 0) break
     const line = stdout.slice(0, newline).trim()
     stdout = stdout.slice(newline + 1)
-    if (line) messages.push(JSON.parse(line))
+    if (line) {
+      const message = JSON.parse(line)
+      messages.push(message)
+      lastEvent = message.event || (message.id === undefined ? '<notification>' : `response-${message.id}`)
+    }
   }
 })
-const waitFor = async (id: number) => {
-  const timeoutAt = Date.now() + 25_000
-  for (;;) {
-    const found = messages.find((message) => message.id === id)
-    if (found) return found
-    if (Date.now() > timeoutAt) throw new Error(`timeout waiting for ${id}: ${JSON.stringify(messages.slice(-5))}`)
-    await new Promise((done) => setTimeout(done, 10))
-  }
+const suiteDeadline = Date.now() + 120_000
+const waitFor = async (id: number, stage = `response:${id}`) => {
+  const found = messages.find((message) => message.id === id)
+  if (found) return found
+  return new Promise<Record<string, any>>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (error?: Error, message?: Record<string, any>) => {
+      if (timer) clearTimeout(timer)
+      host.stdout.removeListener('data', onData)
+      host.removeListener('exit', onExit)
+      if (error) reject(error)
+      else if (message) resolve(message)
+    }
+    const onData = () => {
+      const response = messages.find((message) => message.id === id)
+      if (response) finish(undefined, response)
+    }
+    const onExit = () => finish(new Error(
+      `Host exited waiting for ${id}; run=${activeRunId || '<none>'}; requestCount=${requestCount}; lastEvent=${lastEvent}; pending=${stage}`,
+    ))
+    host.stdout.on('data', onData)
+    host.once('exit', onExit)
+    timer = setTimeout(() => finish(new Error(
+      `timeout waiting for ${id}; run=${activeRunId || '<none>'}; requestCount=${requestCount}; lastEvent=${lastEvent}; pending=${stage}`,
+    )), Math.max(1, suiteDeadline - Date.now()))
+  })
 }
-const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+const send = (id: number, method: string, params: Record<string, unknown> = {}) => {
+  if (typeof params.sessionId === 'string') activeSessionId = params.sessionId
+  if (typeof params.runId === 'string') activeRunId = params.runId
+  if (!host.stdin.destroyed) host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+}
+const waitForExit = async (timeoutMs: number) => {
+  if (host.exitCode !== null || host.signalCode !== null) return true
+  return new Promise<boolean>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (exited: boolean) => {
+      if (timer) clearTimeout(timer)
+      host.removeListener('exit', onExit)
+      resolve(exited)
+    }
+    const onExit = () => finish(true)
+    host.once('exit', onExit)
+    timer = setTimeout(() => finish(false), timeoutMs)
+  })
+}
+const stopHost = async () => {
+  if (host.exitCode !== null || host.signalCode !== null) return
+  if (activeSessionId && activeRunId && !host.stdin.destroyed) {
+    try { host.stdin.write(`${JSON.stringify({ id: 99, method: 'turn/cancel', params: { sessionId: activeSessionId, runId: activeRunId } })}\n`) } catch { /* best effort */ }
+  }
+  if (!host.stdin.destroyed) host.stdin.end()
+  if (!(await waitForExit(2_000))) host.kill('SIGTERM')
+  if (!(await waitForExit(2_000))) host.kill('SIGKILL')
+  await waitForExit(2_000)
+}
+const closeModelServer = async () => {
+  if (!modelServer.listening) return
+  await Promise.race([
+    new Promise<void>((done) => modelServer.close(() => done())),
+    new Promise<void>((done) => setTimeout(done, 2_000)),
+  ])
+}
 
 try {
   send(1, 'initialize', { protocolVersion: 2 })
   assert.equal((await waitFor(1)).error, undefined)
   send(2, 'sessions/create', { title: 'Skill redraft' })
   const sessionId = String((await waitFor(2)).result?.sessionId)
+  const profile = { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: ['write'], approvalMode: 'full', unattended: false, compaction: 'manual' }
+  send(30, 'settings/update', profile)
+  const persistedSettings = await waitFor(30, 'settings-update')
+  assert.equal(persistedSettings.error, undefined, JSON.stringify(persistedSettings))
+  assert.equal(persistedSettings.result?.settings?.provider, profile.provider)
+  assert.equal(persistedSettings.result?.settings?.model, profile.model)
+  assert.equal(persistedSettings.result?.settings?.thinkingLevel, profile.thinkingLevel)
+  assert.deepEqual(persistedSettings.result?.settings?.activeTools, profile.activeTools)
+  assert.equal(persistedSettings.result?.settings?.approvalMode, profile.approvalMode)
+  assert.equal(persistedSettings.result?.settings?.unattended, profile.unattended)
+  assert.equal(persistedSettings.result?.settings?.compaction, profile.compaction)
   send(3, 'turn/submit', {
     sessionId,
     runId: 'skill-redraft-run',
     cwd: workspace,
     prompt: 'Write the verified result.',
-    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: ['write'], approvalMode: 'full', unattended: false, compaction: 'manual' },
+    profile,
     pattern: 'Goal-based', maxIterations: 1,
     workingGoal: { kind: 'file-content', path: 'result.txt', sha256: sha256('safe-redraft\n') },
   })
-  const settled = await waitFor(3)
+  const settled = await waitFor(3, 'skill-redraft-turn')
   assert.equal(settled.error, undefined)
   assert.equal(settled.result?.settlement, 'answered')
   assert.equal(await readFile(join(workspace, 'result.txt'), 'utf8'), 'safe-redraft\n')
@@ -217,8 +291,7 @@ try {
     'Skill updates cannot change the durable injected body')
   console.log('Skill preflight blocks the original effect, injects one immutable revision, and executes only a fresh redraft')
 } finally {
-  host.stdin.end()
-  if (host.exitCode === null) await once(host, 'exit').catch(() => host.kill())
-  modelServer.close()
+  await stopHost()
+  await closeModelServer()
   await Promise.all([rm(agentDir, { recursive: true, force: true }), rm(stateDir, { recursive: true, force: true }), rm(workspace, { recursive: true, force: true })])
 }

@@ -8,6 +8,7 @@ import { recordRecoveryNotice } from '../agent/runJournal.ts'
 import { replaySafeCheckpointIndex } from '../agent/runFork.ts'
 import type { CapabilityUnlockProvenance } from '../agent/capabilities/runtime.ts'
 import { projectPiSession, type PiSessionProjection } from '../agent/piHostProjection.ts'
+import type { ReviewSnapshotRef } from '../agent/reviewContract.ts'
 import { useWorkingStateProjectionStore } from './workingStateProjectionStore.ts'
 
 const KEY = 'subagents.threads.v5'
@@ -102,7 +103,9 @@ export type ThreadRunSummary = {
       sha256: string
     }>
   }
-  /** Current Git working-tree diff for files touched by the run. */
+  /** Canonical Host-owned review identity for summaries written by the new lifecycle. */
+  reviewSnapshotRef?: ReviewSnapshotRef
+  /** Legacy/ephemeral working-tree aid; never canonical historical review data. */
   diff?: string
   /** Plan snapshot captured with this execution, for deterministic replay. */
   plan?: ThreadPlanItem[]

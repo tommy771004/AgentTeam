@@ -454,6 +454,7 @@ export function recordRunAdmitted(input: {
   objective: string
   sourceKind?: string
   scheduleJobId?: string
+  onPersisted?: () => void
 }): void {
   upsert({
     id: input.runId,
@@ -464,6 +465,7 @@ export function recordRunAdmitted(input: {
     sourceKind: bounded(input.sourceKind, 80),
     scheduleJobId: bounded(input.scheduleJobId, 160),
   })
+  input.onPersisted?.()
 }
 
 export function recordRunStarted(input: { runId: string; threadId?: string }): void {

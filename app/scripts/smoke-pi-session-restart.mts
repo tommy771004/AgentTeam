@@ -9,6 +9,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 
 const agentDir = await mkdtemp(join(tmpdir(), 'pi-restart-agent-'))
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-restart-state-'))
+const liveHosts = new Set<ChildProcess>()
 const requests: Array<{ messages?: Array<{ role: string; content: unknown }> }> = []
 let completion = 0
 const modelServer = createServer(async (request, response) => {
@@ -42,6 +43,8 @@ const spawnHost = () => {
     env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'), SUBAGENTS_PI_AGENT_DIR: agentDir },
     stdio: ['pipe', 'pipe', 'inherit'],
   })
+  liveHosts.add(host)
+  host.once('exit', () => liveHosts.delete(host))
   const output = createInterface({ input: host.stdout })
   const messages: Array<Record<string, any>> = []
   output.on('line', (line) => messages.push(JSON.parse(line) as Record<string, any>))
@@ -53,11 +56,55 @@ const spawnHost = () => {
     }
   }
   const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
-  return { host, waitFor, send }
+  return { host, output, waitFor, send }
 }
-const closeHost = async (host: ChildProcess) => {
-  host.stdin.end()
-  await once(host, 'exit')
+const waitForExit = (host: ChildProcess, timeoutMs: number): Promise<boolean> => {
+  if (host.exitCode !== null || host.signalCode !== null) return Promise.resolve(true)
+  return new Promise((resolveExit) => {
+    let settled = false
+    const finish = (exited: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      host.removeListener('exit', onExit)
+      resolveExit(exited)
+    }
+    const onExit = () => finish(true)
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    host.once('exit', onExit)
+  })
+}
+const closeHost = async (host: ChildProcess, output?: ReturnType<typeof createInterface>) => {
+  output?.close()
+  if (host.exitCode === null && host.signalCode === null) {
+    host.stdin.end()
+    if (!(await waitForExit(host, 2_000))) {
+      host.kill('SIGTERM')
+      if (!(await waitForExit(host, 1_000))) {
+        host.kill('SIGKILL')
+        await waitForExit(host, 1_000)
+      }
+    }
+  }
+  liveHosts.delete(host)
+}
+
+const closeModelServer = async (): Promise<void> => {
+  if (!modelServer.listening) return
+  await new Promise<void>((resolveClose) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolveClose()
+    }
+    const timer = setTimeout(() => {
+      modelServer.closeAllConnections?.()
+      finish()
+    }, 2_000)
+    modelServer.close(finish)
+  })
 }
 
 try {
@@ -70,7 +117,7 @@ try {
   first.send(3, 'turn/submit', { sessionId, runId: 'restart-first', cwd: process.cwd(), prompt: 'first prompt' })
   const firstTurn = await first.waitFor((message) => message.id === 3)
   assert.equal(firstTurn.result.settlement, 'answered')
-  await closeHost(first.host)
+  await closeHost(first.host, first.output)
   const persistedPiFiles = await readdir(agentDir, { recursive: true })
   assert.ok(persistedPiFiles.some((file) => String(file).endsWith('.jsonl')), 'Pi must persist a canonical session file')
 
@@ -88,11 +135,22 @@ try {
   const secondTurn = await second.waitFor((message) => message.id === 6)
   assert.equal(secondTurn.result.settlement, 'answered')
   assert.equal(requests.length, 2)
-  assert.deepEqual(requests[1].messages?.filter((message) => message.role !== 'system').slice(-3), [
-    { role: 'user', content: [{ type: 'text', text: 'first prompt' }] },
-    { role: 'assistant', content: 'first from Pi' },
-    { role: 'user', content: [{ type: 'text', text: 'second prompt' }] },
-  ])
+  const delivered = requests[1].messages?.filter((message) => message.role !== 'system').slice(-3) ?? []
+  assert.deepEqual(delivered.map((message) => message.role), ['user', 'assistant', 'user'])
+  assert.equal(delivered[1]?.content, 'first from Pi')
+  const deliveredUserText = (message: (typeof delivered)[number] | undefined): string => {
+    if (!Array.isArray(message?.content)) return ''
+    const firstPart = message.content[0]
+    return firstPart && typeof firstPart === 'object' && 'text' in firstPart && typeof firstPart.text === 'string'
+      ? firstPart.text
+      : ''
+  }
+  const firstDelivered = deliveredUserText(delivered[0])
+  const secondDelivered = deliveredUserText(delivered[2])
+  assert.ok(firstDelivered.endsWith('## 當前請求\nfirst prompt'))
+  assert.ok(secondDelivered.endsWith('## 當前請求\nsecond prompt'))
+  assert.equal(firstDelivered.match(/first prompt/g)?.length, 1)
+  assert.equal(secondDelivered.match(/second prompt/g)?.length, 1)
   const sourceFile = String(restoredSession.piSessionFile)
   second.send(7, 'turn/submit', { sessionId, runId: 'restart-third', cwd: process.cwd(), prompt: 'third prompt' })
   await second.waitFor((message) => message.id === 7)
@@ -105,10 +163,11 @@ try {
   try {
     assert.equal(typeof forked.result.sessions[0].piSessionFile, 'string')
   } finally {
-    await closeHost(second.host)
+    await closeHost(second.host, second.output)
   }
 } finally {
-  modelServer.close()
+  await Promise.all([...liveHosts].map((host) => closeHost(host)))
+  await closeModelServer()
   await rm(agentDir, { recursive: true, force: true })
   await rm(stateDir, { recursive: true, force: true })
 }

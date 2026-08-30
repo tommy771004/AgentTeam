@@ -90,6 +90,21 @@ type RecoveryJournal = Readonly<{
   originalExists: boolean
 }>
 
+type CurrentInstruction = Awaited<ReturnType<typeof readCurrent>>
+
+type WriteTransaction = Readonly<{
+  input: { projectRoot: string; target: string; expectedHash: string; content: string }
+  hooks: WriteHooks
+  bytes: number
+  projectRoot: string
+  targetPath: string
+  temporaryPath: string
+  backupPath?: string
+  journalPath: string
+  transactionId: string
+  observed: CurrentInstruction
+}>
+
 function recoveryJournalPath(targetPath: string): string {
   return join(dirname(targetPath), `.${basename(targetPath)}.recovery.json`)
 }
@@ -157,22 +172,37 @@ async function writeRecoveryJournal(path: string, journal: RecoveryJournal): Pro
   }
 }
 
+function isRecoveryJournal(value: Partial<RecoveryJournal>): value is RecoveryJournal {
+  return value.version === 1
+    && (value.phase === 'replace-pending' || value.phase === 'degraded')
+    && typeof value.target === 'string'
+    && ALLOWED_TARGETS.has(value.target)
+    && validTransactionId(value.transactionId)
+    && typeof value.hasBackup === 'boolean'
+    && typeof value.expectedHash === 'string'
+    && Number.isSafeInteger(value.expectedBytes)
+    && Number(value.expectedBytes) >= 0
+    && Number.isSafeInteger(value.expectedMode)
+    && Number(value.expectedMode) >= 0
+    && Number(value.expectedMode) <= 0o777
+    && Number.isSafeInteger(value.originalMode)
+    && Number(value.originalMode) >= 0
+    && Number(value.originalMode) <= 0o777
+    && typeof value.originalHash === 'string'
+    && Number.isSafeInteger(value.originalBytes)
+    && Number(value.originalBytes) >= 0
+    && typeof value.originalExists === 'boolean'
+}
+
 async function readRecoveryJournal(path: string): Promise<RecoveryJournal | undefined> {
   try {
     const info = await lstat(path)
     if (!info.isFile() || info.isSymbolicLink()) throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction recovery journal 必須是 canonical regular file。')
     const parsed = JSON.parse(await readFile(path, 'utf8')) as Partial<RecoveryJournal>
-    if (parsed.version !== 1 || (parsed.phase !== 'replace-pending' && parsed.phase !== 'degraded')
-      || typeof parsed.target !== 'string' || !ALLOWED_TARGETS.has(parsed.target)
-      || !validTransactionId(parsed.transactionId) || typeof parsed.hasBackup !== 'boolean'
-      || typeof parsed.expectedHash !== 'string' || !Number.isSafeInteger(parsed.expectedBytes as number) || (parsed.expectedBytes as number) < 0
-      || !Number.isSafeInteger(parsed.expectedMode as number) || (parsed.expectedMode as number) < 0 || (parsed.expectedMode as number) > 0o777
-      || !Number.isSafeInteger(parsed.originalMode as number) || (parsed.originalMode as number) < 0 || (parsed.originalMode as number) > 0o777
-      || typeof parsed.originalHash !== 'string' || !Number.isSafeInteger(parsed.originalBytes as number) || (parsed.originalBytes as number) < 0
-      || typeof parsed.originalExists !== 'boolean') {
+    if (!isRecoveryJournal(parsed)) {
       throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction recovery journal schema 無效；Host 維持 degraded 狀態。')
     }
-    return parsed as RecoveryJournal
+    return parsed
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return undefined
     if (error instanceof ProjectInstructionWriteError) throw error
@@ -180,18 +210,65 @@ async function readRecoveryJournal(path: string): Promise<RecoveryJournal | unde
   }
 }
 
+function recoveryMetadataMatches(current: CurrentInstruction, journal: RecoveryJournal): boolean {
+  return current.exists
+    && current.hash === journal.originalHash
+    && Buffer.byteLength(current.content) === journal.originalBytes
+    && current.mode === journal.originalMode
+}
+
+async function assertRecoveryBackup(backupPath: string | undefined, journal: RecoveryJournal, required: boolean): Promise<void> {
+  if (!backupPath) {
+    if (required) throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction recovery 尚未完成；Host 維持 degraded/read-only 狀態。')
+    return
+  }
+  const backup = await readCurrent(backupPath)
+  if ((required && !backup.exists) || (backup.exists && !recoveryMetadataMatches(backup, journal))) {
+    throw new ProjectInstructionWriteError('integrity_failure', required
+      ? 'Project instruction safe recovery backup metadata 不符。'
+      : 'Project instruction recovery backup metadata 不符；Host 維持 degraded 狀態。')
+  }
+}
+
+async function recoverDegradedInstruction(input: {
+  root: string
+  targetPath: string
+  journalPath: string
+  temporaryPath: string
+  backupPath?: string
+  journal: RecoveryJournal
+}): Promise<void> {
+  try {
+    await assertRecoveryBackup(input.backupPath, input.journal, true)
+    await rename(input.backupPath!, input.targetPath)
+    await chmod(input.targetPath, input.journal.originalMode)
+    const restored = await readCurrent(input.targetPath)
+    if (!recoveryMetadataMatches(restored, input.journal)) throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction safe recovery restore metadata 不符。')
+    await syncDirectory(dirname(input.targetPath), {})
+    await cleanupRecoveryArtifacts(input.root, input.journalPath, { temporaryPath: input.temporaryPath })
+  } catch (error) {
+    throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction safe recovery 失敗；Host 維持 degraded/read-only 狀態。', error)
+  }
+}
+
+function committedMetadataMatches(current: CurrentInstruction, journal: RecoveryJournal): boolean {
+  return current.exists
+    && current.hash === journal.expectedHash
+    && Buffer.byteLength(current.content) === journal.expectedBytes
+    && current.mode === journal.expectedMode
+}
+
+function originalMetadataMatches(current: CurrentInstruction, journal: RecoveryJournal): boolean {
+  if (current.exists !== journal.originalExists || current.hash !== journal.originalHash) return false
+  return !current.exists || (Buffer.byteLength(current.content) === journal.originalBytes && current.mode === journal.originalMode)
+}
+
 /**
  * Recover an interrupted project instruction replacement before any Host
  * resolve/write operation observes the target. The target is never moved to a
  * backup: the backup is a durable copy and rollback is one atomic replacement.
  */
-export async function recoverProjectInstruction(projectRoot: string, target: string): Promise<void> {
-  if (!ALLOWED_TARGETS.has(target) || target !== basename(target)) {
-    throw new ProjectInstructionWriteError('invalid_target', '只允許明確建立或編輯 AGENTS.md、AGENTS.override.md 或 CLAUDE.md。')
-  }
-  const root = await realpath(projectRoot).catch((error) => {
-    throw new ProjectInstructionWriteError('project_missing', '目前 canonical project root 不存在。', error)
-  })
+async function recoverProjectInstructionUnlocked(root: string, target: string): Promise<void> {
   const targetPath = join(root, target)
   const journalPath = recoveryJournalPath(targetPath)
   const journal = await readRecoveryJournal(journalPath)
@@ -207,44 +284,34 @@ export async function recoverProjectInstruction(projectRoot: string, target: str
     // A fresh Host may safely finish the operator-visible recovery when the
     // durable original copy is still present. Until this succeeds, every
     // resolve/write remains fenced by integrity_failure.
-    if (!backupPath) throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction recovery 尚未完成；Host 維持 degraded/read-only 狀態。')
-    try {
-      const backup = await readCurrent(backupPath)
-      if (!backup.exists || backup.hash !== journal.originalHash || Buffer.byteLength(backup.content) !== journal.originalBytes || backup.mode !== journal.originalMode) throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction safe recovery backup metadata 不符。')
-      await rename(backupPath, targetPath)
-      await chmod(targetPath, journal.originalMode)
-      const restored = await readCurrent(targetPath)
-      if (!restored.exists || restored.mode !== journal.originalMode || restored.hash !== journal.originalHash) throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction safe recovery restore metadata 不符。')
-      await syncDirectory(dirname(targetPath), {})
-      await cleanupRecoveryArtifacts(root, journalPath, { temporaryPath: artifacts.temporaryPath })
-      return
-    } catch (error) {
-      throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction safe recovery 失敗；Host 維持 degraded/read-only 狀態。', error)
-    }
+    await recoverDegradedInstruction({ root, targetPath, journalPath, temporaryPath: artifacts.temporaryPath, backupPath, journal })
+    return
   }
   const current = await readCurrent(targetPath)
-  if (current.exists && current.hash === journal.expectedHash && Buffer.byteLength(current.content) === journal.expectedBytes && current.mode === journal.expectedMode) {
+  if (committedMetadataMatches(current, journal)) {
     // The replace reached the target before a crash. Keep the committed body,
     // then remove only recovery artefacts.
-    if (backupPath) {
-      const backup = await readCurrent(backupPath)
-      if (backup.exists && (backup.hash !== journal.originalHash || Buffer.byteLength(backup.content) !== journal.originalBytes || backup.mode !== journal.originalMode)) {
-        throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction recovery backup metadata 不符；Host 維持 degraded 狀態。')
-      }
-    }
+    await assertRecoveryBackup(backupPath, journal, false)
     await cleanupRecoveryArtifacts(root, journalPath, artifacts)
     return
   }
-  if (current.exists !== journal.originalExists || current.hash !== journal.originalHash || (current.exists && (Buffer.byteLength(current.content) !== journal.originalBytes || current.mode !== journal.originalMode))) {
+  if (!originalMetadataMatches(current, journal)) {
     throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction recovery 無法判定 target truth；Host 維持 degraded/read-only 狀態。')
   }
   // Replace did not happen. The original target was left in place, so only
   // discard staged artefacts and the journal.
-  if (backupPath) {
-    const backup = await readCurrent(backupPath)
-    if (backup.exists && (backup.hash !== journal.originalHash || Buffer.byteLength(backup.content) !== journal.originalBytes || backup.mode !== journal.originalMode)) throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction recovery backup metadata 不符；Host 維持 degraded 狀態。')
-  }
+  await assertRecoveryBackup(backupPath, journal, false)
   await cleanupRecoveryArtifacts(root, journalPath, artifacts)
+}
+
+export async function recoverProjectInstruction(projectRoot: string, target: string): Promise<void> {
+  if (!ALLOWED_TARGETS.has(target) || target !== basename(target)) {
+    throw new ProjectInstructionWriteError('invalid_target', '只允許明確建立或編輯 AGENTS.md、AGENTS.override.md 或 CLAUDE.md。')
+  }
+  const root = await realpath(projectRoot).catch((error) => {
+    throw new ProjectInstructionWriteError('project_missing', '目前 canonical project root 不存在。', error)
+  })
+  return withProjectWriteLock(`${root}\u0000${target}`, () => recoverProjectInstructionUnlocked(root, target))
 }
 
 function contentHash(content: string): string {
@@ -326,6 +393,144 @@ async function readCurrent(targetPath: string): Promise<{
   }
 }
 
+function validateWriteContent(input: { target: string; content: string }): number {
+  if (!ALLOWED_TARGETS.has(input.target) || input.target !== basename(input.target)) {
+    throw new ProjectInstructionWriteError('invalid_target', '只允許明確建立或編輯 AGENTS.md、AGENTS.override.md 或 CLAUDE.md。')
+  }
+  if (typeof input.content !== 'string') {
+    throw new ProjectInstructionWriteError('invalid_content', 'Project instruction content 必須是文字。')
+  }
+  const bytes = Buffer.byteLength(input.content)
+  if (bytes > MAX_PROJECT_INSTRUCTION_BYTES) {
+    throw new ProjectInstructionWriteError('invalid_content', `Project instruction 超過 ${MAX_PROJECT_INSTRUCTION_BYTES} bytes。`)
+  }
+  return bytes
+}
+
+async function canonicalProjectRoot(path: string): Promise<string> {
+  try {
+    const root = await realpath(path)
+    if (!(await stat(root)).isDirectory()) throw new Error('project root 不是目錄')
+    return root
+  } catch (error) {
+    throw new ProjectInstructionWriteError('project_missing', '目前 canonical project root 不存在。', error)
+  }
+}
+
+function transactionJournal(transaction: WriteTransaction, phase: RecoveryJournal['phase']): RecoveryJournal {
+  return {
+    version: 1,
+    phase,
+    target: transaction.input.target,
+    transactionId: transaction.transactionId,
+    hasBackup: Boolean(transaction.backupPath),
+    expectedHash: contentHash(transaction.input.content),
+    expectedBytes: transaction.bytes,
+    expectedMode: transaction.observed.mode,
+    originalMode: transaction.observed.mode,
+    originalHash: transaction.observed.hash,
+    originalBytes: Buffer.byteLength(transaction.observed.content),
+    originalExists: transaction.observed.exists,
+  }
+}
+
+async function stageInstruction(transaction: WriteTransaction): Promise<void> {
+  const handle = await open(transaction.temporaryPath, 'wx', transaction.observed.mode)
+  try {
+    await handle.writeFile(transaction.input.content, 'utf8')
+    await handle.chmod(transaction.observed.mode)
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+
+function sameObservedFile(current: CurrentInstruction, observed: CurrentInstruction): boolean {
+  return current.hash === observed.hash && current.signature === observed.signature
+}
+
+async function assertTargetUnchanged(transaction: WriteTransaction): Promise<void> {
+  const current = await readCurrent(transaction.targetPath)
+  if (!sameObservedFile(current, transaction.observed)) {
+    throw new ProjectInstructionWriteError('conflict', 'Instruction file conflict：檔案在儲存期間被外部修改，原檔保持不變。')
+  }
+}
+
+async function prepareDurableRecovery(transaction: WriteTransaction): Promise<void> {
+  await assertTargetUnchanged(transaction)
+  if (transaction.backupPath) {
+    // Copy (rather than rename) keeps target present until the single atomic
+    // temp -> target replacement. The backup is synced before replacement.
+    await copyFile(transaction.targetPath, transaction.backupPath)
+    await chmod(transaction.backupPath, transaction.observed.mode)
+    const backup = await open(transaction.backupPath, 'r+')
+    try { await backup.sync() } finally { await backup.close() }
+  }
+  await writeRecoveryJournal(transaction.journalPath, transactionJournal(transaction, 'replace-pending'))
+  await syncDirectory(dirname(transaction.targetPath), transaction.hooks)
+}
+
+async function assertTransactionBackup(transaction: WriteTransaction): Promise<void> {
+  if (!transaction.backupPath) return
+  const backup = await readCurrent(transaction.backupPath)
+  const observedBytes = Buffer.byteLength(transaction.observed.content)
+  if (!backup.exists || backup.hash !== transaction.observed.hash || Buffer.byteLength(backup.content) !== observedBytes || backup.mode !== transaction.observed.mode) {
+    throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction backup identity/hash 不符；原檔保持不變。')
+  }
+}
+
+async function commitInstruction(transaction: WriteTransaction): Promise<void> {
+  await transaction.hooks.beforeCommit?.({ temporaryPath: transaction.temporaryPath, targetPath: transaction.targetPath })
+  // The hook models an external editor and is intentionally followed by the
+  // last possible CAS read. No fallible work is allowed between this check
+  // and the single atomic replacement.
+  await assertTransactionBackup(transaction)
+  await assertTargetUnchanged(transaction)
+  await renameAtomically(transaction.temporaryPath, transaction.targetPath, transaction.hooks)
+}
+
+async function verifyAndFinalizeCommit(transaction: WriteTransaction): Promise<void> {
+  const committed = await readCurrent(transaction.targetPath)
+  const expectedHash = contentHash(transaction.input.content)
+  if (!committed.exists || committed.hash !== expectedHash || Buffer.byteLength(committed.content) !== transaction.bytes || committed.mode !== transaction.observed.mode) {
+    throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction committed target metadata 不符。')
+  }
+  await syncDirectory(dirname(transaction.targetPath), transaction.hooks)
+  if (transaction.backupPath) await unlink(transaction.backupPath)
+  await unlink(transaction.journalPath)
+  await syncDirectory(dirname(transaction.targetPath), transaction.hooks)
+}
+
+async function rollbackInstruction(transaction: WriteTransaction, installed: boolean): Promise<boolean> {
+  try {
+    if (installed && !transaction.observed.exists) await unlink(transaction.targetPath)
+    if (installed && transaction.backupPath) {
+      // The backup is the original body. Replacing the target with it is a
+      // single atomic rollback and never exposes a missing target window.
+      await renameAtomically(transaction.backupPath, transaction.targetPath, transaction.hooks)
+      await chmod(transaction.targetPath, transaction.observed.mode)
+    }
+    await syncDirectory(dirname(transaction.targetPath), transaction.hooks)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function cleanupFailedTransaction(transaction: WriteTransaction, restored: boolean): Promise<void> {
+  try { await unlink(transaction.temporaryPath) } catch { /* already committed or never created */ }
+  if (!restored) return
+  try { if (transaction.backupPath) await unlink(transaction.backupPath) } catch { /* integrity failure reports any leak */ }
+  try { await unlink(transaction.journalPath) } catch { /* recovery will retry on reopen */ }
+}
+
+async function persistDegradedTransaction(transaction: WriteTransaction): Promise<void> {
+  try {
+    await writeRecoveryJournal(transaction.journalPath, transactionJournal(transaction, 'degraded'))
+    await syncDirectory(dirname(transaction.targetPath), transaction.hooks)
+  } catch { /* existing replace-pending journal remains a fail-closed fence */ }
+}
+
 /** Read an editable source through the Host boundary without adding its body
  * to the model-facing instruction projection. Membership and openability are
  * checked by the protocol owner before this helper is called. */
@@ -376,27 +581,12 @@ async function writeProjectInstructionUnlocked(
   input: { projectRoot: string; target: string; expectedHash: string; content: string },
   hooks: WriteHooks = {},
 ): Promise<ProjectInstructionWriteResult> {
-  if (!ALLOWED_TARGETS.has(input.target) || input.target !== basename(input.target)) {
-    throw new ProjectInstructionWriteError('invalid_target', '只允許明確建立或編輯 AGENTS.md、AGENTS.override.md 或 CLAUDE.md。')
-  }
-  if (typeof input.content !== 'string') {
-    throw new ProjectInstructionWriteError('invalid_content', 'Project instruction content 必須是文字。')
-  }
-  const bytes = Buffer.byteLength(input.content)
-  if (bytes > MAX_PROJECT_INSTRUCTION_BYTES) {
-    throw new ProjectInstructionWriteError('invalid_content', `Project instruction 超過 ${MAX_PROJECT_INSTRUCTION_BYTES} bytes。`)
-  }
-
-  let projectRoot: string
-  try {
-    projectRoot = await realpath(input.projectRoot)
-    if (!(await stat(projectRoot)).isDirectory()) throw new Error('project root 不是目錄')
-  } catch (error) {
-    throw new ProjectInstructionWriteError('project_missing', '目前 canonical project root 不存在。', error)
-  }
-
+  const bytes = validateWriteContent(input)
+  const projectRoot = await canonicalProjectRoot(input.projectRoot)
   const targetPath = join(projectRoot, input.target)
-  await recoverProjectInstruction(projectRoot, input.target)
+  // The public recovery entry also takes this target's lock. This write path
+  // already owns it, so call the unlocked core to avoid re-entrant deadlock.
+  await recoverProjectInstructionUnlocked(projectRoot, input.target)
   const observed = await readCurrent(targetPath)
   if (input.expectedHash !== observed.hash) {
     throw new ProjectInstructionWriteError('conflict', 'Instruction file conflict：檔案已被外部修改，請重新載入後再套用草稿。')
@@ -407,112 +597,21 @@ async function writeProjectInstructionUnlocked(
   const temporaryPath = artifacts.temporaryPath
   const backupPath = observed.exists ? artifacts.backupPath : undefined
   const journalPath = recoveryJournalPath(targetPath)
+  const transaction: WriteTransaction = { input, hooks, bytes, projectRoot, targetPath, temporaryPath, backupPath, journalPath, transactionId, observed }
   let installed = false
   try {
-    const handle = await open(temporaryPath, 'wx', observed.mode)
-    try {
-      await handle.writeFile(input.content, 'utf8')
-      await handle.chmod(observed.mode)
-      await handle.sync()
-    } finally {
-      await handle.close()
-    }
-
-    const current = await readCurrent(targetPath)
-    if (current.hash !== observed.hash || current.signature !== observed.signature) {
-      throw new ProjectInstructionWriteError('conflict', 'Instruction file conflict：檔案在儲存期間被外部修改，原檔保持不變。')
-    }
-    if (backupPath) {
-      // Copy (rather than rename) keeps target present until the single atomic
-      // temp -> target replacement. The backup is synced before replacement.
-      await copyFile(targetPath, backupPath)
-      await chmod(backupPath, observed.mode)
-      const backup = await open(backupPath, 'r+')
-      try { await backup.sync() } finally { await backup.close() }
-    }
-    await writeRecoveryJournal(journalPath, {
-      version: 1,
-      phase: 'replace-pending',
-      target: input.target,
-      transactionId,
-      hasBackup: Boolean(backupPath),
-      expectedHash: contentHash(input.content),
-      expectedBytes: bytes,
-      expectedMode: observed.mode,
-      originalMode: observed.mode,
-      originalHash: observed.hash,
-      originalBytes: Buffer.byteLength(observed.content),
-      originalExists: observed.exists,
-    })
-    await syncDirectory(dirname(targetPath), hooks)
-    await hooks.beforeCommit?.({ temporaryPath, targetPath })
-    // The hook models an external editor and is intentionally followed by the
-    // last possible CAS read. No fallible work is allowed between this check
-    // and the single atomic replacement.
-    if (backupPath) {
-      const backup = await readCurrent(backupPath)
-      if (!backup.exists || backup.hash !== observed.hash || Buffer.byteLength(backup.content) !== Buffer.byteLength(observed.content) || backup.mode !== observed.mode) {
-        throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction backup identity/hash 不符；原檔保持不變。')
-      }
-    }
-    const final = await readCurrent(targetPath)
-    if (final.hash !== observed.hash || final.signature !== observed.signature) {
-      throw new ProjectInstructionWriteError('conflict', 'Instruction file conflict：檔案在儲存期間被外部修改，原檔保持不變。')
-    }
-    await renameAtomically(temporaryPath, targetPath, hooks)
+    await stageInstruction(transaction)
+    await prepareDurableRecovery(transaction)
+    await commitInstruction(transaction)
     installed = true
-    const committed = await readCurrent(targetPath)
-    if (!committed.exists || committed.hash !== contentHash(input.content) || Buffer.byteLength(committed.content) !== bytes || committed.mode !== observed.mode) {
-      throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction committed target metadata 不符。')
-    }
-    await syncDirectory(dirname(targetPath), hooks)
-    if (backupPath) {
-      await unlink(backupPath)
-    }
-    await unlink(journalPath)
-    await syncDirectory(dirname(targetPath), hooks)
+    await verifyAndFinalizeCommit(transaction)
   } catch (error) {
-    let restored = true
-    try {
-      if (installed && !observed.exists) {
-        await unlink(targetPath)
-        installed = false
-      }
-      if (installed && backupPath) {
-        // The backup is the original body. Replacing the target with it is a
-        // single atomic rollback and never exposes a missing target window.
-        await renameAtomically(backupPath, targetPath, hooks)
-        await chmod(targetPath, observed.mode)
-        installed = false
-      }
-      await syncDirectory(dirname(targetPath), hooks)
-    } catch {
-      restored = false
-    }
-    try { await unlink(temporaryPath) } catch { /* already committed or never created */ }
-    if (restored) {
-      try { if (backupPath) await unlink(backupPath) } catch { /* integrity failure reports any leak */ }
-      try { await unlink(journalPath) } catch { /* recovery will retry on reopen */ }
-    } else {
+    const restored = await rollbackInstruction(transaction, installed)
+    await cleanupFailedTransaction(transaction, restored)
+    if (!restored) {
       // Persist degraded state when rollback cannot be proven. A later Host
       // instance refuses resolve/write until an operator-safe recovery occurs.
-      try {
-        await writeRecoveryJournal(journalPath, {
-          version: 1,
-          phase: 'degraded',
-          target: input.target,
-          transactionId,
-          hasBackup: Boolean(backupPath),
-          expectedHash: contentHash(input.content),
-          expectedBytes: bytes,
-          expectedMode: observed.mode,
-          originalMode: observed.mode,
-          originalHash: observed.hash,
-          originalBytes: Buffer.byteLength(observed.content),
-          originalExists: observed.exists,
-        })
-        await syncDirectory(dirname(targetPath), hooks)
-      } catch { /* existing replace-pending journal remains a fail-closed fence */ }
+      await persistDegradedTransaction(transaction)
     }
     if (!restored) throw new ProjectInstructionWriteError('integrity_failure', 'Project instruction commit durability 無法確認；Host 必須維持 degraded 狀態。', error)
     throw failureFor(error, 'Project instruction atomic replacement 失敗；原檔保持不變。')

@@ -36,6 +36,7 @@ type ModelRequest = { tools?: Array<{ function?: { name?: string } }>; messages?
 const agentDir = await mkdtemp(join(tmpdir(), 'pi-qualify-agent-'))
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-qualify-state-'))
 const workspace = await mkdtemp(join(tmpdir(), 'pi-qualify-workspace-'))
+const outboundPolicyDir = await mkdtemp(join(tmpdir(), 'pi-qualify-outbound-policy-'))
 const fixtureLog = join(stateDir, 'mcp-fixture.log')
 const fixtureText = 'runtime-contract-fixture-4f19ab'
 await writeFile(join(workspace, 'fixture.txt'), fixtureText)
@@ -109,23 +110,138 @@ await writeFile(join(agentDir, 'auth.json'), JSON.stringify({ loopback: { type: 
 await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'loopback', defaultModel: 'smoke-model', defaultThinkingLevel: 'off' }))
 
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
-  env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'), SUBAGENTS_PI_AGENT_DIR: agentDir },
+  env: {
+    ...process.env,
+    SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'),
+    SUBAGENTS_PI_AGENT_DIR: agentDir,
+    SUBAGENTS_OUTBOUND_POLICY_DIR: outboundPolicyDir,
+  },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 const output = createInterface({ input: host.stdout })
 const messages: Message[] = []
-output.on('line', (line) => messages.push(JSON.parse(line) as Message))
-const wait = async (id: number) => {
+let lastEvent = '<none>'
+let hostRequestCount = 0
+output.on('line', (line) => {
+  const message = JSON.parse(line) as Message
+  messages.push(message)
+  lastEvent = message.event || (message.id === undefined ? '<notification>' : `response:${message.id}`)
+})
+const send = (id: number, method: string, params: Record<string, unknown> = {}) => {
+  hostRequestCount++
+  return host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+}
+const sendAuto = (method: string, params: Record<string, unknown> = {}) => {
+  const id = 1000 + hostRequestCount
+  send(id, method, params)
+  return id
+}
+const waitForLine = async (label: string, deadline: number): Promise<void> => {
+  const remaining = deadline - Date.now()
+  if (remaining <= 0) throw new Error(`timeout waiting for ${label}; lastEvent=${lastEvent}; hostRequests=${hostRequestCount}; messages=${messages.length}`)
+  await new Promise<void>((resolveLine, rejectLine) => {
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      output.removeListener('line', onLine)
+      output.removeListener('close', onClose)
+      if (error) rejectLine(error)
+      else resolveLine()
+    }
+    const onLine = () => finish()
+    const onClose = () => finish(new Error(`Host output closed while waiting for ${label}; lastEvent=${lastEvent}`))
+    const timer = setTimeout(() => finish(new Error(`timeout waiting for ${label}; lastEvent=${lastEvent}; hostRequests=${hostRequestCount}; messages=${messages.length}`)), remaining)
+    output.once('line', onLine)
+    output.once('close', onClose)
+  })
+}
+const waitForMessage = async (predicate: (message: Message) => boolean, label: string, deadline: number): Promise<Message> => {
   for (;;) {
-    const found = messages.find((message) => message.id === id)
+    const found = messages.find(predicate)
     if (found) return found
-    await Promise.race([
-      once(output, 'line'),
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout waiting for ${id}`)), 40_000)),
-    ])
+    await waitForLine(label, deadline)
   }
 }
-const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+const waitExit = async (timeoutMs: number): Promise<boolean> => {
+  if (host.exitCode !== null || host.signalCode !== null) return true
+  return new Promise<boolean>((resolveExit) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      host.removeListener('exit', finish)
+      resolveExit(host.exitCode !== null || host.signalCode !== null)
+    }
+    const timer = setTimeout(finish, timeoutMs)
+    host.once('exit', finish)
+  })
+}
+const approvalCandidates = plan.filter((entry) => ['write', 'workspace_mkdir', 'run_code', MCP_TOOL].includes(entry.name))
+const approvalRunId = 'runtime-contract-run'
+let approvalMonitoring = false
+let approvalCursor = 0
+let approvalFailure: Error | undefined
+const requestedApprovals = new Map<string, { tool: string; callId: string }>()
+const resolvedApprovals = new Set<string>()
+const pendingApprovals = new Map<string, { runId: string; callId: string }>()
+const approvalKey = (runId: string, callId: string) => `${runId}:${callId}`
+const expectedApprovalArgs = (candidate: (typeof approvalCandidates)[number]) => {
+  const args = { ...candidate.args } as Record<string, unknown>
+  if (typeof args.path === 'string') args.path = resolve(workspace, args.path)
+  return args
+}
+const candidateForApproval = (payload: Record<string, any>) => approvalCandidates.find((candidate) => (
+  payload.runId === approvalRunId
+  && payload.tool === candidate.name
+  && typeof payload.callId === 'string'
+  && payload.args !== undefined
+  && JSON.stringify(payload.args) === JSON.stringify(expectedApprovalArgs(candidate))
+))
+const processApprovals = async (deadline: number): Promise<void> => {
+  while (approvalCursor < messages.length) {
+    const message = messages[approvalCursor++]
+    if (message.event !== 'host/approval-requested') continue
+    const payload = message.payload || {}
+    const candidate = candidateForApproval(payload)
+    const callId = typeof payload.callId === 'string' ? payload.callId : '<missing-call-id>'
+    const runId = typeof payload.runId === 'string' ? payload.runId : '<missing-run-id>'
+    if (!candidate) {
+      const denyId = sendAuto('approvals/resolve', { runId, callId, decision: 'deny', reason: 'Qualification rejected an unknown approval request' })
+      await waitForMessage((entry) => entry.id === denyId, `deny unknown approval ${runId}/${callId}`, deadline)
+      approvalFailure = new Error(`unexpected approval request: runId=${runId}; tool=${String(payload.tool)}; callId=${callId}`)
+      throw approvalFailure
+    }
+    const key = approvalKey(runId, callId)
+    if (requestedApprovals.has(key)) {
+      const denyId = sendAuto('approvals/resolve', { runId, callId, decision: 'deny', reason: 'Qualification rejected a duplicate approval request' })
+      await waitForMessage((entry) => entry.id === denyId, `deny duplicate approval ${key}`, deadline)
+      approvalFailure = new Error(`duplicate approval request: ${key}`)
+      throw approvalFailure
+    }
+    requestedApprovals.set(key, { tool: candidate.name, callId })
+    pendingApprovals.set(key, { runId, callId })
+    const allowId = sendAuto('approvals/resolve', { runId, callId, decision: 'allow' })
+    const acknowledgement = await waitForMessage((entry) => entry.id === allowId, `approval acknowledgement ${key}`, deadline)
+    if (acknowledgement.error) {
+      approvalFailure = new Error(`approval acknowledgement failed for ${key}: ${acknowledgement.error.code}`)
+      throw approvalFailure
+    }
+    pendingApprovals.delete(key)
+    resolvedApprovals.add(key)
+  }
+}
+const wait = async (id: number, label = `id ${id}`) => {
+  const deadline = Date.now() + 40_000
+  for (;;) {
+    if (approvalMonitoring) await processApprovals(deadline)
+    const found = messages.find((message) => message.id === id)
+    if (found) return found
+    await waitForLine(label, deadline)
+  }
+}
 
 let passed = 0
 function check(name: string, fn: () => void) {
@@ -172,6 +288,7 @@ try {
     assert.equal(catalogFor(MCP_TOOL)?.extensionId, 'fixture-mcp', 'the MCP tool names the extension that owns it')
   })
 
+  approvalMonitoring = true
   send(5, 'turn/submit', {
     sessionId,
     runId: 'runtime-contract-run',
@@ -185,7 +302,21 @@ try {
     // the mutating and capability tools from ever running.
     profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false },
   })
-  const settled = await wait(5)
+  const settled = await wait(5, 'runtime contract turn')
+  await processApprovals(Date.now() + 2_000)
+  approvalMonitoring = false
+  check('in-turn approvals are exact, acknowledged, and fail closed for unknown calls', () => {
+    assert.equal(approvalFailure, undefined)
+    assert.equal(pendingApprovals.size, 0, 'every approval request received an acknowledgement')
+    assert.deepEqual(
+      [...resolvedApprovals].sort(),
+      [...requestedApprovals.keys()].sort(),
+      'every requested approval was resolved exactly once',
+    )
+    for (const { tool } of requestedApprovals.values()) {
+      assert.ok(approvalCandidates.some((candidate) => candidate.name === tool), `approval tool ${tool} was in the planned side-effect set`)
+    }
+  })
   assert.equal(settled.error, undefined, JSON.stringify(settled.error))
   assert.equal(settled.result?.settlement, 'answered', 'the turn completed through every surface')
 
@@ -489,11 +620,38 @@ try {
 
   console.log(`\n${passed} checks passed`)
 } finally {
-  host.stdin.end()
-  if (host.exitCode === null) await once(host, 'exit').catch(() => host.kill())
+  const cleanupDeadline = Date.now() + 5_000
+  for (const pending of pendingApprovals.values()) {
+    const denyId = sendAuto('approvals/resolve', { ...pending, decision: 'deny', reason: 'Qualification cleanup' })
+    await waitForMessage((message) => message.id === denyId, `cleanup approval ${pending.callId}`, cleanupDeadline).catch(() => undefined)
+  }
+  pendingApprovals.clear()
+  if (host.exitCode === null && host.signalCode === null) {
+    const cancelId = sendAuto('turn/cancel', { runId: approvalRunId })
+    await waitForMessage((message) => message.id === cancelId, 'cleanup turn cancel', cleanupDeadline).catch(() => undefined)
+    host.stdin.end()
+    if (!(await waitExit(2_000))) {
+      host.kill('SIGTERM')
+      if (!(await waitExit(1_000))) {
+        host.kill('SIGKILL')
+        await waitExit(1_000)
+      }
+    }
+  }
   output.close()
-  await new Promise<void>((done) => modelServer.close(() => done()))
+  await new Promise<void>((done) => {
+    if (!modelServer.listening) return done()
+    const timer = setTimeout(() => {
+      modelServer.closeAllConnections?.()
+      done()
+    }, 2_000)
+    modelServer.close(() => {
+      clearTimeout(timer)
+      done()
+    })
+  })
   await rm(agentDir, { recursive: true, force: true })
   await rm(stateDir, { recursive: true, force: true })
   await rm(workspace, { recursive: true, force: true })
+  await rm(outboundPolicyDir, { recursive: true, force: true })
 }

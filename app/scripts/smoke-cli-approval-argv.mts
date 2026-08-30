@@ -29,6 +29,7 @@ function assertNoDanger(args: string[], label: string) {
 
 assert.deepEqual(argv('codex', 'always').slice(5, 9), ['-s', 'workspace-write', '-c', 'approval_policy="on-request"'])
 assert.ok(argv('codex', 'auto').includes('--approve-for-me'))
+assert.equal(argv('codex', 'auto').includes('workspace-write'), false, 'Codex rejects --sandbox together with --approve-for-me')
 assert.ok(argv('codex', 'full').includes('--dangerously-bypass-approvals-and-sandbox'))
 
 assert.deepEqual(argv('claude', 'always').slice(4, 6), ['--permission-mode', 'manual'])

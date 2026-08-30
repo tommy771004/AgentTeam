@@ -11,17 +11,23 @@ const distEntry = path.join(appRoot, 'dist', 'index.html')
 const mainEntry = path.join(appRoot, 'dist-electron', 'main.js')
 const preloadEntry = path.join(appRoot, 'dist-electron', 'preload.cjs')
 const piHostEntry = path.join(appRoot, 'dist-electron', 'pi-host.js')
-const sourceInputs = [
-  path.join(appRoot, 'electron', 'main.ts'),
-  path.join(appRoot, 'electron', 'preload.ts'),
-  path.join(appRoot, 'electron', 'piHostEntry.ts'),
-  path.join(appRoot, 'electron', 'piHostProtocol.ts'),
-  path.join(appRoot, 'src', 'components', 'settings', 'PersonalizationInstructionsSection.tsx'),
-]
-const shippedBundles = [distEntry, mainEntry, preloadEntry, piHostEntry]
+const mainSource = path.join(appRoot, 'electron', 'main.ts')
+const preloadSource = path.join(appRoot, 'electron', 'preload.ts')
+const piHostEntrySource = path.join(appRoot, 'electron', 'piHostEntry.ts')
+const piHostProtocolSource = path.join(appRoot, 'electron', 'piHostProtocol.ts')
+const personalizationSource = path.join(appRoot, 'src', 'components', 'settings', 'PersonalizationInstructionsSection.tsx')
+const artifactInputs = new Map([
+  [distEntry, [personalizationSource]],
+  [mainEntry, [mainSource, piHostProtocolSource]],
+  [preloadEntry, [preloadSource]],
+  [piHostEntry, [piHostEntrySource, piHostProtocolSource]],
+])
+const shippedBundles = [...artifactInputs.keys()]
 if (shippedBundles.some((filePath) => !fs.existsSync(filePath))) throw new Error('Focused Pi instruction E2E requires npm run build:pi-host && npx vite build')
-const newestSourceMtime = Math.max(...sourceInputs.map((filePath) => fs.statSync(filePath).mtimeMs))
-const staleBundles = shippedBundles.filter((filePath) => fs.statSync(filePath).mtimeMs < newestSourceMtime)
+const staleBundles = shippedBundles.filter((filePath) => {
+  const artifactMtime = fs.statSync(filePath).mtimeMs
+  return artifactInputs.get(filePath).some((sourcePath) => fs.statSync(sourcePath).mtimeMs > artifactMtime)
+})
 if (staleBundles.length) throw new Error(`Focused Pi instruction E2E refused stale shipped bundle(s): ${staleBundles.map((filePath) => path.relative(appRoot, filePath)).join(', ')}`)
 
 const { _electron: electron } = await import('playwright')
@@ -179,17 +185,20 @@ try {
   const saved = await page.evaluate(async () => window.subagents?.piHost?.instructions?.get?.())
   assert.equal(saved?.instructions?.globalCustomInstructions, 'QUALIFIED_GLOBAL_INSTRUCTION', 'UI save must commit through the real Host')
   assert.ok((saved?.instructions?.revision || 0) > 0, 'UI save must publish a revision')
-  const resolvedAfterSave = await page.evaluate(async (root) => window.subagents?.piHost?.instructions?.resolve?.({ projectRoot: root, workPath: root }), projectRoot)
-  const savedEffectiveHash = resolvedAfterSave?.instructionSnapshot?.effectiveHash
-  assert.equal(typeof savedEffectiveHash, 'string', 'Host resolve must expose the effective instruction hash')
   const canonicalProjectSource = fs.realpathSync(path.join(projectRoot, 'AGENTS.md'))
-  const expectedProjectSource = resolvedAfterSave?.instructionSnapshot?.sources?.find((source) => source.kind === 'project-root' && source.path === canonicalProjectSource)
-  assert.ok(expectedProjectSource, 'pre-run Host resolve must expose the canonical project source')
   step('UI save committed')
 
   await page.evaluate(() => { window.location.hash = '#/' })
   await page.reload({ waitUntil: 'domcontentloaded', timeout: deadlineTimeout() })
   await page.waitForSelector('.agent-composer-send', { timeout: deadlineTimeout() })
+  // Navigation/reload may complete pending Host projection work. Resolve at
+  // the last observable pre-admission boundary so the expected provenance is
+  // the same snapshot generation the following Task run is required to freeze.
+  const resolvedBeforeRun = await page.evaluate(async (root) => window.subagents?.piHost?.instructions?.resolve?.({ projectRoot: root, workPath: root }), projectRoot)
+  const admittedEffectiveHash = resolvedBeforeRun?.instructionSnapshot?.effectiveHash
+  assert.equal(typeof admittedEffectiveHash, 'string', 'pre-run Host resolve must expose the effective instruction hash')
+  const expectedProjectSource = resolvedBeforeRun?.instructionSnapshot?.sources?.find((source) => source.kind === 'project-root' && source.path === canonicalProjectSource)
+  assert.ok(expectedProjectSource, 'pre-run Host resolve must expose the canonical project source')
   const beforeRuns = await readRuns(page)
   await page.locator('textarea.composer-field').first().fill('QUALIFIED_CURRENT_REQUEST')
   await page.locator('.agent-composer-send').first().click()
@@ -228,7 +237,7 @@ try {
   assert.equal(projectSourceEntry.hash, expectedProjectSource.hash, 'Turn Record project source hash must equal the pre-run Host source')
   assert.deepEqual(projectSourceEntry, expectedProjectSource, 'Turn Record project source provenance must equal the pre-run Host source entry')
   assert.equal(typeof instructionEntry.snapshot.effectiveHash, 'string', 'Turn Record snapshot must preserve effective hash')
-  assert.equal(instructionEntry.snapshot.effectiveHash, savedEffectiveHash, 'Turn Record snapshot hash must match the Host-resolved effective hash')
+  assert.equal(instructionEntry.snapshot.effectiveHash, admittedEffectiveHash, 'Turn Record snapshot hash must match the immediately pre-run Host-resolved effective hash')
   assert.equal(entries.filter((entry) => entry.kind === 'step-start').length, 1, 'Turn Record must record the Host orchestration step boundary')
   assert.equal(entries.filter((entry) => entry.kind === 'provider-prompt').length, 1, 'Turn Record must record the admitted provider prompt boundary')
   assert.equal(entries.filter((entry) => entry.kind === 'tool-call' && entry.tool === 'bash').length, 1, 'Turn Record must record exactly one model tool call')

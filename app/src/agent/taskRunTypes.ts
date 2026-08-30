@@ -21,6 +21,7 @@ export type RunSourceKind =
   | 'composer'
   | 'slash'
   | 'retry'
+  | 'review'
   | 'schedule'
   | 'webhook'
   | 'telegram'
@@ -51,6 +52,7 @@ export function resolveBusyPolicy(
     case 'composer':
     case 'slash':
     case 'retry':
+    case 'review':
       return (followUpMode || 'steer') === 'queue' ? 'queue' : 'steer'
     default:
       return 'reject'
@@ -117,6 +119,11 @@ export type ExternalRunOpts = {
   }
   /** Internal: skip re-enqueue when draining queue */
   _fromQueue?: boolean
+  /**
+   * Internal synchronous admission handoff for the durable queue. The queue
+   * must not remove its item until the coordinator has persisted run ownership.
+   */
+  _onAdmitted?: () => void
   /**
    * Resume thread.continueGoal (same DoD / missing).
    * When true, forces Goal-based corrective run.

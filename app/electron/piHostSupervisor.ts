@@ -5,6 +5,7 @@ import type { ProjectInstructionWriteFailureCode } from './projectInstructionWri
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
 import type { MemoryImportPreviewInput, MemoryImportApplyInput } from './durableMemoryImport.ts'
 import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
+import type { ReviewAdmissionSnapshot, ReviewRunnerKind, ReviewSnapshotRef } from '../src/agent/reviewContract.ts'
 import type {
   DurableMemoryProtocolResult,
   CanonicalProjectId,
@@ -68,7 +69,7 @@ export class PiHostSupervisor {
     this.turnIdleTimeoutMs = options.turnIdleTimeoutMs ?? 5 * 60_000
     this.requestedCapabilities = options.requestedCapabilities
       ? [...options.requestedCapabilities]
-      : ['attachments-v1', 'tool-contract-v1', 'instructions-v1']
+      : ['attachments-v1', 'tool-contract-v1', 'instructions-v1', 'review-v1']
     this.serviceHandler = options.serviceHandler
   }
 
@@ -271,6 +272,91 @@ export class PiHostSupervisor {
     if (response.error || !response.result?.instructions) throw new Error(response.error?.message || 'Instruction import failed')
     return response.result.instructions
   }
+
+  async admitReviewWorkspace(input: {
+    runId: string
+    threadId: string
+    projectRoot: string
+    runnerKind: ReviewRunnerKind
+  }): Promise<ReviewAdmissionSnapshot> {
+    const response = await this.request('review/v1/admit', input)
+    if (response.error || !response.result?.reviewAdmission) {
+      throw new Error(response.error?.message || 'Run Review workspace admission failed')
+    }
+    return response.result.reviewAdmission
+  }
+
+  async finalizeReviewWorkspace(input: {
+    snapshotId?: string
+    runId?: string
+    settlementKind: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash'
+  }): Promise<ReviewSnapshotRef> {
+    const response = await this.request('review/v1/finalize', input)
+    if (response.error || !response.result?.reviewSnapshotRef) {
+      throw new Error(response.error?.message || 'Run Review snapshot finalization failed')
+    }
+    return response.result.reviewSnapshotRef
+  }
+
+  async readReviewArtifact(snapshotId: string): Promise<NonNullable<PiHostResponse['result']>['reviewArtifact']> {
+    const response = await this.request('review/v1/read', { snapshotId })
+    if (response.error || !response.result?.reviewArtifact) throw new Error(response.error?.message || 'Review artifact read failed')
+    return response.result.reviewArtifact
+  }
+
+  async readReviewPayloadPage(input: { snapshotId: string; payloadId: string; offset?: number; maxBytes?: number }): Promise<NonNullable<PiHostResponse['result']>['reviewPayloadPage']> {
+    const response = await this.request('review/v1/payload-page', input)
+    if (response.error || !response.result?.reviewPayloadPage) throw new Error(response.error?.message || 'Review payload page failed')
+    return response.result.reviewPayloadPage
+  }
+
+  async describeReviewTarget(target: import('../src/agent/reviewContract.ts').ReviewTarget): Promise<NonNullable<PiHostResponse['result']>['reviewTargetDescription']> {
+    const response = await this.request('review/v1/describe', { target })
+    if (response.error || !response.result?.reviewTargetDescription) throw new Error(response.error?.message || 'Review target description failed')
+    return response.result.reviewTargetDescription
+  }
+
+  async listReviewFiles(input: { target: import('../src/agent/reviewContract.ts').ReviewTarget; cursor?: string; limit?: number; query?: string }): Promise<NonNullable<PiHostResponse['result']>['reviewFiles']> {
+    const response = await this.request('review/v1/files', input)
+    if (response.error || !response.result?.reviewFiles) throw new Error(response.error?.message || 'Review file listing failed')
+    return response.result.reviewFiles
+  }
+
+  async readReviewFileDiff(input: { target: import('../src/agent/reviewContract.ts').ReviewTarget; path: string; cursor?: string; maxBytes?: number }): Promise<NonNullable<PiHostResponse['result']>['reviewDiff']> {
+    const response = await this.request('review/v1/file-diff', input)
+    if (response.error || !response.result?.reviewDiff) throw new Error(response.error?.message || 'Review diff read failed')
+    return response.result.reviewDiff
+  }
+
+  async refreshReviewTarget(target: import('../src/agent/reviewContract.ts').ReviewTarget): Promise<NonNullable<PiHostResponse['result']>['reviewTargetDescription']> {
+    const response = await this.request('review/v1/refresh', { target })
+    if (response.error || !response.result?.reviewTargetDescription) throw new Error(response.error?.message || 'Review target refresh failed')
+    return response.result.reviewTargetDescription
+  }
+
+  async listReviewComments(snapshotId: string) { const response = await this.request('review/v1/comments/list', { snapshotId }); if (response.error || !response.result?.reviewComments) throw new Error(response.error?.message || 'Review comments read failed'); return response.result.reviewComments }
+  async saveReviewDraft(input: { id?: string; snapshotId: string; path: string; side?: 'old' | 'new'; line?: number; body: string }) { const response = await this.request('review/v1/draft/save', input); if (response.error || !response.result?.reviewComment) throw new Error(response.error?.message || 'Review draft save failed'); return response.result.reviewComment }
+  async deleteReviewDraft(id: string) { const response = await this.request('review/v1/draft/delete', { id }); if (response.error) throw new Error(response.error.message) }
+  async transitionReviewComment(id: string, status: import('../src/agent/reviewStateContract.ts').ReviewCommentStatus) { const response = await this.request('review/v1/comment/transition', { id, status }); if (response.error || !response.result?.reviewComment) throw new Error(response.error?.message || 'Review comment transition failed'); return response.result.reviewComment }
+  async listReviewFileStates(snapshotId: string) { const response = await this.request('review/v1/file-state/list', { snapshotId }); if (response.error || !response.result?.reviewFileStates) throw new Error(response.error?.message || 'Review file states read failed'); return response.result.reviewFileStates }
+  async markReviewFile(input: { snapshotId: string; path: string; contentHash: string }) { const response = await this.request('review/v1/file-state/mark', input); if (response.error || !response.result?.reviewFileState) throw new Error(response.error?.message || 'Review file state write failed'); return response.result.reviewFileState }
+  async prepareReviewFeedback(snapshotId: string) { const response = await this.request('review/v1/feedback/prepare', { snapshotId }); if (response.error || !response.result?.reviewFeedbackBundle) throw new Error(response.error?.message || 'Review feedback prepare failed'); return response.result.reviewFeedbackBundle }
+  async claimReviewFeedback(id: string, runId: string) { const response = await this.request('review/v1/feedback/claim', { id, runId }); if (response.error || !response.result?.reviewFeedbackBundle) throw new Error(response.error?.message || 'Review feedback claim failed'); return { bundle: response.result.reviewFeedbackBundle, claimed: response.result.reviewFeedbackClaimed === true } }
+  async releaseReviewFeedback(id: string, runId: string) { const response = await this.request('review/v1/feedback/release', { id, runId }); if (response.error) throw new Error(response.error.message) }
+  async inheritReviewState(fromSnapshotId: string, toSnapshotId: string) { const response = await this.request('review/v1/state/inherit', { fromSnapshotId, toSnapshotId }); if (response.error || !response.result?.reviewComments || !response.result.reviewFileStates) throw new Error(response.error?.message || 'Review state inheritance failed'); return { comments: response.result.reviewComments, fileStates: response.result.reviewFileStates } }
+  async listReviewVerifications(snapshotId: string) { const response = await this.request('review/v1/verification/list', { snapshotId }); if (response.error || !response.result?.reviewVerifications) throw new Error(response.error?.message || 'Review verification listing failed'); return response.result.reviewVerifications }
+  async runReviewVerification(snapshotId: string, kind: import('../src/agent/reviewVerificationContract.ts').ReviewVerificationKind) { const response = await this.request('review/v1/verification/run', { snapshotId, kind }); if (response.error || !response.result?.reviewVerification) throw new Error(response.error?.message || 'Review verification failed'); return response.result.reviewVerification }
+  async readReviewVerificationOutput(input: { outputRef: string; offset?: number; maxBytes?: number }) { const response = await this.request('review/v1/verification/output', input); if (response.error || !response.result?.reviewVerificationOutput) throw new Error(response.error?.message || 'Review verification output failed'); return response.result.reviewVerificationOutput }
+  async previewReviewMutation(intent: import('../src/agent/reviewMutationContract.ts').ReviewMutationIntent) { const response = await this.request('review/v1/mutation/preview', { intent }); if (response.error || !response.result?.reviewMutationPreview) throw new Error(response.error?.message || 'Review mutation preview failed'); return response.result.reviewMutationPreview }
+  async applyReviewMutation(previewId: string) { const response = await this.request('review/v1/mutation/apply', { previewId }); if (response.error || !response.result?.reviewMutationReceipt) throw new Error(response.error?.message || 'Review mutation apply failed'); return response.result.reviewMutationReceipt }
+  async previewReviewDelivery(intent: import('../src/agent/reviewDeliveryContract.ts').ReviewDeliveryIntent) { const response = await this.request('review/v1/delivery/preview', { intent }); if (response.error || !response.result?.reviewDeliveryPreview) throw new Error(response.error?.message || 'Review delivery preview failed'); return response.result.reviewDeliveryPreview }
+  async applyReviewDelivery(previewId: string) { const response = await this.request('review/v1/delivery/apply', { previewId }); if (response.error || !response.result?.reviewDeliveryReceipt) throw new Error(response.error?.message || 'Review delivery apply failed'); return response.result.reviewDeliveryReceipt }
+  async exportReviewArtifact(snapshotId: string) { const response = await this.request('review/v1/artifact/export', { snapshotId }); if (response.error || !response.result?.reviewArtifactExport) throw new Error(response.error?.message || 'Review artifact export failed'); return response.result.reviewArtifactExport }
+  async previewReviewArtifactImport(bundle: unknown) { const response = await this.request('review/v1/artifact/import-preview', { bundle }); if (response.error || !response.result?.reviewArtifactImportPreview) throw new Error(response.error?.message || 'Review artifact import preview failed'); return response.result.reviewArtifactImportPreview }
+  async applyReviewArtifactImport(bundle: unknown, expectedBundleHash: string) { const response = await this.request('review/v1/artifact/import-apply', { bundle, expectedBundleHash }); if (response.error || !response.result?.reviewArtifact) throw new Error(response.error?.message || 'Review artifact import failed'); return response.result.reviewArtifact }
+  async rebindReviewArtifact(snapshotId: string, projectRoot: string) { const response = await this.request('review/v1/artifact/rebind', { snapshotId, projectRoot }); if (response.error || !response.result?.reviewArtifact) throw new Error(response.error?.message || 'Review artifact rebind failed'); return response.result.reviewArtifact }
+  async applyReviewArtifactRetention(input: { retainedSnapshotIds: string[]; reason: string; olderThan?: string }) { const response = await this.request('review/v1/artifact/retention', input); if (response.error || !response.result?.reviewArtifactRetention) throw new Error(response.error?.message || 'Review artifact retention failed'); return response.result.reviewArtifactRetention }
+  async hardDeleteReviewArtifact(snapshotId: string) { const response = await this.request('review/v1/artifact/hard-delete', { snapshotId }); if (response.error || response.result?.reviewArtifactHardDeleted !== true) throw new Error(response.error?.message || 'Review artifact hard delete failed') }
 
   async createSession(title?: string, threadId?: string): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('sessions/create', {
@@ -660,7 +746,7 @@ export class PiHostSupervisor {
     }
     const id = this.nextRequestId++
     return new Promise((resolve, reject) => {
-      const timeoutMs = method === 'turn/submit' ? this.turnIdleTimeoutMs : this.requestTimeoutMs
+      const timeoutMs = method === 'turn/submit' || method === 'review/v1/verification/run' ? this.turnIdleTimeoutMs : this.requestTimeoutMs
       const waiter: PendingRequest = {
         resolve,
         reject,

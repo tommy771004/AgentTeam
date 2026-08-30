@@ -12,7 +12,7 @@ import { buildPinnedPiSkillsPromptBlock, captureDiscoveredPiSkills, snapshotPiSk
 import { piCodingAgentModule as piCodingAgent } from './piVendor.ts'
 import { piCoreCompatibility } from './piCoreAdapter.ts'
 import { sanitizeModelRow, SUBSCRIPTION_PROVIDERS, type SubscriptionModelInfo, type SubscriptionProviderId } from '../src/agent/subscriptionCatalog.ts'
-import { bindPiSessionSkillResourceView, buildPiPackExtensionBundle, commitPiPackExtensionBundle, disposePiSkillPreflightSession, installPiSkillPreflightBatchBarrier, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, piSkillPreflightExtensionFactory, piWorkingStateWriteToolDefinition, registerPiPackSession, unregisterPiPackSession } from './piToolHost.ts'
+import { bindPiSessionSkillResourceView, buildPiPackExtensionBundle, commitPiPackExtensionBundle, disposePiSkillPreflightSession, installPiSkillPreflightBatchBarrier, piActivePackToolNames, piAllPackToolNames, piBashGateExtensionFactory, piSkillPreflightExtensionFactory, piWorkingStateWriteToolDefinition, registerPiPackSession, retirePiSkillPreflightSession, unregisterPiPackSession } from './piToolHost.ts'
 import { buildPiMcpDynamicPacks } from './piExtensionPacks/mcpBridgePack.ts'
 
 type PiSessionRuntime = {
@@ -341,7 +341,7 @@ export async function persistPiLegacyCredential(provider: string, apiKey: string
 type PiMcpDynamicPacks = Awaited<ReturnType<typeof buildPiMcpDynamicPacks>>
 
 async function retireExistingPiSession(sessionId: string, existing?: PiSessionRuntime): Promise<void> {
-  if (existing) await disposePiSession(sessionId)
+  if (existing) await disposePiSession(sessionId, true)
 }
 
 function configurePiToolOptions(options: Record<string, unknown>, settings: PiRuntimeSettings, mcpDynamic: PiMcpDynamicPacks): boolean {
@@ -546,21 +546,26 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     ...(contextWindowTokens ? { contextWindowTokens } : {}),
     ...(options.resourceLoader ? { requestContext } : {}),
   } as PiSessionRuntime
-  if (existing) {
-    await existing.session.dispose?.()
-    if (existing.skillSnapshotRoot && existing.skillSnapshotRoot !== skillSnapshot?.root) {
-      await rm(existing.skillSnapshotRoot, { recursive: true, force: true })
-    }
+  // `retireExistingPiSession` already disposed the previous AgentSession, but
+  // deliberately transferred its snapshot-root ownership to this replacement.
+  // Do not remove it until construction has succeeded. Reusing a deterministic
+  // root (same digest) keeps the readable view alive; a changed root is the
+  // only one this owner is allowed to clean up.
+  if (existing?.skillSnapshotRoot && existing.skillSnapshotRoot !== skillSnapshot?.root) {
+    await rm(existing.skillSnapshotRoot, { recursive: true, force: true })
   }
   commitPiPackExtensionBundle(sessionId, packBundle)
   sessionRuntimes.set(sessionId, runtime)
   return runtime
   } catch (error) {
-    // A failed loader/model/session construction must not strand a readable
-    // snapshot that no live turn owns. Preserve only the previous runtime's
-    // snapshot, which remains valid until a replacement succeeds.
-    if (skillSnapshot?.root && skillSnapshot.root !== existing?.skillSnapshotRoot) {
-      await rm(skillSnapshot.root, { recursive: true, force: true })
+    // The replacement path retained the previous root until construction
+    // completed. A loader/model/session failure leaves no runtime owner,
+    // including when the new snapshot has the same deterministic path.
+    // Reclaim both candidates here; a retry will materialize the same-digest
+    // view afresh instead of leaking an orphan.
+    if (skillSnapshot?.root) await rm(skillSnapshot.root, { recursive: true, force: true })
+    if (existing?.skillSnapshotRoot && existing.skillSnapshotRoot !== skillSnapshot?.root) {
+      await rm(existing.skillSnapshotRoot, { recursive: true, force: true })
     }
     throw error
   }
@@ -808,15 +813,21 @@ export function forkPiSession(sessionId: string) {
   return (runtime.sessionManager as { createBranchedSession?: (id: string) => string | undefined }).createBranchedSession?.(leafId)
 }
 
-export async function disposePiSession(sessionId: string) {
+export async function disposePiSession(sessionId: string, preservePreflightTombstones = false) {
   const runtime = sessionRuntimes.get(sessionId)
   if (!runtime) return
   unregisterPiPackSession(sessionId)
-  disposePiSkillPreflightSession(sessionId)
+  if (preservePreflightTombstones) retirePiSkillPreflightSession(sessionId)
+  else disposePiSkillPreflightSession(sessionId)
   try {
     await runtime.session.dispose?.()
   } finally {
-    if (runtime.skillSnapshotRoot) await rm(runtime.skillSnapshotRoot, { recursive: true, force: true })
+    // Runtime replacement passes `true` above so the next successful runtime
+    // owns this root. Final session disposal remains the terminal cleanup
+    // owner and removes it only when no replacement is taking over.
+    if (!preservePreflightTombstones && runtime.skillSnapshotRoot) {
+      await rm(runtime.skillSnapshotRoot, { recursive: true, force: true })
+    }
     sessionRuntimes.delete(sessionId)
   }
 }

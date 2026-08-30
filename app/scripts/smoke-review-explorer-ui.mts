@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+
+const explorer = await readFile(new URL('../src/components/ReviewExplorer.tsx', import.meta.url), 'utf8')
+for (const source of ['Run snapshot', 'Live working tree', 'Staged changes', 'Branch range', 'Snapshot range']) assert.match(explorer, new RegExp(source))
+for (const state of ['loading', 'failed', 'partial', 'stale', 'Binary', '不支援']) assert.match(explorer, new RegExp(state, 'i'))
+assert.match(explorer, /listFiles\(\{ target, limit: 200,[\s\S]*query/, 'file navigation and search enter through bounded Host paging')
+assert.match(explorer, /nextCursor[\s\S]*載入更多/, 'large manifests expose a real continuation action')
+assert.match(explorer, /readFileDiff\(\{ target, path: file\.path, maxBytes: 64 \* 1024 \}\)/, 'hunks enter through bounded Host paging')
+assert.match(explorer, /controller\.abort\(\)/, 'target and file changes cancel stale requests')
+assert.match(explorer, /搜尋路徑[\s\S]*依狀態篩選[\s\S]*排序變更檔案/)
+assert.match(explorer, /Unified[\s\S]*Split/)
+assert.match(explorer, /折疊 context/)
+assert.match(explorer, /altKey[\s\S]*ArrowDown[\s\S]*ArrowUp/)
+assert.match(explorer, /navigator\.clipboard\.writeText/, 'copy actions are wired')
+assert.match(explorer, /listComments[\s\S]*listFileStates/)
+assert.match(explorer, /saveDraft[\s\S]*transitionComment[\s\S]*deleteDraft/)
+assert.match(explorer, /依審查狀態篩選[\s\S]*markReviewed/)
+assert.match(explorer, /md:flex-row[\s\S]*focus-visible/, 'narrow and keyboard projections are present')
+assert.doesNotMatch(explorer, /exec\(|spawn\(|git |dispatchThreadTask|startExecution/, 'renderer never authors execution or Git commands')
+
+const protocol = await readFile(new URL('../electron/piHostProtocol.ts', import.meta.url), 'utf8')
+for (const method of ['review/v1/describe', 'review/v1/files', 'review/v1/file-diff', 'review/v1/refresh']) assert.match(protocol, new RegExp(method.replaceAll('/', '\\/')))
+assert.match(protocol, /state\.reviewProjection\.listFiles/)
+assert.match(protocol, /state\.reviewProjection\.readFileDiff/)
+
+const preload = await readFile(new URL('../electron/preload.ts', import.meta.url), 'utf8')
+assert.match(preload, /describe: \(target: ReviewTarget\)/)
+assert.match(preload, /listFiles:/)
+assert.match(preload, /readFileDiff:/)
+assert.match(preload, /refresh:/)
+
+const session = await readFile(new URL('../src/components/WorkspacePanelSession.tsx', import.meta.url), 'utf8')
+assert.match(session, /<ReviewExplorer/)
+assert.match(session, /status === 'draft'[\s\S]*window\.confirm/, 'closing a review with durable drafts asks before hiding the tab')
+const summary = await readFile(new URL('../src/components/InlineRunPanel.tsx', import.meta.url), 'utf8')
+assert.match(summary, /reviewSnapshotRef[\s\S]*onOpenReview/)
+console.log('smoke-review-explorer-ui passed')

@@ -5,7 +5,6 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
-import { readToolOutputSpill } from '../electron/attachmentStore.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'pi-bash-stream-'))
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-bash-stream-state-'))
@@ -65,9 +64,24 @@ try {
   assert.ok(boundedUpdates.every((item) => JSON.stringify(item.payload?.item || '').length <= 16_500))
   const spill = boundedUpdates.find((item) => item.payload?.item?.type === 'truncated')?.payload?.item?.spill
   assert.match(String(spill?.locator || ''), /^toolspill:/)
-  const recovered = readToolOutputSpill({ locator: spill.locator, runId: 'bash-output-limit', projectRoot: root })
-  assert.equal(recovered.ok, true)
-  assert.match(recovered.output || '', /x/)
+  send(6, 'tools/pack', {
+    name: 'tool_output_read',
+    cwd: root,
+    runId: 'bash-output-limit',
+    arguments: { outputId: spill.locator, chars: 1024 },
+  })
+  const recovered = await waitFor(6)
+  assert.equal(recovered.error, undefined, JSON.stringify(recovered))
+  assert.match(String(recovered.result?.content?.[0]?.text || ''), /x/)
+  send(7, 'tools/pack', {
+    name: 'tool_output_read',
+    cwd: root,
+    runId: 'different-run',
+    arguments: { outputId: spill.locator, chars: 1024 },
+  })
+  const crossRun = await waitFor(7)
+  assert.equal(crossRun.error, undefined)
+  assert.equal(crossRun.result?.item?.ok, false, 'a spill locator cannot be read by another run')
 } finally {
   host.stdin.end()
   await once(host, 'exit')

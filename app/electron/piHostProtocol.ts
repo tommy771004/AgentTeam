@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { createHash, timingSafeEqual } from 'node:crypto'
+import { execFile } from 'node:child_process'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
 import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatalog.ts'
 import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
@@ -21,6 +22,19 @@ import { BUILTIN_BASELINE_POLICY, emptySupplementalPolicy } from '../src/agent/o
 import { compileProviderSecurityProfile } from '../src/agent/outbound/policyMerge.ts'
 import { ensureLocalPolicyTree } from '../src/agent/outbound/policyStore.ts'
 import { connectionIdForBuiltinLlm } from '../src/agent/outbound/providerConnectionId.ts'
+import { captureReviewWorkspaceAdmission } from './reviewWorkspaceBinding.ts'
+import { InMemoryReviewArtifactStore, type ReviewArtifactStore } from './reviewArtifactStore.ts'
+import { captureRunReviewSnapshot, type TrustedReviewMutation } from './reviewSnapshotCapture.ts'
+import { WorkspaceReviewProjection, type ReviewDiffHunk, type ReviewTargetDescription } from './workspaceReviewProjection.ts'
+import type { ReviewFileManifestEntry, ReviewPageEnvelope, ReviewTarget, ReviewWorkspaceBinding } from '../src/agent/reviewContract.ts'
+import { InMemoryReviewStateStore, type ReviewStateStore } from './reviewStateStore.ts'
+import type { ReviewComment, ReviewFileState } from '../src/agent/reviewStateContract.ts'
+import { InMemoryReviewVerificationStore, type ReviewVerificationStore } from './reviewVerificationStore.ts'
+import { projectReviewVerification, type ReviewVerificationKind, type ReviewVerificationProjection } from '../src/agent/reviewVerificationContract.ts'
+import { ReviewMutationCoordinator } from './reviewMutationCoordinator.ts'
+import type { ReviewMutationApproval, ReviewMutationIntent, ReviewMutationPreview, ReviewMutationReceipt } from '../src/agent/reviewMutationContract.ts'
+import { ReviewDeliveryCoordinator } from './reviewDeliveryCoordinator.ts'
+import type { ReviewDeliveryApproval, ReviewDeliveryIntent, ReviewDeliveryPreview, ReviewDeliveryReceipt } from '../src/agent/reviewDeliveryContract.ts'
 
 /**
  * Version 2 retired the ambiguous `success` turn settlement for the closed
@@ -33,7 +47,7 @@ import { connectionIdForBuiltinLlm } from '../src/agent/outbound/providerConnect
  * field. Durable memory is available only through negotiated memory-store-v1.
  */
 export const PI_HOST_PROTOCOL_VERSION = 5 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'capabilities'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
@@ -55,7 +69,8 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+    | 'review/v1/finalize' | 'review/v1/read' | 'review/v1/payload-page' | 'review/v1/describe' | 'review/v1/files' | 'review/v1/file-diff' | 'review/v1/refresh' | 'review/v1/comments/list' | 'review/v1/draft/save' | 'review/v1/draft/delete' | 'review/v1/comment/transition' | 'review/v1/file-state/list' | 'review/v1/file-state/mark' | 'review/v1/state/inherit' | 'review/v1/feedback/prepare' | 'review/v1/feedback/claim' | 'review/v1/feedback/release' | 'review/v1/verification/list' | 'review/v1/verification/run' | 'review/v1/verification/output' | 'review/v1/mutation/preview' | 'review/v1/mutation/apply' | 'review/v1/delivery/preview' | 'review/v1/delivery/apply' | 'review/v1/artifact/export' | 'review/v1/artifact/import-preview' | 'review/v1/artifact/import-apply' | 'review/v1/artifact/rebind' | 'review/v1/artifact/retention' | 'review/v1/artifact/hard-delete'
   params: Record<string, unknown>
 }
 
@@ -120,6 +135,30 @@ export type PiHostResponse = {
     instructionImportPreview?: PersonalizationImportPreview
     instructionMigrationReport?: LegacyInstructionMigrationReport
     instructionExport?: import('./instructionRepository.ts').PersonalizationExportBundle
+    reviewAdmission?: import('../src/agent/reviewContract.ts').ReviewAdmissionSnapshot
+    reviewSnapshotRef?: import('../src/agent/reviewContract.ts').ReviewSnapshotRef
+    reviewArtifact?: import('./reviewArtifactStore.ts').ReviewArtifactProjection
+    reviewPayloadPage?: { payloadId: string; contentBase64: string; offset: number; bytes: number; nextOffset?: number }
+    reviewTargetDescription?: ReviewTargetDescription
+    reviewFiles?: ReviewPageEnvelope<ReviewFileManifestEntry>
+    reviewDiff?: ReviewPageEnvelope<ReviewDiffHunk>
+    reviewComments?: ReviewComment[]
+    reviewComment?: ReviewComment
+    reviewFileStates?: ReviewFileState[]
+    reviewFileState?: ReviewFileState
+    reviewFeedbackBundle?: import('../src/agent/reviewStateContract.ts').ReviewFeedbackBundle
+    reviewFeedbackClaimed?: boolean
+    reviewVerifications?: ReviewVerificationProjection[]
+    reviewVerification?: ReviewVerificationProjection
+    reviewVerificationOutput?: { outputRef: string; contentBase64: string; offset: number; bytes: number; nextOffset?: number }
+    reviewMutationPreview?: ReviewMutationPreview
+    reviewMutationReceipt?: ReviewMutationReceipt
+    reviewDeliveryPreview?: ReviewDeliveryPreview
+    reviewDeliveryReceipt?: ReviewDeliveryReceipt
+    reviewArtifactExport?: import('./reviewArtifactStore.ts').ReviewArtifactExportBundle
+    reviewArtifactImportPreview?: import('./reviewArtifactStore.ts').ReviewArtifactImportPreview
+    reviewArtifactRetention?: import('./reviewArtifactStore.ts').ReviewArtifactRetentionReport
+    reviewArtifactHardDeleted?: boolean
     projectInstructionWrite?: { path: string; hash: string; bytes: number }
     projectInstructionRead?: { path: string; hash: string; bytes: number; content: string }
     authorizedIncludeTargets?: readonly string[]
@@ -427,6 +466,15 @@ type HostState = {
   memoryStoreNegotiated: boolean
   memoryControlNegotiated: boolean
   instructionRepositoryNegotiated: boolean
+  reviewNegotiated: boolean
+  reviewArtifactStore: ReviewArtifactStore
+  reviewWorkspaces: Map<string, ReviewWorkspaceBinding>
+  reviewProjection: WorkspaceReviewProjection
+  reviewStateStore: ReviewStateStore
+  reviewVerificationStore: ReviewVerificationStore
+  reviewMutationCoordinator: ReviewMutationCoordinator
+  reviewDeliveryCoordinator: ReviewDeliveryCoordinator
+  reviewImportPreviews: Set<string>
   memoryStore: DurableMemoryStore
   instructionRepository: InstructionRepository
   instructionProjections: Map<string, { signature: string; sourceRevisions: Map<string, { signature: string; revision: number }> }>
@@ -2629,6 +2677,8 @@ function handleInitialization(
     && Array.isArray(requestedCapabilities) && requestedCapabilities.includes('memory-control-v1')
   state.instructionRepositoryNegotiated = requestedVersion === PI_HOST_PROTOCOL_VERSION
     && Array.isArray(requestedCapabilities) && requestedCapabilities.includes('instructions-v1')
+  state.reviewNegotiated = requestedVersion === PI_HOST_PROTOCOL_VERSION
+    && Array.isArray(requestedCapabilities) && requestedCapabilities.includes('review-v1')
   const result = readyResult(state.negotiatedProtocolVersion)
   return [
     { event: 'host/ready', payload: {
@@ -3080,6 +3130,487 @@ async function handleInstructionRequest(
   }
 }
 
+async function readReviewArtifactRequest(
+  state: HostState,
+  params: Record<string, unknown>,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  const snapshotId = typeof params.snapshotId === 'string' ? params.snapshotId.trim() : ''
+  if (!snapshotId) return [errorResponse(id, 'invalid_request', 'snapshotId is required')]
+  const reviewArtifact = await state.reviewArtifactStore.read(snapshotId)
+  return [{ id, result: { reviewArtifact } }]
+}
+
+async function readReviewPayloadPageRequest(
+  state: HostState,
+  params: Record<string, unknown>,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  const snapshotId = typeof params.snapshotId === 'string' ? params.snapshotId.trim() : ''
+  const payloadId = typeof params.payloadId === 'string' ? params.payloadId.trim() : ''
+  if (!snapshotId || !payloadId) return [errorResponse(id, 'invalid_request', 'snapshotId and payloadId are required')]
+  const page = await state.reviewArtifactStore.readPayloadPage({
+    snapshotId,
+    payloadId,
+    offset: Number(params.offset) || 0,
+    maxBytes: Number(params.maxBytes) || 16 * 1024,
+  })
+  return [{ id, result: { reviewPayloadPage: {
+    payloadId: page.payloadId,
+    contentBase64: Buffer.from(page.content).toString('base64'),
+    offset: page.offset,
+    bytes: page.bytes,
+    ...(page.nextOffset === undefined ? {} : { nextOffset: page.nextOffset }),
+  } } }]
+}
+
+async function finalizeReviewRequest(
+  state: HostState,
+  params: Record<string, unknown>,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  let snapshotId = typeof params.snapshotId === 'string' ? params.snapshotId.trim() : ''
+  const runId = typeof params.runId === 'string' ? params.runId.trim() : ''
+  const settlementKind = ['completed', 'failed', 'cancelled', 'timeout', 'crash'].includes(String(params.settlementKind))
+    ? params.settlementKind as 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash'
+    : 'failed'
+  if (!snapshotId && runId) snapshotId = (await state.reviewArtifactStore.findByRunId(runId))?.snapshotId || ''
+  if (!snapshotId) return [errorResponse(id, 'not_found', 'Review snapshot identity is unavailable')]
+  const current = await state.reviewArtifactStore.read(snapshotId)
+  if (current.status === 'ready' || current.status === 'partial' || current.status === 'failed') {
+    return [{ id, result: { reviewSnapshotRef: { snapshotId, runId: current.runId, status: current.status, attributionFidelity: current.attributionFidelity, ...(current.manifestHash ? { manifestHash: current.manifestHash } : {}) } } }]
+  }
+  const trustedMutations: TrustedReviewMutation[] = state.snapshot.sessions.flatMap((session) =>
+    (session.record?.entries || []).flatMap((entry) => {
+      if (entry.kind !== 'tool-result' || entry.settlement !== 'success' || !entry.executionEvidence || entry.executionEvidence.runId !== current.runId) return []
+      const tool = entry.executionEvidence.tool
+      if (tool !== 'write' && tool !== 'edit' && tool !== 'delete' && tool !== 'move') return []
+      return [{ source: 'host' as const, runId: current.runId, callId: entry.callId, tool, paths: [entry.executionEvidence.resource.path], settlement: 'success' as const }]
+    }),
+  )
+  const captured = await captureRunReviewSnapshot({ admission: current.admission, threadId: current.threadId, trustedMutations, settlementKind })
+  const finalized = await state.reviewArtifactStore.finalizeRun(captured)
+  return [{ id, result: { reviewSnapshotRef: { snapshotId, runId: finalized.runId, status: finalized.status, attributionFidelity: finalized.attributionFidelity, ...(finalized.manifestHash ? { manifestHash: finalized.manifestHash } : {}) } } }]
+}
+
+type ReviewTargetRequestMethod = 'review/v1/describe' | 'review/v1/refresh' | 'review/v1/files' | 'review/v1/file-diff'
+
+function isReviewTargetMethod(method: unknown): method is ReviewTargetRequestMethod {
+  return method === 'review/v1/describe'
+    || method === 'review/v1/refresh'
+    || method === 'review/v1/files'
+    || method === 'review/v1/file-diff'
+}
+
+async function handleReviewTargetRequest(
+  state: HostState,
+  method: ReviewTargetRequestMethod,
+  params: Record<string, unknown>,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  const target = params.target as ReviewTarget | undefined
+  if (!target || typeof target !== 'object' || typeof target.kind !== 'string') {
+    return [errorResponse(id, 'invalid_request', 'typed review target is required')]
+  }
+  if (method === 'review/v1/describe') return [{ id, result: { reviewTargetDescription: await state.reviewProjection.describeTarget(target) } }]
+  if (method === 'review/v1/refresh') return [{ id, result: { reviewTargetDescription: await state.reviewProjection.refresh(target) } }]
+  if (method === 'review/v1/files') return [{ id, result: { reviewFiles: await state.reviewProjection.listFiles(target, {
+    cursor: typeof params.cursor === 'string' ? params.cursor : undefined,
+    limit: Number(params.limit) || undefined,
+    query: typeof params.query === 'string' ? params.query : undefined,
+  }) } }]
+  const path = typeof params.path === 'string' ? params.path : ''
+  if (!path) return [errorResponse(id, 'invalid_request', 'review file path is required')]
+  return [{ id, result: { reviewDiff: await state.reviewProjection.readFileDiff(target, path, {
+    cursor: typeof params.cursor === 'string' ? params.cursor : undefined,
+    maxBytes: Number(params.maxBytes) || undefined,
+  }) } }]
+}
+
+async function admitReviewRequest(
+  state: HostState,
+  params: Record<string, unknown>,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  const runId = typeof params.runId === 'string' ? params.runId.trim() : ''
+  const projectRoot = typeof params.projectRoot === 'string' ? params.projectRoot.trim() : ''
+  const runnerKind = params.runnerKind === 'external' ? 'external' : params.runnerKind === 'builtin' ? 'builtin' : undefined
+  if (!runId || !projectRoot || !runnerKind) {
+    return [errorResponse(id, 'invalid_request', 'runId, projectRoot, and runnerKind are required')]
+  }
+  const reviewAdmission = await captureReviewWorkspaceAdmission({ runId, projectRoot, runnerKind })
+  if (reviewAdmission.canonical && reviewAdmission.workspace) state.reviewWorkspaces.set(reviewAdmission.workspace.workspaceId, reviewAdmission.workspace)
+  await state.reviewArtifactStore.beginRun({ admission: reviewAdmission, threadId: typeof params.threadId === 'string' && params.threadId.trim() ? params.threadId.trim() : runId })
+  return [{ id, result: { reviewAdmission } }]
+}
+
+type ReviewStateRequestMethod = 'review/v1/comments/list' | 'review/v1/draft/save' | 'review/v1/draft/delete' | 'review/v1/comment/transition' | 'review/v1/file-state/list' | 'review/v1/file-state/mark' | 'review/v1/state/inherit' | 'review/v1/feedback/prepare' | 'review/v1/feedback/claim' | 'review/v1/feedback/release'
+
+function isReviewStateMethod(method: unknown): method is ReviewStateRequestMethod {
+  return method === 'review/v1/comments/list' || method === 'review/v1/draft/save' || method === 'review/v1/draft/delete'
+    || method === 'review/v1/comment/transition' || method === 'review/v1/file-state/list' || method === 'review/v1/file-state/mark'
+    || method === 'review/v1/feedback/prepare' || method === 'review/v1/feedback/claim' || method === 'review/v1/feedback/release'
+    || method === 'review/v1/state/inherit'
+}
+
+function reviewHunkAnchor(snapshotId: string, path: string, hunk: ReviewDiffHunk, side: 'old' | 'new', line: number) {
+  const context = hunk.content.split('\n').filter((value) => !value.startsWith('diff ') && !value.startsWith('index ') && !value.startsWith('---') && !value.startsWith('+++') && !value.startsWith('@@')).slice(0, 7).join('\n')
+  return { snapshotId, path, side, line, hunkFingerprint: createHash('sha256').update(hunk.header).digest('hex'), contextHash: createHash('sha256').update(context).digest('hex'), originalContext: context }
+}
+
+async function saveReviewDraftRequest(state: HostState, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
+  const snapshotId = typeof params.snapshotId === 'string' ? params.snapshotId : ''
+  const path = typeof params.path === 'string' ? params.path : ''
+  const body = typeof params.body === 'string' ? params.body : ''
+  const draftId = typeof params.id === 'string' ? params.id : undefined
+  let anchor = draftId ? (await state.reviewStateStore.listComments(snapshotId)).find((comment) => comment.id === draftId)?.anchor : undefined
+  if (!anchor) {
+    if (!snapshotId || !path) return [errorResponse(id, 'invalid_request', 'snapshotId and path are required')]
+    const page = await state.reviewProjection.readFileDiff({ kind: 'run-snapshot', snapshotId }, path, { maxBytes: 256 * 1024 })
+    const hunk = page.items.find((item) => item.header.startsWith('@@')) || page.items[0]
+    if (!hunk) return [errorResponse(id, 'not_found', 'No text hunk is available for this comment')]
+    const requestedLine = Number.isSafeInteger(Number(params.line)) && Number(params.line) > 0 ? Number(params.line) : 1
+    anchor = reviewHunkAnchor(snapshotId, path, hunk, params.side === 'old' ? 'old' : 'new', requestedLine)
+  }
+  return [{ id, result: { reviewComment: await state.reviewStateStore.saveDraft({ id: draftId, anchor, body }) } }]
+}
+
+async function inheritReviewStateRequest(state: HostState, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
+  const fromSnapshotId = typeof params.fromSnapshotId === 'string' ? params.fromSnapshotId : ''
+  const toSnapshotId = typeof params.toSnapshotId === 'string' ? params.toSnapshotId : ''
+  if (!fromSnapshotId || !toSnapshotId) return [errorResponse(id, 'invalid_request', 'fromSnapshotId and toSnapshotId are required')]
+  const [comments, after] = await Promise.all([state.reviewStateStore.listComments(fromSnapshotId), state.reviewArtifactStore.read(toSnapshotId)])
+  const anchorCandidates = []
+  for (const comment of comments) {
+    const file = after.manifest.find((entry) => entry.path === comment.anchor.path)
+    if (!file || file.binary) continue
+    const page = await state.reviewProjection.readFileDiff({ kind: 'run-snapshot', snapshotId: toSnapshotId }, file.path, { maxBytes: 256 * 1024 })
+    for (const hunk of page.items.filter((item) => item.header.startsWith('@@'))) anchorCandidates.push(reviewHunkAnchor(toSnapshotId, file.path, hunk, comment.anchor.side, comment.anchor.line))
+  }
+  const inherited = await state.reviewStateStore.inheritSnapshot({ fromSnapshotId, toSnapshotId, nextManifest: after.manifest, anchorCandidates })
+  return [{ id, result: { reviewComments: inherited.comments, reviewFileStates: inherited.fileStates } }]
+}
+
+async function handleReviewFeedbackRequest(state: HostState, method: Extract<ReviewStateRequestMethod, `review/v1/feedback/${string}`>, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
+  if (method === 'review/v1/feedback/prepare') {
+    const snapshotId = typeof params.snapshotId === 'string' ? params.snapshotId.trim() : ''
+    if (!snapshotId) return [errorResponse(id, 'invalid_request', 'snapshotId is required')]
+    const artifact = await state.reviewArtifactStore.read(snapshotId)
+    if (!artifact.admission.workspace) return [errorResponse(id, 'invalid_request', 'Review snapshot has no canonical workspace binding')]
+    const reviewFeedbackBundle = await state.reviewStateStore.prepareFeedback({ snapshotId, threadId: artifact.threadId, workspace: artifact.admission.workspace })
+    return [{ id, result: { reviewFeedbackBundle } }]
+  }
+  if (method === 'review/v1/feedback/claim') { const claim = await state.reviewStateStore.claimFeedback(String(params.id || ''), String(params.runId || '')); return [{ id, result: { reviewFeedbackBundle: claim.bundle, reviewFeedbackClaimed: claim.claimed } }] }
+  await state.reviewStateStore.releaseFeedback(String(params.id || ''), String(params.runId || ''))
+  return [{ id, result: {} }]
+}
+
+async function handleReviewStateRequest(state: HostState, method: ReviewStateRequestMethod, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
+  const snapshotId = typeof params.snapshotId === 'string' ? params.snapshotId.trim() : ''
+  if (method === 'review/v1/draft/save') return saveReviewDraftRequest(state, params, id)
+  if (method.startsWith('review/v1/feedback/')) return handleReviewFeedbackRequest(state, method as Extract<ReviewStateRequestMethod, `review/v1/feedback/${string}`>, params, id)
+  if (method === 'review/v1/state/inherit') return inheritReviewStateRequest(state, params, id)
+  if (method === 'review/v1/draft/delete') { await state.reviewStateStore.deleteDraft(String(params.id || '')); return [{ id, result: {} }] }
+  if (method === 'review/v1/comment/transition') return [{ id, result: { reviewComment: await state.reviewStateStore.transitionComment(String(params.id || ''), params.status as never) } }]
+  if (!snapshotId && method !== 'review/v1/file-state/mark') return [errorResponse(id, 'invalid_request', 'snapshotId is required')]
+  if (method === 'review/v1/comments/list') return [{ id, result: { reviewComments: await state.reviewStateStore.listComments(snapshotId) } }]
+  if (method === 'review/v1/file-state/list') return [{ id, result: { reviewFileStates: await state.reviewStateStore.listFileStates(snapshotId) } }]
+  return [{ id, result: { reviewFileState: await state.reviewStateStore.markReviewed(params as never) } }]
+}
+
+function reviewVerificationScript(projectRoot: string, kind: ReviewVerificationKind): { command: string; args: string[]; cwd: string } | undefined {
+  const roots = [projectRoot, resolve(projectRoot, 'app')]
+  for (const cwd of roots) {
+    const packagePath = resolve(cwd, 'package.json')
+    if (!existsSync(packagePath)) continue
+    try {
+      const parsed = JSON.parse(readFileSync(packagePath, 'utf8')) as { scripts?: Record<string, unknown> }
+      if (typeof parsed.scripts?.[kind] !== 'string') continue
+      return { command: 'npm', args: ['run', kind], cwd }
+    } catch { /* malformed package metadata is reported as not-run below */ }
+  }
+  return undefined
+}
+
+function executeReviewVerification(command: string, args: string[], cwd: string): Promise<{ exitCode: number; signal?: string; output: string; durationMs: number }> {
+  const started = Date.now()
+  return new Promise((resolveExecution) => {
+    execFile(command, args, { cwd, encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 10 * 60 * 1000 }, (error, stdout, stderr) => {
+      const failure = error as NodeJS.ErrnoException & { code?: number | string; signal?: string } | null
+      resolveExecution({
+        exitCode: failure ? (typeof failure.code === 'number' ? failure.code : 1) : 0,
+        ...(failure?.signal ? { signal: String(failure.signal) } : {}),
+        output: `${stdout || ''}${stderr || ''}`,
+        durationMs: Date.now() - started,
+      })
+    })
+  })
+}
+
+async function currentReviewRevision(state: HostState, snapshotId: string): Promise<{ artifact: Awaited<ReturnType<ReviewArtifactStore['read']>>; revision?: string }> {
+  const artifact = await state.reviewArtifactStore.read(snapshotId)
+  const expected = artifact.settlement?.workingRevision || artifact.admission.baseline?.workingRevision
+  const projectRoot = artifact.admission.workspace?.projectRoot
+  if (!projectRoot) return { artifact, revision: expected }
+  try {
+    const admission = await captureReviewWorkspaceAdmission({ runId: `verification:${snapshotId}`, projectRoot, runnerKind: 'builtin' })
+    return { artifact, revision: admission.canonical ? admission.baseline?.workingRevision : undefined }
+  } catch { return { artifact, revision: undefined } }
+}
+
+async function readReviewVerificationOutput(
+  state: HostState,
+  params: Record<string, unknown>,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  const outputRef = typeof params.outputRef === 'string' ? params.outputRef : ''
+  if (!outputRef) return [errorResponse(id, 'invalid_request', 'outputRef is required')]
+  const page = await state.reviewVerificationStore.readOutput({
+    outputRef,
+    offset: Number(params.offset) || 0,
+    maxBytes: Number(params.maxBytes) || undefined,
+  })
+  return [{ id, result: { reviewVerificationOutput: {
+    outputRef: page.outputRef,
+    contentBase64: Buffer.from(page.content).toString('base64'),
+    offset: page.offset,
+    bytes: page.bytes,
+    ...(page.nextOffset === undefined ? {} : { nextOffset: page.nextOffset }),
+  } } }]
+}
+
+function verificationKind(value: unknown): ReviewVerificationKind | undefined {
+  return value === 'build' || value === 'smoke' || value === 'test' ? value : undefined
+}
+
+async function runReviewVerification(
+  state: HostState,
+  snapshotId: string,
+  params: Record<string, unknown>,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  const kind = verificationKind(params.kind)
+  if (!kind) return [errorResponse(id, 'invalid_request', 'verification kind is required')]
+  const current = await currentReviewRevision(state, snapshotId)
+  const expectedRevision = current.artifact.settlement?.workingRevision || current.artifact.admission.baseline?.workingRevision || ''
+  const workspace = current.artifact.admission.workspace
+  if (!workspace || !expectedRevision) return [errorResponse(id, 'unavailable', 'Snapshot workspace revision is unavailable')]
+  const script = reviewVerificationScript(workspace.projectRoot, kind)
+  const startedAt = new Date().toISOString()
+  if (!script || current.revision !== expectedRevision) {
+    const record = await state.reviewVerificationStore.record({
+      snapshotId, runId: current.artifact.runId, workspaceId: workspace.workspaceId, verifiedRevision: expectedRevision,
+      kind, command: script?.command || 'npm', args: script?.args || ['run', kind], cwd: script?.cwd || workspace.projectRoot,
+      runner: 'host', startedAt, durationMs: 0,
+      detail: script ? 'Workspace revision changed before verification; refresh the review snapshot.' : `No ${kind} script was found for this workspace.`,
+    })
+    return [{ id, result: { reviewVerification: projectReviewVerification(record, current.revision) } }]
+  }
+  const execution = await executeReviewVerification(script.command, script.args, script.cwd)
+  const record = await state.reviewVerificationStore.record({
+    snapshotId, runId: current.artifact.runId, workspaceId: workspace.workspaceId, verifiedRevision: expectedRevision,
+    kind, command: script.command, args: script.args, cwd: script.cwd, runner: 'host', startedAt,
+    durationMs: execution.durationMs, exitCode: execution.exitCode, signal: execution.signal, output: execution.output,
+  })
+  const after = await currentReviewRevision(state, snapshotId)
+  return [{ id, result: { reviewVerification: projectReviewVerification(record, after.revision) } }]
+}
+
+async function handleReviewVerificationRequest(
+  state: HostState,
+  method: 'review/v1/verification/list' | 'review/v1/verification/run' | 'review/v1/verification/output',
+  params: Record<string, unknown>,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  if (method === 'review/v1/verification/output') return readReviewVerificationOutput(state, params, id)
+  const snapshotId = typeof params.snapshotId === 'string' ? params.snapshotId : ''
+  if (!snapshotId) return [errorResponse(id, 'invalid_request', 'snapshotId is required')]
+  if (method === 'review/v1/verification/list') {
+    const current = await currentReviewRevision(state, snapshotId)
+    const records = await state.reviewVerificationStore.list(snapshotId)
+    return [{ id, result: { reviewVerifications: records.map((record) => projectReviewVerification(record, current.revision)) } }]
+  }
+  return runReviewVerification(state, snapshotId, params, id)
+}
+
+async function handleReviewMutationRequest(
+  state: HostState,
+  method: 'review/v1/mutation/preview' | 'review/v1/mutation/apply',
+  params: Record<string, unknown>,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  if (method === 'review/v1/mutation/preview') {
+    const reviewMutationPreview = await state.reviewMutationCoordinator.preview(params.intent as ReviewMutationIntent)
+    return [{ id, result: { reviewMutationPreview } }]
+  }
+  const previewId = typeof params.previewId === 'string' ? params.previewId : ''
+  if (!previewId) return [errorResponse(id, 'invalid_request', 'previewId is required')]
+  const preview = state.reviewMutationCoordinator.describePreview(previewId)
+  const approvalRunId = `review-mutation:${preview.id}`
+  const resolution = await requestPiToolApproval({
+    runId: approvalRunId,
+    sessionId: approvalRunId,
+    tool: 'review_mutation',
+    callId: preview.id,
+    args: {
+      operation: preview.operation,
+      selection: preview.selection,
+      patchHash: preview.patchHash,
+      patchBytes: preview.patchBytes,
+      patch: preview.patch,
+      expectedRevision: preview.expectedRevision,
+    },
+    reason: `Approve ${preview.operation} for ${preview.selection.path}`,
+  })
+  const approval: ReviewMutationApproval = {
+    decision: resolution.decision === 'allow' ? 'allow' : resolution.decision === 'deny' ? 'deny' : 'cancel',
+    source: 'electron-main',
+    decidedAt: new Date().toISOString(),
+  }
+  const reviewMutationReceipt = await state.reviewMutationCoordinator.apply(previewId, approval)
+  return [{ id, result: { reviewMutationReceipt } }]
+}
+
+async function handleReviewDeliveryRequest(
+  state: HostState,
+  method: 'review/v1/delivery/preview' | 'review/v1/delivery/apply',
+  params: Record<string, unknown>,
+  id: string | number,
+): Promise<PiHostMessage[]> {
+  if (method === 'review/v1/delivery/preview') {
+    const reviewDeliveryPreview = await state.reviewDeliveryCoordinator.preview(params.intent as ReviewDeliveryIntent)
+    return [{ id, result: { reviewDeliveryPreview } }]
+  }
+  const previewId = typeof params.previewId === 'string' ? params.previewId : ''
+  if (!previewId) return [errorResponse(id, 'invalid_request', 'previewId is required')]
+  const preview = state.reviewDeliveryCoordinator.describePreview(previewId)
+  const approvalRunId = `review-delivery:${preview.id}`
+  const resolution = await requestPiToolApproval({
+    runId: approvalRunId,
+    sessionId: approvalRunId,
+    tool: `review_delivery_${preview.kind}`,
+    callId: preview.id,
+    args: { title: preview.title, detail: preview.detail, workspaceId: preview.workspaceId },
+    reason: `Approve review delivery ${preview.kind}`,
+  })
+  const approval: ReviewDeliveryApproval = {
+    decision: resolution.decision === 'allow' ? 'allow' : resolution.decision === 'deny' ? 'deny' : 'cancel',
+    source: 'electron-main',
+    decidedAt: new Date().toISOString(),
+  }
+  const reviewDeliveryReceipt = await state.reviewDeliveryCoordinator.apply(previewId, approval)
+  return [{ id, result: { reviewDeliveryReceipt } }]
+}
+
+async function approveReviewLifecycle(input: { action: string; identity: string; detail: Record<string, unknown> }): Promise<boolean> {
+  const callId = `review-lifecycle:${input.action}:${input.identity}`
+  const resolution = await requestPiToolApproval({
+    runId: callId,
+    sessionId: callId,
+    tool: `review_artifact_${input.action}`,
+    callId,
+    args: input.detail,
+    reason: `Approve Review artifact ${input.action}: ${input.identity}`,
+  })
+  return resolution.decision === 'allow'
+}
+
+function lifecycleSnapshotId(params: Record<string, unknown>): string {
+  return typeof params.snapshotId === 'string' ? params.snapshotId : ''
+}
+
+async function exportReviewArtifactLifecycle(state: HostState, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
+  const snapshotId = lifecycleSnapshotId(params)
+  return snapshotId ? [{ id, result: { reviewArtifactExport: await state.reviewArtifactStore.exportArtifact(snapshotId) } }] : [errorResponse(id, 'invalid_request', 'snapshotId is required')]
+}
+
+async function previewReviewArtifactLifecycle(state: HostState, bundle: unknown, id: string | number): Promise<PiHostMessage[]> {
+  const preview = await state.reviewArtifactStore.previewImport(bundle)
+  if (preview.status === 'ready' && preview.bundleHash) state.reviewImportPreviews.add(preview.bundleHash)
+  return [{ id, result: { reviewArtifactImportPreview: preview } }]
+}
+
+async function importReviewArtifactLifecycle(state: HostState, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
+  const expectedBundleHash = typeof params.expectedBundleHash === 'string' ? params.expectedBundleHash : ''
+  if (!expectedBundleHash || !state.reviewImportPreviews.has(expectedBundleHash)) return [errorResponse(id, 'conflict', 'Review import requires an unconsumed Host preview')]
+  state.reviewImportPreviews.delete(expectedBundleHash)
+  if (!await approveReviewLifecycle({ action: 'import', identity: expectedBundleHash, detail: { bundleHash: expectedBundleHash } })) return [errorResponse(id, 'forbidden', 'Review import was denied')]
+  const reviewArtifact = await state.reviewArtifactStore.importArtifact(params.bundle, expectedBundleHash)
+  const workspace = reviewArtifact.admission.workspace
+  if (workspace) state.reviewWorkspaces.set(workspace.workspaceId, workspace)
+  return [{ id, result: { reviewArtifact } }]
+}
+
+async function rebindReviewArtifactLifecycle(state: HostState, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
+  const snapshotId = lifecycleSnapshotId(params)
+  const projectRoot = typeof params.projectRoot === 'string' ? params.projectRoot : ''
+  if (!snapshotId || !projectRoot) return [errorResponse(id, 'invalid_request', 'snapshotId and projectRoot are required')]
+  const current = await state.reviewArtifactStore.read(snapshotId)
+  const originalWorkspace = current.admission.workspace
+  if (!originalWorkspace) return [errorResponse(id, 'invalid_target', 'Review artifact has no workspace identity to rebind')]
+  const rebound = await captureReviewWorkspaceAdmission({ runId: `review-rebind:${snapshotId}`, projectRoot, runnerKind: current.admission.runnerKind })
+  if (!rebound.canonical || !rebound.workspace) return [errorResponse(id, 'invalid_target', rebound.error?.message || 'Rebind target is not a canonical workspace')]
+  state.reviewWorkspaces.set(originalWorkspace.workspaceId, { ...rebound.workspace, workspaceId: originalWorkspace.workspaceId })
+  return [{ id, result: { reviewArtifact: await state.reviewArtifactStore.rebindWorkspace(snapshotId, projectRoot) } }]
+}
+
+async function retainReviewArtifactLifecycle(state: HostState, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
+  const requested = Array.isArray(params.retainedSnapshotIds) ? params.retainedSnapshotIds.filter((value): value is string => typeof value === 'string') : []
+  const retainedSnapshotIds = [...new Set([...requested, ...await state.reviewStateStore.referencedSnapshotIds()])]
+  const reason = typeof params.reason === 'string' && params.reason.trim() ? params.reason.trim() : 'Review retention policy'
+  if (!await approveReviewLifecycle({ action: 'retention', identity: `${retainedSnapshotIds.length}-refs`, detail: { retainedSnapshotIds, reason } })) return [errorResponse(id, 'forbidden', 'Review retention was denied')]
+  const reviewArtifactRetention = await state.reviewArtifactStore.applyRetention({ retainedSnapshotIds, reason, ...(typeof params.olderThan === 'string' ? { olderThan: params.olderThan } : {}) })
+  return [{ id, result: { reviewArtifactRetention } }]
+}
+
+async function hardDeleteReviewArtifactLifecycle(state: HostState, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
+  const snapshotId = lifecycleSnapshotId(params)
+  if (!snapshotId) return [errorResponse(id, 'invalid_request', 'snapshotId is required')]
+  const artifact = await state.reviewArtifactStore.read(snapshotId)
+  if (!await approveReviewLifecycle({ action: 'hard-delete', identity: snapshotId, detail: { snapshotId, status: artifact.status, manifestHash: artifact.manifestHash } })) return [errorResponse(id, 'forbidden', 'Review hard delete was denied')]
+  await state.reviewStateStore.hardDeleteSnapshot(snapshotId)
+  await state.reviewVerificationStore.hardDeleteSnapshot(snapshotId)
+  await state.reviewArtifactStore.hardDeleteArtifact(snapshotId)
+  return [{ id, result: { reviewArtifactHardDeleted: true } }]
+}
+
+async function handleReviewArtifactLifecycleRequest(state: HostState, method: Extract<PiHostRequest['method'], `review/v1/artifact/${string}`>, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
+  if (method === 'review/v1/artifact/export') return exportReviewArtifactLifecycle(state, params, id)
+  if (method === 'review/v1/artifact/import-preview') return previewReviewArtifactLifecycle(state, params.bundle, id)
+  if (method === 'review/v1/artifact/import-apply') return importReviewArtifactLifecycle(state, params, id)
+  if (method === 'review/v1/artifact/rebind') return rebindReviewArtifactLifecycle(state, params, id)
+  if (method === 'review/v1/artifact/retention') return retainReviewArtifactLifecycle(state, params, id)
+  return hardDeleteReviewArtifactLifecycle(state, params, id)
+}
+
+async function handleReviewRequest(
+  state: HostState,
+  input: Partial<PiHostRequest>,
+  id: string | number,
+): Promise<PiHostMessage[] | undefined> {
+  if (!isReviewRequestMethod(input.method)) return undefined
+  if (!state.reviewNegotiated) {
+    return [errorResponse(id, 'protocol_mismatch', 'Run Review requires current protocol and review-v1 negotiation')]
+  }
+  const params = input.params || {}
+  if (input.method.startsWith('review/v1/artifact/')) return handleReviewArtifactLifecycleRequest(state, input.method as Extract<PiHostRequest['method'], `review/v1/artifact/${string}`>, params, id)
+  if (input.method === 'review/v1/read') return readReviewArtifactRequest(state, params, id)
+  if (input.method === 'review/v1/payload-page') return readReviewPayloadPageRequest(state, params, id)
+  if (input.method === 'review/v1/finalize') return finalizeReviewRequest(state, params, id)
+  if (input.method === 'review/v1/verification/list' || input.method === 'review/v1/verification/run' || input.method === 'review/v1/verification/output') {
+    return handleReviewVerificationRequest(state, input.method, params, id)
+  }
+  if (input.method === 'review/v1/mutation/preview' || input.method === 'review/v1/mutation/apply') {
+    return handleReviewMutationRequest(state, input.method, params, id)
+  }
+  if (input.method === 'review/v1/delivery/preview' || input.method === 'review/v1/delivery/apply') {
+    return handleReviewDeliveryRequest(state, input.method, params, id)
+  }
+  if (isReviewStateMethod(input.method)) return handleReviewStateRequest(state, input.method, params, id)
+  if (isReviewTargetMethod(input.method)) return handleReviewTargetRequest(state, input.method, params, id)
+  return admitReviewRequest(state, params, id)
+}
+
 async function migrateLegacyInstructionRequest(state: HostState, id: string | number, params: Record<string, unknown>, emit?: (message: PiHostMessage) => void): Promise<PiHostMessage[]> {
   const migrated = await state.instructionRepository.migrateLegacy(params)
   if (migrated.report.status === 'migrated') {
@@ -3112,6 +3643,8 @@ async function saveInstructionRequest(state: HostState, id: string | number, par
     ...(typeof params.personality === 'string' ? { personality: params.personality } : {}),
     ...(typeof params.aboutUser === 'string' ? { aboutUser: params.aboutUser } : {}),
     ...(typeof params.responseStyle === 'string' ? { responseStyle: params.responseStyle } : {}),
+    ...(['unset', 'blank', 'value'].includes(String(params.globalCustomInstructionsPresence)) ? { globalCustomInstructionsPresence: params.globalCustomInstructionsPresence as 'unset' | 'blank' | 'value' } : {}),
+    ...(['unset', 'blank', 'value'].includes(String(params.advancedPersonalityInstructionsPresence)) ? { advancedPersonalityInstructionsPresence: params.advancedPersonalityInstructionsPresence as 'unset' | 'blank' | 'value' } : {}),
   })
   return publishInstructionMutation(state, id, saved, 'save', emit)
 }
@@ -3271,6 +3804,25 @@ function publishInstructionMutation(
   } }
   if (emit) emit(event)
   return [...(emit ? [] : [event]), { id, result: { instructions, ...(projectInstructionWrite ? { projectInstructionWrite } : {}) } }]
+}
+
+type ReviewRequestMethod = Extract<PiHostRequest['method'], `review/${string}`>
+
+const REVIEW_REQUEST_METHODS = new Set<ReviewRequestMethod>([
+  'review/v1/admit', 'review/v1/finalize', 'review/v1/read', 'review/v1/payload-page',
+  'review/v1/describe', 'review/v1/files', 'review/v1/file-diff', 'review/v1/refresh',
+  'review/v1/comments/list', 'review/v1/draft/save', 'review/v1/draft/delete',
+  'review/v1/comment/transition', 'review/v1/file-state/list', 'review/v1/file-state/mark',
+  'review/v1/state/inherit', 'review/v1/feedback/prepare', 'review/v1/feedback/claim',
+  'review/v1/feedback/release', 'review/v1/verification/list', 'review/v1/verification/run',
+  'review/v1/verification/output', 'review/v1/mutation/preview', 'review/v1/mutation/apply',
+  'review/v1/delivery/preview', 'review/v1/delivery/apply',
+  'review/v1/artifact/export', 'review/v1/artifact/import-preview', 'review/v1/artifact/import-apply',
+  'review/v1/artifact/rebind', 'review/v1/artifact/retention', 'review/v1/artifact/hard-delete',
+])
+
+function isReviewRequestMethod(method: unknown): method is ReviewRequestMethod {
+  return typeof method === 'string' && REVIEW_REQUEST_METHODS.has(method as ReviewRequestMethod)
 }
 
 export function handlePiHostRequest(
@@ -4054,6 +4606,8 @@ export function handlePiHostRequest(
         globalRevision: instructions.revision,
         globalCustomInstructions: instructions.globalCustomInstructions,
         advancedPersonalityInstructions: instructions.advancedPersonalityInstructions,
+        globalCustomInstructionsPresence: instructions.globalCustomInstructionsPresence,
+        advancedPersonalityInstructionsPresence: instructions.advancedPersonalityInstructionsPresence,
         personality: instructions.personality,
         aboutUser: instructions.aboutUser,
         responseStyle: instructions.responseStyle,
@@ -4893,6 +5447,7 @@ export function handlePiHostRequest(
     })
   }
   if (input.method.startsWith('instructions/v1/')) return handleInstructionRequest(state, input as Partial<PiHostRequest>, id, emit) as Promise<PiHostMessage[]>
+  if (isReviewRequestMethod(input.method)) return handleReviewRequest(state, input as Partial<PiHostRequest>, id) as Promise<PiHostMessage[]>
   if (input.method === 'settings/get') return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config, settingsRevision: state.snapshot.cursor } }]
   if (input.method === 'settings/update') {
     return (async () => {
@@ -5226,9 +5781,26 @@ export function createPiHostServer(
   suppliedMemoryControlMaintenanceToken?: string,
   suppliedMemoryControlEvaluationAuthority?: MemoryControlEvaluationAuthority,
   suppliedInstructionRepository?: InstructionRepository,
+  suppliedReviewArtifactStore?: ReviewArtifactStore,
+  suppliedReviewStateStore?: ReviewStateStore,
+  suppliedReviewVerificationStore?: ReviewVerificationStore,
+  reviewMutationRecoveryDir = resolve(process.cwd(), '.agentstudio-review-recovery'),
 ) {
   const memoryStore = suppliedMemoryStore || new InMemoryDurableMemoryStore()
   const instructionRepository = suppliedInstructionRepository || new InMemoryInstructionRepository()
+  const reviewArtifactStore = suppliedReviewArtifactStore || new InMemoryReviewArtifactStore()
+  const reviewWorkspaces = new Map<string, ReviewWorkspaceBinding>()
+  const reviewProjection = new WorkspaceReviewProjection({
+    store: reviewArtifactStore,
+    resolveWorkspace: (workspaceId) => reviewWorkspaces.get(workspaceId),
+  })
+  const reviewStateStore = suppliedReviewStateStore || new InMemoryReviewStateStore()
+  const reviewVerificationStore = suppliedReviewVerificationStore || new InMemoryReviewVerificationStore()
+  const reviewMutationCoordinator = new ReviewMutationCoordinator({
+    resolveWorkspace: (workspaceId) => reviewWorkspaces.get(workspaceId),
+    recoveryDir: reviewMutationRecoveryDir,
+  })
+  const reviewDeliveryCoordinator = new ReviewDeliveryCoordinator({ resolveWorkspace: (workspaceId) => reviewWorkspaces.get(workspaceId) })
   const memoryControlPackages = suppliedMemoryControlPackages || baselineMemoryControlPackageReader()
   const memoryReady = Promise.resolve()
   const snapshot = { ...initialSnapshot, extensions: initialSnapshot.extensions || [], attachments: initialSnapshot.attachments || [] }
@@ -5247,6 +5819,15 @@ export function createPiHostServer(
     memoryStoreNegotiated: false,
     memoryControlNegotiated: false,
     instructionRepositoryNegotiated: false,
+    reviewNegotiated: false,
+    reviewArtifactStore,
+    reviewWorkspaces,
+    reviewProjection,
+    reviewStateStore,
+    reviewVerificationStore,
+    reviewMutationCoordinator,
+    reviewDeliveryCoordinator,
+    reviewImportPreviews: new Set(),
     memoryStore,
     instructionRepository,
     instructionProjections: new Map(),

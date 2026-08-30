@@ -7,9 +7,8 @@ import { ThreadCapabilityDiagnostics } from '../components/ThreadCapabilityDiagn
 import { ModelDepthMenu } from '../components/ModelDepthMenu'
 import { ApprovalModeMenu } from '../components/ApprovalModeMenu'
 import { ProjectContextBar } from '../components/ProjectContextBar'
-import { InlineRunPanel } from '../components/InlineRunPanel'
+import { WorkspacePanelSession } from '../components/WorkspacePanelSession'
 import { RunProcessFeed } from '../components/RunProcessFeed'
-import { TerminalPanel } from '../components/TerminalPanel'
 import { ComposerQuickActions } from '../components/ComposerQuickActions'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import { IDLE_AGENT_STATE, useAgentStore } from '../store/agentStore'
@@ -37,6 +36,7 @@ import { RunContinuationActions } from '../components/RunContinuationActions'
 import { CliDoctorCard } from '../components/CliDoctorCard'
 import { SuggestedPrompts } from '../components/SuggestedPrompts'
 import { requestFocusComposer } from '../store/commandHistoryStore'
+import { useWorkspacePanelSessionStore } from '../store/workspacePanelSessionStore'
 import type { ApprovalMode } from '../agent/types'
 import {
   buildComposerRunInput,
@@ -170,6 +170,19 @@ export function ProtocolsPage() {
     [activeId, setThreadDraft, setDraftInput],
   )
   const presentationRunId = activeId ? getRunIdForThread(activeId) : null
+  useEffect(() => {
+    const panel = useWorkspacePanelSessionStore.getState()
+    panel.restore()
+    if (useWorkspacePanelSessionStore.getState().tabs.length > 0) setShowRunPanel(true)
+  }, [setShowRunPanel])
+  useEffect(() => {
+    if (showRunPanel && presentationRunId && activeId) {
+      useWorkspacePanelSessionStore.getState().openTab({ kind: 'summary', runId: presentationRunId, threadId: activeId })
+    }
+  }, [showRunPanel, presentationRunId, activeId])
+  useEffect(() => {
+    if (showTerminal) useWorkspacePanelSessionStore.getState().openTab({ kind: 'terminal' })
+  }, [showTerminal])
   const activity = useRunActivityStore((s) =>
     presentationRunId ? s.presentations[presentationRunId] : undefined,
   )
@@ -682,11 +695,13 @@ export function ProtocolsPage() {
                     }}
                     runPanelAvailable={Boolean(presentationRunId)}
                     onToggleRunPanel={() => {
-                      setShowRunPanel(!showRunPanel)
+                      if (presentationRunId && activeId) useWorkspacePanelSessionStore.getState().openTab({ kind: 'summary', runId: presentationRunId, threadId: activeId })
+                      setShowRunPanel(true)
                       setShowTerminal(false)
                     }}
                     onToggleTerminal={() => {
-                      setShowTerminal((value) => !value)
+                      useWorkspacePanelSessionStore.getState().openTab({ kind: 'terminal' })
+                      setShowTerminal(true)
                       setShowRunPanel(false)
                     }}
                     onCreateThread={() =>
@@ -773,19 +788,8 @@ export function ProtocolsPage() {
         </div>
       </div>
 
-      {showRunPanel && presentationRunId && activeId && (
-        <aside className="w-full sm:w-[320px] lg:w-[360px] shrink-0 max-w-[100vw] absolute sm:relative inset-0 sm:inset-auto z-30 sm:z-0 bg-background sm:bg-transparent">
-          <InlineRunPanel
-            runId={presentationRunId}
-            threadId={activeId}
-            onClose={() => setShowRunPanel(false)}
-          />
-        </aside>
-      )}
-      {showTerminal && (
-        <aside className="w-full sm:w-[380px] lg:w-[420px] shrink-0 max-w-[100vw] absolute sm:relative inset-0 sm:inset-auto z-30 sm:z-0">
-          <TerminalPanel onClose={() => setShowTerminal(false)} />
-        </aside>
+      {(showRunPanel || showTerminal) && (
+        <WorkspacePanelSession onEmpty={() => { setShowRunPanel(false); setShowTerminal(false); requestFocusComposer() }} />
       )}
     </div>
   )

@@ -1,6 +1,12 @@
 # Development State
 
-截至 2026-08-28。
+截至 2026-08-30。
+
+## 本日進展：Codex-aligned personalization 本機收口
+
+Codex-aligned personalization 的 Host-owned Instruction Repository、Pi resource discovery、immutable Task admission snapshot、Turn Record replay、atomic project-file CAS、Personalization UI 與 outbound authority gates 已完成。本輪 `npm run build`、`smoke:instructions`、`smoke:instruction-release`、完整 `npm run smoke` 與 real Pi Host strict-provenance E2E 全綠；anti-slop UI 複查另以 desktop、conflict 與 280px narrow 真 renderer 畫面驗證，修正 shared Settings button 的 40px hit target 與 `focus-visible`。
+
+一 hop 證據見 `.scratch/codex-aligned-personalization-instructions/qualification.md`。effort 仍維持 needs-info，不宣稱 resolved：外部 CLI ticket #11 尚缺 native-discovery 真機證據，Codex 為 `native_discovery_unproven`，Claude 為 `auth_unavailable`，兩者皆是 explicit blocked／unqualified。
 
 ## 本日進展：SubDesign deep modules 與 tracker 修正
 
@@ -41,6 +47,7 @@ Ticket 15 完成 contract：Pi Host Protocol v5 移除 whole-bundle `memory/*` �
 1. paid-beta #14 release qualification——需 clean-machine signed 安裝等真機證據（目錄已移除，殘餘遷記 Remaining blocked）。
 2. runtime-contract #14——Linux CI 首綠後補勾三框。
 3. harness-gap-closure #09——待維護者裁決。
+4. codex-aligned personalization #11——需可用 Codex／Claude 真機環境補 native filesystem discovery 證據；目前 Codex `native_discovery_unproven`、Claude `auth_unavailable`。
 
 ## 延續未解（自 08-15 記載）
 
@@ -49,4 +56,4 @@ Ticket 15 完成 contract：Pi Host Protocol v5 移除 whole-bundle `memory/*` �
 
 ## 下一步
 
-依 `.scratch/INDEX.md` Active frontier 排工：優先完成 subdesign-architecture-deepening #05 的其餘 protocol domain extraction；external-cli-durable-harness #07 的未安裝 provider 真機證據仍需外部環境。
+依 `.scratch/INDEX.md` Active frontier 排工：codex-aligned personalization 只剩 #11 外部 native-discovery qualification；其餘工作優先完成 subdesign-architecture-deepening #05 的 protocol domain extraction，external-cli-durable-harness #07 的未安裝 provider 真機證據仍需外部環境。

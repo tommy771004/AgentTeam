@@ -4,7 +4,7 @@
 
 **Blocked by:** 09 — Instruction budget、去重與 context usage.
 
-**Status:** 可交給代理
+**Status:** 待補資訊
 
 - [x] Runner capability contract 宣告 instruction delivery mode 與是否可證明 exact effective snapshot。
 - [x] Explicit mode 傳遞 admission 時凍結的有效文字與 hash，runner 不在執行途中重新解析 mutable settings。
@@ -14,3 +14,5 @@
 - [x] External CLI success 仍不等於 Definition of Done met，instruction delivery 不改變 runner capability matrix。
 - [x] Adapter contract tests 覆蓋 duplicate suppression、argv/prompt handoff、project cwd、queue/restart snapshot 與 unsupported provider。
 - [ ] 真機 Codex／Claude qualification 驗證 native discovery；未安裝或未授權 provider 保持 explicit blocked/unqualified evidence。
+
+**Qualification note（2026-08-30）：** [release evidence](../qualification.md) 已把外部界線固定為 Codex `native_discovery_unproven`、Claude `auth_unavailable`；兩者皆為 `unqualified`，本項維持未勾選，等待可用外部環境補證。

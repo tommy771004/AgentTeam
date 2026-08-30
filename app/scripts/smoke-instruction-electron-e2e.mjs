@@ -51,12 +51,29 @@ fs.writeFileSync(path.join(launcherDir, 'launcher.mjs'), [
   '',
 ].join('\n'))
 
-let app = await electron.launch({
-  executablePath: electronExecutable,
-  args: [launcherDir, '--no-sandbox', '--disable-gpu'],
-  timeout: 30_000,
-})
-app.process().stderr?.on('data', (chunk) => console.error(`electron stderr: ${chunk}`))
+const launchRecords = []
+const launchElectron = async (stage) => {
+  const record = { stage, stderr: '', exitCode: null, signal: null }
+  const launched = await electron.launch({
+    executablePath: electronExecutable,
+    args: [launcherDir, '--no-sandbox', '--disable-gpu'],
+    timeout: 30_000,
+  })
+  const process = launched.process()
+  process?.stderr?.on('data', (chunk) => {
+    record.stderr = `${record.stderr}${String(chunk)}`.slice(-8_000)
+    console.error(`electron stderr: ${chunk}`)
+  })
+  process?.once('exit', (code, signal) => {
+    record.exitCode = code
+    record.signal = signal
+  })
+  launchRecords.push(record)
+  return launched
+}
+
+let app = await launchElectron('initial')
+let currentPage
 
 const suiteDeadline = Date.now() + 60_000
 const stepTrace = []
@@ -67,6 +84,78 @@ const step = (name) => {
 const waitFor = async (page, locator) => {
   step('wait for UI control')
   return locator.waitFor({ state: 'visible', timeout: Math.max(1_000, Math.min(10_000, suiteDeadline - Date.now())) })
+}
+const metadataOnly = (root) => {
+  const files = []
+  const visit = (directory) => {
+    let entries
+    try { entries = fs.readdirSync(directory, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      const target = path.join(directory, entry.name)
+      let stat
+      try { stat = fs.statSync(target) } catch { continue }
+      files.push({ path: target, size: stat.size, mtimeMs: stat.mtimeMs })
+      if (entry.isDirectory() && files.length < 200) visit(target)
+      if (files.length >= 200) return
+    }
+  }
+  visit(root)
+  return files
+}
+const publicDiagnostics = async (page) => {
+  let visibleStatus = '<page unavailable>'
+  let bodyTail = '<page unavailable>'
+  let bridge = { unavailable: true }
+  try {
+    visibleStatus = (await page.locator('[role="status"]').allTextContents()).join(' | ').slice(-4_000) || '<none>'
+    bodyTail = (await page.locator('body').innerText()).slice(-4_000)
+    bridge = await page.evaluate(async () => {
+      const instructions = window.subagents?.piHost?.instructions
+      const host = window.subagents?.piHost
+      const read = instructions?.get
+        ? await instructions.get().then((value) => ({ ok: true, revision: value?.instructions?.revision, hash: value?.instructions?.hash }), (error) => ({ ok: false, error: String(error) }))
+        : { unavailable: true }
+      const health = host?.health
+        ? await host.health().then((value) => ({ ok: true, status: value?.status }), (error) => ({ ok: false, error: String(error) }))
+        : { unavailable: true }
+      return { read, health }
+    })
+  } catch (error) {
+    visibleStatus = `diagnostic error: ${error instanceof Error ? error.message : String(error)}`
+  }
+  return {
+    visibleStatus,
+    bodyTail,
+    bridge,
+    launches: launchRecords.map(({ stage, stderr, exitCode, signal }) => ({ stage, stderr, exitCode, signal })),
+    userDataMetadata: metadataOnly(userDataDir),
+  }
+}
+const waitForInstructionCommit = async (page, expectedRevision, expectedBody) => {
+  const deadline = Math.min(suiteDeadline, Date.now() + 30_000)
+  let lastTypedBridgeError = '<none>'
+  while (Date.now() < deadline) {
+    const observed = await page.evaluate(async () => {
+      try {
+        const snapshot = await window.subagents?.piHost?.instructions?.get?.()
+        return {
+          ok: true,
+          revision: snapshot?.instructions?.revision,
+          body: snapshot?.instructions?.globalCustomInstructions,
+        }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+    if (!observed.ok) {
+      lastTypedBridgeError = observed.error
+    } else if (observed.revision > expectedRevision && observed.body === expectedBody) {
+      return observed
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  const diagnostics = await publicDiagnostics(page)
+  throw new Error(`keyboard instruction commit timeout; lastTypedBridgeError=${lastTypedBridgeError}; diagnostics=${JSON.stringify(diagnostics)}`)
 }
 const waitForMarker = async (expected, timeout = 10_000) => {
   const deadline = Date.now() + timeout
@@ -83,6 +172,7 @@ const canonicalTarget = path.join(projectRoot, 'AGENTS.md')
 
 try {
   const page = await app.firstWindow()
+  currentPage = page
   page.setDefaultTimeout(10_000)
   step('renderer ready')
   page.on('crash', () => console.error('instruction Electron E2E renderer crashed'))
@@ -164,13 +254,7 @@ try {
   await globalSave.focus()
   await page.keyboard.press('Enter')
   step('keyboard global atomic save')
-  await page.waitForFunction(async (expectedRevision) => {
-    try {
-      const snapshot = await window.subagents?.piHost?.instructions?.get?.()
-      return Boolean(snapshot && snapshot.instructions.revision > expectedRevision
-        && snapshot.instructions.globalCustomInstructions === 'E2E_GLOBAL_KEYBOARD_COMMITTED')
-    } catch { return false }
-  }, committed.instructions.revision, { timeout: 30_000 })
+  await waitForInstructionCommit(page, committed.instructions.revision, 'E2E_GLOBAL_KEYBOARD_COMMITTED')
   const keyboardCommitted = await page.evaluate(async () => window.subagents?.piHost?.instructions?.get?.())
   assert.equal(keyboardCommitted?.instructions?.globalCustomInstructions, 'E2E_GLOBAL_KEYBOARD_COMMITTED')
   assert.ok(keyboardCommitted.instructions.revision > committed.instructions.revision, 'keyboard Host save must advance revision')
@@ -287,12 +371,9 @@ try {
   // public Host bridge. This proves the successful transaction survived a
   // renderer reload and a fresh Pi Host process.
   await app.close()
-  app = await electron.launch({
-    executablePath: electronExecutable,
-    args: [launcherDir, '--no-sandbox', '--disable-gpu'],
-    timeout: 30_000,
-  })
+  app = await launchElectron('restart')
   const restartedPage = await app.firstWindow()
+  currentPage = restartedPage
   await restartedPage.waitForSelector('textarea', { timeout: 120_000 })
   const restarted = await restartedPage.evaluate(async () => window.subagents?.piHost?.instructions?.get?.())
   assert.equal(restarted?.instructions?.globalCustomInstructions, 'E2E_GLOBAL_KEYBOARD_COMMITTED', 'committed global instruction must survive Host restart')
@@ -302,6 +383,7 @@ try {
   console.log('Instruction Electron E2E passed: real pointer/keyboard IPC open and visible typed failure')
 } catch (error) {
   console.error(`Instruction Electron E2E trace:\n${stepTrace.join('\n')}`)
+  console.error(`Instruction Electron E2E diagnostics:\n${JSON.stringify(await publicDiagnostics(currentPage), null, 2)}`)
   throw error
 } finally {
   await app.close().catch(() => {})

@@ -2220,9 +2220,13 @@ await test('drift guard: the Pi path\'s live timeline is the record projection, 
   assert.match(feed, /runTimelineRows\(recordView, draftText\)/,
     'and its rows are the fold over that projection — not a second synthesis')
   assert.match(feed, /const hasRecordTimeline = recordTimeline\.length > 0/)
-  assert.match(feed, /agent-conversation-timeline[\s\S]*data-run-timeline="record"[\s\S]*<RunTimelineList rows=\{recordTimeline\}/,
+  assert.match(feed, /agent-conversation-timeline[\s\S]*data-run-timeline="record"[\s\S]*<RunTimelineList rows=\{recordTimeline\} hideReasoning/,
     'the canonical conversation stays in the visible flow instead of the diagnostics disclosure')
+  assert.doesNotMatch(feed, /推理摘要|thoughtOpen|setThoughtOpen/,
+    'task conversation does not expose streamed reasoning on the fallback path')
   const timelineList = fs.readFileSync(path.join(appRoot, 'src/components/RunTimelineList.tsx'), 'utf8')
+  assert.match(timelineList, /hideReasoning \? rows\.filter\(\(row\) => row\.kind !== 'reasoning'\) : rows/,
+    'the conversation renderer can omit reasoning without deleting it from the Turn Record projection')
   assert.doesNotMatch(timelineList, /agent-process-chip[^"\n]*flex-1/,
     'timeline chips size to their text instead of filling the remaining row')
   assert.doesNotMatch(timelineList, />assistant\{row\.draft/,
@@ -2238,7 +2242,6 @@ await test('drift guard: the Pi path\'s live timeline is the record projection, 
   // The activity-event trace is the FALLBACK. It renders only where no record
   // exists, so the two can never appear side by side as rival accounts.
   for (const fallback of [
-    /\{!hasRecordTimeline && thought\.trim\(\) \? \(/,
     /\{!hasRecordTimeline && groups\.length > 0 \? \(/,
     /\{draftText && !hasRecordTimeline \? \(/,
   ]) {

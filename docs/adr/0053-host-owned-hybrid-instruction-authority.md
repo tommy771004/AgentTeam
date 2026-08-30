@@ -26,3 +26,9 @@ Every builtin run appends a Host-authored `instruction-snapshot` Turn Record ent
 - Instruction content still crosses the existing Outbound Data Gate and cannot alter Approval Mode, capabilities, sandbox policy, managed policy or execution evidence.
 - Export/import includes only DB-owned records. Project file bodies are never smuggled into the personalization bundle.
 - Protocol and drift guards must keep Instruction Repository and DurableMemoryStore as visibly separate authorities.
+
+## Qualification status
+
+The 2026-08-30 local release gates are green: full build, focused instruction release chain, full repository smoke, real Pi Host strict-provenance admission/restart/replay, and desktop/narrow/conflict UI qualification. The one-hop report is [`.scratch/codex-aligned-personalization-instructions/qualification.md`](../../.scratch/codex-aligned-personalization-instructions/qualification.md).
+
+This ADR is accepted, but the overall effort is not yet resolved. External native-discovery evidence remains explicit and fail-closed under ticket #11: Codex is `native_discovery_unproven` and Claude is `auth_unavailable`; neither result may be represented as builtin-equivalent snapshot fidelity.

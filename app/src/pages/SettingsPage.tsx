@@ -268,6 +268,26 @@ function memoryScopeLabel(kind: 'global' | 'project') {
   return kind === 'global' ? '全域' : '目前專案'
 }
 
+function buildLegacyPersonalizationInput(
+  settings: Pick<LlmSettings, 'personality' | 'customAboutUser' | 'customResponseStyle'>,
+  presence: ReturnType<typeof getLegacyPersonalizationPresence>,
+  docs: ReturnType<typeof getLegacyInstructionDocs>,
+): { personality?: string; aboutUser?: string; responseStyle?: string; soul?: string; agents?: string } {
+  return {
+    ...(presence.personality ? { personality: settings.personality } : {}),
+    ...(presence.aboutUser ? { aboutUser: settings.customAboutUser } : {}),
+    ...(presence.responseStyle ? { responseStyle: settings.customResponseStyle } : {}),
+    ...(docs.soul !== undefined ? { soul: docs.soul } : {}),
+    ...(docs.agents !== undefined ? { agents: docs.agents } : {}),
+  }
+}
+
+function settingsPersistenceHint(section: string): string {
+  return section === 'personalization'
+    ? '個人化草稿需按「儲存 revision」才會由 Host commit，並從下一個 run 生效。'
+    : '變更會立即套用，無需儲存。'
+}
+
 function SettingsMemoryScopeGroup() {
   const projection = useLearningStore((state) => state.memoryProjection)
   const setScope = useLearningStore((state) => state.setMemoryScope)
@@ -1206,13 +1226,7 @@ export function SettingsPage() {
           <>
             <PersonalizationInstructionsSection
               projectRoot={projectRoot || undefined}
-              legacy={{
-                ...(legacyPersonalizationPresence.personality ? { personality: settings.personality } : {}),
-                ...(legacyPersonalizationPresence.aboutUser ? { aboutUser: settings.customAboutUser } : {}),
-                ...(legacyPersonalizationPresence.responseStyle ? { responseStyle: settings.customResponseStyle } : {}),
-                ...(legacyInstructionDocs.soul !== undefined ? { soul: legacyInstructionDocs.soul } : {}),
-                ...(legacyInstructionDocs.agents !== undefined ? { agents: legacyInstructionDocs.agents } : {}),
-              }}
+              legacy={buildLegacyPersonalizationInput(settings, legacyPersonalizationPresence, legacyInstructionDocs)}
             />
           </>
         )}
@@ -3746,7 +3760,7 @@ export function SettingsPage() {
           </p>
         )}
         <p className="text-[11px] text-outline px-1 mt-2">
-          {section === 'personalization' ? '個人化草稿需按「儲存 revision」才會由 Host commit，並從下一個 run 生效。' : '變更會立即套用，無需儲存。'}
+          {settingsPersistenceHint(section)}
         </p>
       </>
     </ThemePage>

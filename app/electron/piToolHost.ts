@@ -329,6 +329,10 @@ export function unbindPiSessionRun(sessionId: string): void {
   const binding = sessionRuns.get(sessionId)
   if (binding?.runId) releaseBuiltinShellExecution(binding.runId)
   sessionRuns.delete(sessionId)
+  clearPiSessionTransientPreflightState(sessionId)
+}
+
+function clearPiSessionTransientPreflightState(sessionId: string): void {
   pendingSkillContexts.delete(sessionId)
   pendingRedraftCandidates.delete(sessionId)
   redraftAuthorizations.delete(sessionId)
@@ -351,6 +355,10 @@ export function unbindPiSessionRun(sessionId: string): void {
 
 /** Remove session-lifetime idempotency tombstones only when the Pi session itself is disposed. */
 export function disposePiSkillPreflightSession(sessionId: string): void {
+  preflightSessionGenerations.set(sessionId, preflightSessionGeneration(sessionId) + 1)
+  for (const key of preflightBatchInFlight.keys()) {
+    if (key.startsWith(`${sessionId}:`)) preflightBatchInFlight.delete(key)
+  }
   sessionBatchPackTools.delete(sessionId)
   pendingSkillContexts.delete(sessionId)
   pendingRedraftCandidates.delete(sessionId)
@@ -358,6 +366,15 @@ export function disposePiSkillPreflightSession(sessionId: string): void {
   for (const map of [notExecutedInTurnCalls, preflightCallDecisions, preflightBatchDecisions, preflightCallBatchIds, releasedPreflightCalls]) {
     for (const key of map.keys()) if (key.startsWith(`${sessionId}:`)) map.delete(key)
   }
+}
+
+/** Retire a runtime while keeping blocked identity tombstones for session replay. */
+export function retirePiSkillPreflightSession(sessionId: string): void {
+  // Replacing a Pi runtime must not clear the logical turn's binding: the
+  // newly-created runtime still belongs to the same Host session and needs
+  // its frozen policy/resource view until the turn's owner finally unbinds it.
+  // In-flight batch latches and blocked identity tombstones remain durable.
+  clearPiSessionTransientPreflightState(sessionId)
 }
 
 export function piSessionRunBinding(sessionId: string): PiRunBinding | undefined {
@@ -602,9 +619,19 @@ const redraftAuthorizations = new Map<string, PendingSkillContext[]>()
 const notExecutedInTurnCalls = new Map<string, string>()
 const preflightCallDecisions = new Map<string, CachedPreflightDecision>()
 const preflightBatchDecisions = new Map<string, PiSkillBatchDecision>()
+const preflightBatchInFlight = new Map<string, Promise<{ block: true; reason: string } | undefined>>()
+const preflightSessionGenerations = new Map<string, number>()
 const preflightCallBatchIds = new Map<string, string>()
 const releasedPreflightCalls = new Map<string, string>()
 const sessionBatchPackTools = new Map<string, Map<string, PiPackTool>>()
+
+function preflightSessionGeneration(sessionId: string): number {
+  return preflightSessionGenerations.get(sessionId) || 0
+}
+
+function preflightGenerationIsCurrent(sessionId: string, generation: number): boolean {
+  return preflightSessionGeneration(sessionId) === generation
+}
 
 /** Host-owned consumer for the pure policy directive. Missing ownership fails closed. */
 export function setPiSkillPreflightBridge(bridge: PiSkillPreflightBridge | undefined): void {
@@ -648,6 +675,66 @@ function preflightIdentityConflict(input: { sessionId: string; callId: string; b
   return { block: true, reason }
 }
 
+function preflightGenerationFailure(input: { sessionId: string; generation?: number }): { block: true; reason: string } | undefined {
+  if (input.generation !== undefined && !preflightGenerationIsCurrent(input.sessionId, input.generation)) {
+    return { block: true, reason: 'Skill preflight session generation was disposed before decision.' }
+  }
+  return undefined
+}
+
+type PiSkillPreflightSnapshot = { runId: string; step: number; workingStateRevision: number }
+
+async function finishSkillPreflightDecision(input: {
+  evaluation: PiPolicyEvaluation
+  sessionId: string
+  runId: string
+  callId: string
+  tool: string
+  args: Record<string, unknown>
+  identity: PiInvocationContractIdentity
+  batchId: string
+  snapshot: PiSkillPreflightSnapshot
+  callKey: string
+  identityDigest: string
+  generation?: number
+}): Promise<{ block: true; reason: string } | undefined> {
+  const decision = await skillPreflightBridge!.preflight({
+    sessionId: input.sessionId,
+    runId: input.runId,
+    callId: input.callId,
+    tool: input.tool,
+    args: input.args,
+    identity: input.identity,
+    trigger: input.evaluation.skillPreflight!.trigger,
+    step: input.snapshot.step,
+    batchId: input.batchId,
+    workingStateRevision: input.snapshot.workingStateRevision,
+  })
+  const generationFailure = preflightGenerationFailure(input)
+  if (generationFailure) return generationFailure
+  if (decision.kind === 'pass-through') {
+    preflightCallDecisions.set(input.callKey, { identityDigest: input.identityDigest, decision: 'pass-through' })
+    return undefined
+  }
+  const pending: PendingSkillContext = {
+    runId: input.runId,
+    originalCallId: input.callId,
+    tool: input.tool,
+    identity: input.identity,
+    skills: decision.skills,
+    reason: '',
+    batchId: input.batchId,
+  }
+  pending.reason = skillRedraftReason(pending)
+  if (!pendingSkillContexts.has(input.sessionId)) pendingSkillContexts.set(input.sessionId, pending)
+  const candidates = pendingRedraftCandidates.get(input.sessionId) || []
+  if (!candidates.some((candidate) => candidate.originalCallId === pending.originalCallId)) candidates.push(pending)
+  pendingRedraftCandidates.set(input.sessionId, candidates)
+  notExecutedInTurnCalls.set(input.callKey, pending.reason)
+  preflightCallDecisions.set(input.callKey, { identityDigest: input.identityDigest, decision: 'redraft', reason: pending.reason })
+  return { block: true, reason: pending.reason }
+}
+
 export async function consumePiSkillPreflightDirective(input: {
   evaluation: PiPolicyEvaluation
   sessionId: string
@@ -657,10 +744,15 @@ export async function consumePiSkillPreflightDirective(input: {
   args: Record<string, unknown>
   identity: PiInvocationContractIdentity
   batchId?: string
+  generation?: number
 }): Promise<{ block: true; reason: string } | undefined> {
+  const initialGenerationFailure = preflightGenerationFailure(input)
+  if (initialGenerationFailure) return initialGenerationFailure
   if (!input.evaluation.skillPreflight) return
   if (!skillPreflightBridge) throw new Error('Host Skill preflight owner is unavailable')
   const snapshot = skillPreflightBridge.snapshot(input.sessionId)
+  const snapshotGenerationFailure = preflightGenerationFailure(input)
+  if (snapshotGenerationFailure) return snapshotGenerationFailure
   if (snapshot.runId !== input.runId) throw new Error('Skill preflight run identity drifted before execution')
   const callKey = migratedInvocationKey(input.sessionId, input.callId)
   const batchId = input.batchId || preflightCallBatchIds.get(callKey)
@@ -689,44 +781,14 @@ export async function consumePiSkillPreflightDirective(input: {
     && authorization.originalCallId !== input.callId && authorization.tool === input.tool
     && samePreflightTool(authorization.identity, input.identity))
   if (authorizationIndex >= 0) {
+    const authorizationGenerationFailure = preflightGenerationFailure(input)
+    if (authorizationGenerationFailure) return authorizationGenerationFailure
     authorizations.splice(authorizationIndex, 1)
     if (authorizations.length < 1) redraftAuthorizations.delete(input.sessionId)
     preflightCallDecisions.set(callKey, { identityDigest, decision: 'pass-through' })
     return undefined
   }
-  const decision = await skillPreflightBridge.preflight({
-    sessionId: input.sessionId,
-    runId: input.runId,
-    callId: input.callId,
-    tool: input.tool,
-    args: input.args,
-    identity: input.identity,
-    trigger: input.evaluation.skillPreflight.trigger,
-    step: snapshot.step,
-    batchId,
-    workingStateRevision: snapshot.workingStateRevision,
-  })
-  if (decision.kind === 'pass-through') {
-    preflightCallDecisions.set(callKey, { identityDigest, decision: 'pass-through' })
-    return undefined
-  }
-  const pending: PendingSkillContext = {
-    runId: input.runId,
-    originalCallId: input.callId,
-    tool: input.tool,
-    identity: input.identity,
-    skills: decision.skills,
-    reason: '',
-    batchId,
-  }
-  pending.reason = skillRedraftReason(pending)
-  if (!pendingSkillContexts.has(input.sessionId)) pendingSkillContexts.set(input.sessionId, pending)
-  const candidates = pendingRedraftCandidates.get(input.sessionId) || []
-  if (!candidates.some((candidate) => candidate.originalCallId === pending.originalCallId)) candidates.push(pending)
-  pendingRedraftCandidates.set(input.sessionId, candidates)
-  notExecutedInTurnCalls.set(callKey, pending.reason)
-  preflightCallDecisions.set(callKey, { identityDigest, decision: 'redraft', reason: pending.reason })
-  return { block: true, reason: pending.reason }
+  return finishSkillPreflightDecision({ ...input, batchId, snapshot, callKey, identityDigest })
 }
 
 type PiSkillBatchCall = { callId: string; tool: string; args: Record<string, unknown> }
@@ -753,6 +815,7 @@ async function decideBatchPreflight(input: {
   classified: Array<{ call: PiSkillBatchCall; requirements: PiToolPolicyRequirements | undefined }>
   contracts: Array<PiInvocationContractIdentity | undefined>
   batchId: string
+  generation: number
 }): Promise<{ block: true; reason: string } | undefined> {
   let blocked: { block: true; reason: string } | undefined
   for (let index = 0; index < input.classified.length; index += 1) {
@@ -774,14 +837,22 @@ async function decideBatchPreflight(input: {
       args: evaluation.normalizedArgs as Record<string, unknown>,
       identity: contract,
       batchId: input.batchId,
+      generation: input.generation,
     })
     if (decision && !blocked) blocked = decision
   }
   return blocked
 }
 
-async function preflightPiToolBatch(sessionId: string, calls: PiSkillBatchCall[]): Promise<{ block: true; reason: string } | undefined> {
+async function preflightPiToolBatch(sessionId: string, calls: PiSkillBatchCall[], signal?: AbortSignal): Promise<{ block: true; reason: string } | undefined> {
   if (calls.length < 1) return undefined
+  const generation = preflightSessionGeneration(sessionId)
+  const durableTombstone = calls.find((call) => preflightCallDecisions.get(migratedInvocationKey(sessionId, call.callId))?.decision === 'redraft')
+  if (durableTombstone) {
+    const reason = `Skill preflight identity conflict for call ${durableTombstone.callId}; the original identity was already intercepted.`
+    markBatchNotExecuted(sessionId, calls, reason)
+    return { block: true, reason }
+  }
   const binding = piSessionRunBinding(sessionId)
   if (!binding?.frozenPolicy || !policyEvidenceBridge || !skillPreflightBridge) {
     const reason = 'Skill preflight Host admission dependencies are unavailable; no batch call was executed.'
@@ -803,6 +874,7 @@ async function preflightPiToolBatch(sessionId: string, calls: PiSkillBatchCall[]
     return { block: true, reason }
   }
   const contracts = calls.map((call) => policyEvidenceBridge!.contractIdentity(sessionId, call.tool))
+  const boundBinding = { ...binding, frozenPolicy: binding.frozenPolicy! }
   const identityDigest = createHash('sha256').update(canonicalJson({
     runId: binding.runId,
     step: snapshot.step,
@@ -823,18 +895,39 @@ async function preflightPiToolBatch(sessionId: string, calls: PiSkillBatchCall[]
     markBatchNotExecuted(sessionId, calls, reason)
     return { block: true, reason }
   }
-  const blocked = await decideBatchPreflight({ sessionId, binding: { ...binding, frozenPolicy: binding.frozenPolicy }, classified, contracts, batchId })
-  const batchDecision: PiSkillBatchDecision = {
-    identityDigest,
-    block: Boolean(blocked),
-    ...(blocked ? { reason: blocked.reason } : {}),
+  const inFlight = preflightBatchInFlight.get(batchKey)
+  if (inFlight) return inFlight
+  const decisionPromise: Promise<{ block: true; reason: string } | undefined> = (async () => {
+    let blocked: { block: true; reason: string } | undefined
+    try {
+      if (signal?.aborted) {
+        blocked = { block: true, reason: `Skill preflight batch ${batchId} was cancelled before decision.` }
+      } else {
+        blocked = await decideBatchPreflight({ sessionId, binding: boundBinding, classified, contracts, batchId, generation })
+        if (signal?.aborted) blocked = { block: true, reason: `Skill preflight batch ${batchId} was cancelled before execution.` }
+      }
+    } catch (error) {
+      blocked = { block: true, reason: `Skill preflight batch ${batchId} failed closed: ${error instanceof Error ? error.message : 'decision unavailable'}` }
+    }
+    if (!preflightGenerationIsCurrent(sessionId, generation)) {
+      return { block: true, reason: `Skill preflight batch ${batchId} was disposed before decision completion.` }
+    }
+    const reason = blocked ? `Skill preflight blocked batch ${batchId} before side effects: ${blocked.reason}` : undefined
+    preflightBatchDecisions.set(batchKey, {
+      identityDigest,
+      block: Boolean(reason),
+      ...(reason ? { reason } : {}),
+    })
+    if (!reason) return undefined
+    markBatchNotExecuted(sessionId, calls, reason)
+    return { block: true as const, reason }
+  })()
+  preflightBatchInFlight.set(batchKey, decisionPromise)
+  try {
+    return await decisionPromise
+  } finally {
+    if (preflightBatchInFlight.get(batchKey) === decisionPromise) preflightBatchInFlight.delete(batchKey)
   }
-  preflightBatchDecisions.set(batchKey, batchDecision)
-  if (!blocked) return undefined
-  const reason = `Skill preflight blocked batch ${batchId} before side effects: ${blocked.reason}`
-  batchDecision.reason = reason
-  markBatchNotExecuted(sessionId, calls, reason)
-  return { block: true, reason }
 }
 
 /** Install one Host-owned barrier before Pi's ordinary per-call policy hooks. */
@@ -859,7 +952,7 @@ export function installPiSkillPreflightBatchBarrier(sessionId: string, agent: {
         : definition?.prepareArguments?.(call.arguments) ?? call.arguments
       return [{ callId: call.id, tool: call.name, args: Object(prepared) as Record<string, unknown> }]
     })
-    const blocked = await preflightPiToolBatch(sessionId, calls)
+    const blocked = await preflightPiToolBatch(sessionId, calls, signal)
     if (blocked) return blocked
     const result = await previous?.(context, signal)
     if (!result?.block) {

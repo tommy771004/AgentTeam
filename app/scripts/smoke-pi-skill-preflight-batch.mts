@@ -113,12 +113,23 @@ try {
   assert.equal((await waitFor(1)).error, undefined)
   send(2, 'sessions/create', { title: 'Skill batch barrier' })
   const sessionId = String((await waitFor(2)).result?.sessionId)
+  const profile = { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: ['write', 'edit'], approvalMode: 'full', unattended: false, compaction: 'manual' }
+  send(30, 'settings/update', profile)
+  const persistedSettings = await waitFor(30)
+  assert.equal(persistedSettings.error, undefined, JSON.stringify(persistedSettings))
+  assert.equal(persistedSettings.result?.settings?.provider, profile.provider)
+  assert.equal(persistedSettings.result?.settings?.model, profile.model)
+  assert.equal(persistedSettings.result?.settings?.thinkingLevel, profile.thinkingLevel)
+  assert.deepEqual(persistedSettings.result?.settings?.activeTools, [...profile.activeTools].sort())
+  assert.equal(persistedSettings.result?.settings?.approvalMode, profile.approvalMode)
+  assert.equal(persistedSettings.result?.settings?.unattended, profile.unattended)
+  assert.equal(persistedSettings.result?.settings?.compaction, profile.compaction)
   send(3, 'turn/submit', {
     sessionId,
     runId: 'skill-batch-run',
     cwd: workspace,
     prompt: 'Safely update both files.',
-    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', activeTools: ['write', 'edit'], approvalMode: 'full', unattended: false, compaction: 'manual' },
+    profile,
     pattern: 'Goal-based', maxIterations: 1,
   })
   const settled = await waitFor(3)

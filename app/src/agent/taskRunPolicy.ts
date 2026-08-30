@@ -164,7 +164,11 @@ export function explicitLoopTypeForConversation(opts: ExternalRunOpts): LoopType
 }
 
 export function isInteractiveConversationSource(opts: ExternalRunOpts): boolean {
-  return opts.sourceKind === 'composer' || opts.sourceKind === 'slash'
+  return (
+    opts.sourceKind === 'composer' ||
+    opts.sourceKind === 'slash' ||
+    opts.sourceKind === 'review'
+  )
 }
 
 export type ScheduleTriggerResolution =

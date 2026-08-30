@@ -138,6 +138,39 @@ try {
   assert.equal(updated.created, false)
   assert.equal(await readFile(join(root, 'AGENTS.md'), 'utf8'), 'second committed rule')
 
+  // A live resolver may request recovery while the writer has durably staged
+  // its journal but has not renamed the target yet. Recovery must serialize
+  // behind that in-process write; otherwise it mistakes the live transaction
+  // for a crash and removes the writer's backup/temp artifacts.
+  const concurrentRecoveryTarget = join(root, 'CLAUDE.md')
+  const concurrentRecoveryOriginal = 'concurrent recovery original'
+  await writeFile(concurrentRecoveryTarget, concurrentRecoveryOriginal)
+  await chmod(concurrentRecoveryTarget, 0o600)
+  const concurrentRecoveryHash = (await import('node:crypto')).createHash('sha256').update(concurrentRecoveryOriginal).digest('hex')
+  let releaseConcurrentCommit!: () => void
+  let signalConcurrentCommit!: () => void
+  const concurrentCommitReached = new Promise<void>((resolve) => { signalConcurrentCommit = resolve })
+  const concurrentCommitRelease = new Promise<void>((resolve) => { releaseConcurrentCommit = resolve })
+  const concurrentWrite = writeProjectInstruction({
+    projectRoot: root,
+    target: 'CLAUDE.md',
+    expectedHash: concurrentRecoveryHash,
+    content: 'concurrent recovery committed',
+  }, {
+    beforeCommit: async () => {
+      signalConcurrentCommit()
+      await concurrentCommitRelease
+    },
+  })
+  await concurrentCommitReached
+  const concurrentRecovery = recoverProjectInstruction(root, 'CLAUDE.md')
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  releaseConcurrentCommit()
+  await Promise.all([concurrentWrite, concurrentRecovery])
+  assert.equal(await readFile(concurrentRecoveryTarget, 'utf8'), 'concurrent recovery committed')
+  assert.deepEqual((await readdir(root)).filter((name) => name.includes('.CLAUDE.md.') || name === '.CLAUDE.md.recovery.json'), [])
+  await rm(concurrentRecoveryTarget)
+
   let tamperedBackup = false
   await assert.rejects(
     writeProjectInstruction({ projectRoot: root, target: 'AGENTS.md', expectedHash: updated.hash, content: 'backup mode must reject' }, {

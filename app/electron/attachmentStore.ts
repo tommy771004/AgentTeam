@@ -5,7 +5,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 /** Mirrors the lowest vision-provider limit currently enforced by Grok. */
 export const MIN_VISION_IMAGE_PIXELS = 512
@@ -274,13 +274,15 @@ export type ToolOutputSpillRecord = {
 
 const MAX_TOOL_SPILL_BYTES = 8 * 1024 * 1024
 const MAX_TOOL_SPILLS_PER_RUN = 24
+const MAX_TOOL_SPILL_PAGE_BYTES = 64 * 1024
 
-function safeSpillSegment(value: string, fallback: string): string {
-  return (value || fallback).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || fallback
+/** Opaque run scope prevents sanitized-id collisions (for example a/b vs a_b). */
+function runScopeId(runId: string): string {
+  return createHash('sha256').update(runId).digest('hex').slice(0, 32)
 }
 
 function toolSpillDir(projectRoot: string | undefined, runId: string): string {
-  return path.join(resolveBaseDir(projectRoot), 'tool-spills', safeSpillSegment(runId, 'run'))
+  return path.join(resolveBaseDir(projectRoot), 'tool-spills', runScopeId(runId))
 }
 
 function pruneToolSpills(dir: string) {
@@ -298,22 +300,23 @@ function pruneToolSpills(dir: string) {
 /** Persist oversized tool output outside the provider context window. */
 export function writeToolOutputSpill(input: ToolOutputSpillInput): ToolOutputSpillRecord {
   if (!input.runId.trim()) throw new Error('runId required for tool spill')
-  const content = input.output.slice(0, MAX_TOOL_SPILL_BYTES)
+  const original = Buffer.from(input.output, 'utf8')
+  const content = original.subarray(0, MAX_TOOL_SPILL_BYTES)
   const id = `spill_${randomUUID().replaceAll('-', '').slice(0, 24)}`
   const dir = toolSpillDir(input.projectRoot, input.runId)
   fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(path.join(dir, `${id}.txt`), content, 'utf8')
+  fs.writeFileSync(path.join(dir, `${id}.txt`), content)
   pruneToolSpills(dir)
   return {
-    locator: `toolspill:${safeSpillSegment(input.runId, 'run')}:${id}`,
+    locator: `toolspill:${runScopeId(input.runId)}:${id}`,
     runId: input.runId,
     tool: input.tool.slice(0, 120),
-    bytes: Buffer.byteLength(input.output, 'utf8'),
+    bytes: original.byteLength,
     createdAt: new Date().toISOString(),
   }
 }
 
-/** Read a bounded byte region; locator and runId must agree. */
+/** Read a bounded byte region; locator and exact run scope must agree. */
 export function readToolOutputSpill(input: {
   locator: string
   runId: string
@@ -321,22 +324,33 @@ export function readToolOutputSpill(input: {
   offset?: number
   maxBytes?: number
 }): { ok: boolean; output?: string; bytes?: number; offset?: number; nextOffset?: number; error?: string } {
-  const match = /^toolspill:([a-zA-Z0-9._-]+):(spill_[a-zA-Z0-9._-]+)$/.exec(input.locator.trim())
-  const safeRun = safeSpillSegment(input.runId, 'run')
-  if (!match || match[1] !== safeRun) return { ok: false, error: 'invalid or cross-run spill locator' }
+  const match = /^toolspill:([a-f0-9]{32}):(spill_[a-zA-Z0-9._-]+)$/.exec(input.locator.trim())
+  if (!match || !input.runId.trim() || match[1] !== runScopeId(input.runId)) {
+    return { ok: false, error: 'invalid or cross-run spill locator' }
+  }
   const file = path.join(toolSpillDir(input.projectRoot, input.runId), `${match[2]}.txt`)
   try {
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return { ok: false, error: 'spill not found' }
     const buf = fs.readFileSync(file)
-    const offset = Math.max(0, Math.min(buf.byteLength, Math.floor(input.offset || 0)))
-    const maxBytes = Math.max(1, Math.min(64 * 1024, Math.floor(input.maxBytes || 16 * 1024)))
-    const chunk = buf.subarray(offset, offset + maxBytes)
+    const requestedOffset = Math.max(0, Math.min(buf.byteLength, Math.floor(input.offset || 0)))
+    const offset = (() => {
+      let value = requestedOffset
+      while (value > 0 && (buf[value] & 0xc0) === 0x80) value -= 1
+      return value
+    })()
+    const maxBytes = Math.max(1, Math.min(MAX_TOOL_SPILL_PAGE_BYTES, Math.floor(input.maxBytes || 16 * 1024)))
+    let end = Math.min(buf.byteLength, offset + maxBytes)
+    // Include a UTF-8 code point that straddles the byte budget, avoiding a
+    // replacement character at the end of one page and a continuation byte at
+    // the beginning of the next page.
+    while (end < buf.byteLength && (buf[end] & 0xc0) === 0x80) end += 1
+    const chunk = buf.subarray(offset, end)
     return {
       ok: true,
       output: chunk.toString('utf8'),
       bytes: buf.byteLength,
       offset,
-      nextOffset: offset + chunk.byteLength < buf.byteLength ? offset + chunk.byteLength : undefined,
+      nextOffset: end < buf.byteLength ? end : undefined,
     }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }

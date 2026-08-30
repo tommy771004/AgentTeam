@@ -159,13 +159,20 @@ const scripted: Array<{ command: string } | undefined> = [
   { command: `git rev-parse --abbrev-ref HEAD > ${JSON.stringify(branchEffect)}` },
   undefined,
 ]
-const requests: unknown[] = []
+const requests: Array<{ index: number }> = []
+const stageTrace: string[] = []
+let lastEvent = '<none>'
+const noteStage = (stage: string) => {
+  stageTrace.push(`${new Date().toISOString()} ${stage}`)
+}
 const sse = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`
 const modelServer = createServer(async (request, response) => {
   if (request.url !== '/v1/chat/completions' || request.method !== 'POST') return response.writeHead(404).end()
   request.on('data', () => undefined)
   await once(request, 'end')
-  requests.push(1)
+  requests.push({ index: requests.length + 1 })
+  lastEvent = `provider-request-${requests.length}`
+  noteStage(lastEvent)
   const call = scripted.shift()
   const chunk = (delta: unknown, finish: string | null) => sse({
     id: `git-prefs-${requests.length}`, object: 'chat.completion.chunk', model: 'smoke-model',
@@ -201,25 +208,75 @@ const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-elec
 })
 const output = createInterface({ input: host.stdout })
 const messages: Message[] = []
-output.on('line', (line) => messages.push(JSON.parse(line) as Message))
-const wait = async (id: number) => {
-  for (;;) {
-    const found = messages.find((message) => message.id === id)
-    if (found) return found
-    await new Promise<Array<unknown>>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`timeout ${id}`)), 30_000)
-      once(output, 'line').then((value) => { clearTimeout(timer); resolve(value) }, (error) => { clearTimeout(timer); reject(error) })
-    })
-  }
+output.on('line', (line) => {
+  const message = JSON.parse(line) as Message
+  messages.push(message)
+  lastEvent = message.event || (message.id === undefined ? '<notification>' : `response-${message.id}`)
+})
+const suiteDeadline = Date.now() + 120_000
+const wait = async (id: number, stage: string) => {
+  const found = messages.find((message) => message.id === id)
+  if (found) return found
+  noteStage(`wait:${stage}`)
+  return new Promise<Message>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (error?: Error, response?: Message) => {
+      if (timer) clearTimeout(timer)
+      output.removeListener('line', onLine)
+      output.removeListener('close', onClose)
+      if (error) reject(error)
+      else if (response) resolve(response)
+    }
+    const onLine = () => {
+      const response = messages.find((message) => message.id === id)
+      if (response) finish(undefined, response)
+    }
+    const onClose = () => finish(new Error(`Host output closed while waiting for ${stage} id=${id}`))
+    output.on('line', onLine)
+    output.once('close', onClose)
+    const remaining = suiteDeadline - Date.now()
+    timer = setTimeout(() => finish(new Error(
+      `timeout ${stage} id=${id}; requestCount=${requests.length}; lastEvent=${lastEvent}; trace=${stageTrace.join(' > ')}`,
+    )), Math.max(1, remaining))
+  })
 }
-const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+const send = (id: number, method: string, params: Record<string, unknown> = {}) => {
+  noteStage(`send:${method}#${id}`)
+  if (!host.stdin.destroyed) host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+}
 
+const waitForHostExit = async (timeoutMs: number): Promise<boolean> => {
+  if (host.exitCode !== null || host.signalCode !== null) return true
+  return new Promise<boolean>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (exited: boolean) => {
+      if (timer) clearTimeout(timer)
+      host.removeListener('exit', onExit)
+      resolve(exited)
+    }
+    const onExit = () => finish(true)
+    host.once('exit', onExit)
+    timer = setTimeout(() => finish(false), Math.max(1, Math.min(timeoutMs, suiteDeadline - Date.now())))
+  })
+}
+
+let sessionId = ''
 try {
   send(1, 'initialize', { protocolVersion: 2 })
-  assert.equal((await wait(1)).error, undefined)
+  assert.equal((await wait(1, 'initialize')).error, undefined)
   send(2, 'sessions/create', { title: 'Git preferences' })
-  const sessionId = String((await wait(2)).result?.sessionId)
-  send(3, 'turn/submit', {
+  sessionId = String((await wait(2, 'session-create')).result?.sessionId)
+  send(3, 'settings/update', {
+    provider: 'loopback',
+    model: 'smoke-model',
+    thinkingLevel: 'off',
+    approvalMode: 'full',
+    unattended: false,
+    activeTools: ['bash'],
+    compaction: 'manual',
+  })
+  assert.equal((await wait(3, 'settings-update')).error, undefined)
+  send(4, 'turn/submit', {
     sessionId,
     runId: 'git-prefs-run',
     cwd: workspace,
@@ -228,9 +285,10 @@ try {
       memoryEnabled: false, memoryWriteEnabled: false, referenceChatHistory: false, temporary: false,
       gitPolicy: { branchPrefix: 'agent/', allowForcePush: false, draftPr: true },
     },
-    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false },
+    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false, activeTools: ['bash'], compaction: 'manual' },
   })
-  const settled = await wait(3)
+  const settled = await wait(4, 'turn-settlement')
+  noteStage(`settled:id=4 requestCount=${requests.length}`)
   assert.equal(settled.error, undefined)
 
   const decisions = messages.filter((message) => message.event === 'host/tool-decision' && message.payload?.runId === 'git-prefs-run')
@@ -270,8 +328,15 @@ try {
       `the prefix reached execution; git reports ${JSON.stringify(branchOnDisk)}`)
   })
 } finally {
-  host.stdin.end()
-  if (host.exitCode === null) await once(host, 'exit').catch(() => host.kill())
+  noteStage('cleanup:start')
+  if (host.exitCode === null && sessionId) {
+    try { send(99, 'turn/cancel', { sessionId, runId: 'git-prefs-run' }) } catch { /* best effort */ }
+  }
+  if (!host.stdin.destroyed) host.stdin.end()
+  if (!(await waitForHostExit(2_000)) && host.exitCode === null) host.kill('SIGTERM')
+  if (!(await waitForHostExit(2_000)) && host.exitCode === null) host.kill('SIGKILL')
+  await waitForHostExit(2_000)
+  noteStage(`cleanup:done requestCount=${requests.length} lastEvent=${lastEvent}`)
   output.close()
   await new Promise<void>((done) => modelServer.close(() => done()))
   await rm(agentDir, { recursive: true, force: true })

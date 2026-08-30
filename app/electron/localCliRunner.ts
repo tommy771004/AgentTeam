@@ -800,10 +800,14 @@ function codexArgv(context: LocalCliArgContext): string[] {
   const args = ['exec', '--json', '--color', 'never', '--skip-git-repo-check']
   if (context.plan) args.push('-s', 'read-only')
   else if (context.permissive) args.push('--dangerously-bypass-approvals-and-sandbox')
+  else if (context.effectiveApprovalMode === 'auto') {
+    // Codex owns the workspace-write sandbox implied by --approve-for-me.
+    // Passing an explicit --sandbox alongside it is rejected by current CLIs.
+    args.push('--approve-for-me')
+  }
   else {
     args.push('-s', 'workspace-write')
-    if (context.effectiveApprovalMode === 'auto') args.push('--approve-for-me')
-    else args.push('-c', 'approval_policy="on-request"')
+    args.push('-c', 'approval_policy="on-request"')
   }
   appendModelAndTier(args, context.model, context.serviceTier, '-m')
   args.push('-c', `model_reasoning_effort=${context.effort}`, context.prompt)

@@ -23,6 +23,15 @@ _Avoid_: treating CLI success as Definition of Done met.
 
 **Execution evidence（執行證據）** — the model cannot manufacture it. Model text, tool arguments, planned state, and claimed success are not proof a side effect occurred; only the trusted adapter that performed the effect may issue a non-model snapshot, and missing or model-attested evidence makes the result unsuccessful (ADR-0048). Automatic retry after recovery needs a replay-safe checkpoint proving nothing effectful happened since it.
 
+**Run Review Snapshot（執行審查快照）** — an immutable, Host-owned record of the code changes associated with one Task run, bound to a workspace baseline, settlement identity, integrity hashes and stated attribution fidelity. Historical review reads this artifact and never reinterprets the current working tree as an older run.
+_Avoid_: saved diff, last-turn working-tree diff, treating a renderer string as historical truth.
+
+**Live Workspace Diff（即時工作目錄差異）** — a mutable view of one workspace revision and Git scope, refreshed from the current checkout. It is useful for current review and Git actions but is never a fallback for a missing Run Review Snapshot.
+_Avoid_: run diff, historical review, silently presenting live state as archived state.
+
+**Change attribution fidelity（變更歸屬可信度）** — the Host-stated strength of the relationship between workspace changes and one Task run: exact in an uncontaminated isolated worktree, attributed by trusted side-effect evidence, shared in a checkout with other writers, or partial when coverage is incomplete.
+_Avoid_: inferring ownership from model text, tool arguments, touched-file guesses or CLI success.
+
 ## Pi platform
 
 **Pi Core（Pi 核心）** — the project-owned vendored foundation from `pi-ai`, `pi-agent-core`, `pi-coding-agent`, `pi-tui`, owning model access, agent/session execution, the extension host, and terminal primitives. The Electron/React app is the desktop shell; the Pi CLI and TUI are not product entry points. **Pi Core Host** is the Electron utility process owning those runtimes behind the versioned Pi Host Protocol.

@@ -19,9 +19,16 @@ import type {
 import type { DurableMemoryBundle } from './durableMemoryStore'
 import type { MemoryImportApplyInput, MemoryImportMode, MemoryImportPreview, MemoryImportResult } from './durableMemoryImport'
 import type { MemoryStorageHealth } from './memoryStorageLifecycle'
-import type { LegacyInstructionMigrationInput, LegacyInstructionMigrationReport, PersonalizationExportBundle, PersonalizationImportPreview, PersonalizationInstructionSnapshot } from './instructionRepository'
+import type { InstructionPresence, LegacyInstructionMigrationInput, LegacyInstructionMigrationReport, PersonalizationExportBundle, PersonalizationImportPreview, PersonalizationInstructionSnapshot } from './instructionRepository'
 import type { InstructionSnapshot } from './instructionResolver'
 import type { ProjectInstructionWriteFailureCode } from './projectInstructionWriter'
+import type { ReviewAdmissionSnapshot, ReviewFileManifestEntry, ReviewPageEnvelope, ReviewRunnerKind, ReviewSnapshotRef, ReviewTarget } from '../src/agent/reviewContract'
+import type { ReviewArtifactExportBundle, ReviewArtifactImportPreview, ReviewArtifactProjection, ReviewArtifactRetentionReport } from './reviewArtifactStore'
+import type { ReviewDiffHunk, ReviewTargetDescription } from './workspaceReviewProjection'
+import type { ReviewComment, ReviewCommentStatus, ReviewFeedbackBundle, ReviewFileState } from '../src/agent/reviewStateContract'
+import type { ReviewVerificationKind, ReviewVerificationProjection } from '../src/agent/reviewVerificationContract'
+import type { ReviewMutationIntent, ReviewMutationPreview, ReviewMutationReceipt } from '../src/agent/reviewMutationContract'
+import type { ReviewDeliveryIntent, ReviewDeliveryPreview, ReviewDeliveryReceipt } from '../src/agent/reviewDeliveryContract'
 
 type PiHostThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 type PiHostSettings = {
@@ -87,9 +94,46 @@ const api = {
       profile: (role?: Record<string, unknown>, taskOverride?: Record<string, unknown>) =>
         ipcRenderer.invoke('pi-host:settings:profile', role, taskOverride) as Promise<{ profile: unknown }>,
     },
+      review: {
+        admit: (input: { runId: string; threadId: string; projectRoot: string; runnerKind: ReviewRunnerKind }) =>
+          ipcRenderer.invoke('pi-host:review:admit', input) as Promise<{ reviewAdmission: ReviewAdmissionSnapshot }>,
+        finalize: (input: { snapshotId?: string; runId?: string; settlementKind: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash' }) =>
+          ipcRenderer.invoke('pi-host:review:finalize', input) as Promise<{ reviewSnapshotRef: ReviewSnapshotRef }>,
+        read: (snapshotId: string) =>
+          ipcRenderer.invoke('pi-host:review:read', snapshotId) as Promise<{ reviewArtifact: ReviewArtifactProjection }>,
+        readPayloadPage: (input: { snapshotId: string; payloadId: string; offset?: number; maxBytes?: number }) =>
+          ipcRenderer.invoke('pi-host:review:payload-page', input) as Promise<{ reviewPayloadPage: { payloadId: string; contentBase64: string; offset: number; bytes: number; nextOffset?: number } }>, 
+        describe: (target: ReviewTarget) => ipcRenderer.invoke('pi-host:review:describe', target) as Promise<{ reviewTargetDescription: ReviewTargetDescription }>,
+        listFiles: (input: { target: ReviewTarget; cursor?: string; limit?: number; query?: string }) => ipcRenderer.invoke('pi-host:review:files', input) as Promise<{ reviewFiles: ReviewPageEnvelope<ReviewFileManifestEntry> }>,
+        readFileDiff: (input: { target: ReviewTarget; path: string; cursor?: string; maxBytes?: number }) => ipcRenderer.invoke('pi-host:review:file-diff', input) as Promise<{ reviewDiff: ReviewPageEnvelope<ReviewDiffHunk> }>,
+        refresh: (target: ReviewTarget) => ipcRenderer.invoke('pi-host:review:refresh', target) as Promise<{ reviewTargetDescription: ReviewTargetDescription }>,
+        listComments: (snapshotId: string) => ipcRenderer.invoke('pi-host:review:comments:list', snapshotId) as Promise<{ reviewComments: ReviewComment[] }>,
+        saveDraft: (input: { id?: string; snapshotId: string; path: string; side?: 'old' | 'new'; line?: number; body: string }) => ipcRenderer.invoke('pi-host:review:draft:save', input) as Promise<{ reviewComment: ReviewComment }>,
+        deleteDraft: (id: string) => ipcRenderer.invoke('pi-host:review:draft:delete', id) as Promise<Record<string, never>>,
+        transitionComment: (id: string, status: ReviewCommentStatus) => ipcRenderer.invoke('pi-host:review:comment:transition', id, status) as Promise<{ reviewComment: ReviewComment }>,
+        listFileStates: (snapshotId: string) => ipcRenderer.invoke('pi-host:review:file-state:list', snapshotId) as Promise<{ reviewFileStates: ReviewFileState[] }>,
+        markReviewed: (input: { snapshotId: string; path: string; contentHash: string }) => ipcRenderer.invoke('pi-host:review:file-state:mark', input) as Promise<{ reviewFileState: ReviewFileState }>,
+        prepareFeedback: (snapshotId: string) => ipcRenderer.invoke('pi-host:review:feedback:prepare', snapshotId) as Promise<{ reviewFeedbackBundle: ReviewFeedbackBundle }>,
+        claimFeedback: (id: string, runId: string) => ipcRenderer.invoke('pi-host:review:feedback:claim', id, runId) as Promise<{ bundle: ReviewFeedbackBundle; claimed: boolean }>,
+        releaseFeedback: (id: string, runId: string) => ipcRenderer.invoke('pi-host:review:feedback:release', id, runId) as Promise<Record<string, never>>,
+        inheritState: (fromSnapshotId: string, toSnapshotId: string) => ipcRenderer.invoke('pi-host:review:state:inherit', fromSnapshotId, toSnapshotId) as Promise<{ comments: ReviewComment[]; fileStates: ReviewFileState[] }>,
+        listVerifications: (snapshotId: string) => ipcRenderer.invoke('pi-host:review:verification:list', snapshotId) as Promise<{ reviewVerifications: ReviewVerificationProjection[] }>,
+        runVerification: (snapshotId: string, kind: ReviewVerificationKind) => ipcRenderer.invoke('pi-host:review:verification:run', snapshotId, kind) as Promise<{ reviewVerification: ReviewVerificationProjection }>,
+        readVerificationOutput: (input: { outputRef: string; offset?: number; maxBytes?: number }) => ipcRenderer.invoke('pi-host:review:verification:output', input) as Promise<{ reviewVerificationOutput: { outputRef: string; contentBase64: string; offset: number; bytes: number; nextOffset?: number } }>,
+        previewMutation: (intent: ReviewMutationIntent) => ipcRenderer.invoke('pi-host:review:mutation:preview', intent) as Promise<{ reviewMutationPreview: ReviewMutationPreview }>,
+        applyMutation: (previewId: string) => ipcRenderer.invoke('pi-host:review:mutation:apply', previewId) as Promise<{ reviewMutationReceipt: ReviewMutationReceipt }>,
+        previewDelivery: (intent: ReviewDeliveryIntent) => ipcRenderer.invoke('pi-host:review:delivery:preview', intent) as Promise<{ reviewDeliveryPreview: ReviewDeliveryPreview }>,
+        applyDelivery: (previewId: string) => ipcRenderer.invoke('pi-host:review:delivery:apply', previewId) as Promise<{ reviewDeliveryReceipt: ReviewDeliveryReceipt }>,
+        exportArtifact: (snapshotId: string) => ipcRenderer.invoke('pi-host:review:artifact:export', snapshotId) as Promise<{ reviewArtifactExport: ReviewArtifactExportBundle }>,
+        previewArtifactImport: (bundle: unknown) => ipcRenderer.invoke('pi-host:review:artifact:import-preview', bundle) as Promise<{ reviewArtifactImportPreview: ReviewArtifactImportPreview }>,
+        applyArtifactImport: (bundle: unknown, expectedBundleHash: string) => ipcRenderer.invoke('pi-host:review:artifact:import-apply', bundle, expectedBundleHash) as Promise<{ reviewArtifact: ReviewArtifactProjection }>,
+        rebindArtifact: (snapshotId: string, projectRoot: string) => ipcRenderer.invoke('pi-host:review:artifact:rebind', snapshotId, projectRoot) as Promise<{ reviewArtifact: ReviewArtifactProjection }>,
+        applyArtifactRetention: (input: { retainedSnapshotIds: string[]; reason: string; olderThan?: string }) => ipcRenderer.invoke('pi-host:review:artifact:retention', input) as Promise<{ reviewArtifactRetention: ReviewArtifactRetentionReport }>,
+        hardDeleteArtifact: (snapshotId: string) => ipcRenderer.invoke('pi-host:review:artifact:hard-delete', snapshotId) as Promise<{ reviewArtifactHardDeleted: true }>,
+      },
       instructions: {
         get: () => ipcRenderer.invoke('pi-host:instructions:get') as Promise<{ instructions: PersonalizationInstructionSnapshot }>,
-        save: (input: { expectedRevision: number; globalCustomInstructions: string; advancedPersonalityInstructions?: string; personality?: string; aboutUser?: string; responseStyle?: string }) =>
+        save: (input: { expectedRevision: number; globalCustomInstructions: string; advancedPersonalityInstructions?: string; personality?: string; aboutUser?: string; responseStyle?: string; globalCustomInstructionsPresence?: InstructionPresence; advancedPersonalityInstructionsPresence?: InstructionPresence }) =>
           ipcRenderer.invoke('pi-host:instructions:save', input) as Promise<{ instructions: PersonalizationInstructionSnapshot }>,
         migrateLegacy: (input: LegacyInstructionMigrationInput) =>
           ipcRenderer.invoke('pi-host:instructions:migrate-legacy', input) as Promise<{ instructions: PersonalizationInstructionSnapshot; instructionMigrationReport: LegacyInstructionMigrationReport }>,

@@ -230,19 +230,35 @@ function validateBundle(value: unknown): PersonalizationExportBundle {
 function validateImportedSnapshot(value: unknown): asserts value is PersonalizationInstructionSnapshot {
   if (!value || typeof value !== 'object') throw new InstructionRepositoryError('invalid_import', '匯入 snapshot 缺失。')
   const candidate = value as Record<string, unknown>
+  assertImportedSnapshotSchema(candidate)
+  assertImportedSnapshotOptionalFields(candidate)
+  assertImportedSnapshotByteLimits(candidate)
+  assertImportedSnapshotTimestamp(candidate)
+  assertImportedSnapshotHash(candidate)
+}
+
+function assertImportedSnapshotSchema(candidate: Record<string, unknown>): void {
   if (candidate.schemaVersion !== 1 || !Number.isSafeInteger(candidate.revision) || Number(candidate.revision) < 0
     || typeof candidate.globalCustomInstructions !== 'string' || typeof candidate.advancedPersonalityInstructions !== 'string'
     || typeof candidate.updatedAt !== 'string' || typeof candidate.hash !== 'string') {
     throw new InstructionRepositoryError('invalid_import', '匯入 snapshot schema 無效。')
   }
+}
+
+function assertImportedSnapshotOptionalFields(candidate: Record<string, unknown>): void {
   for (const field of ['personality', 'aboutUser', 'responseStyle'] as const) {
-    if (candidate[field] !== undefined && typeof candidate[field] !== 'string') throw new InstructionRepositoryError('invalid_import', `匯入 ${field} 無效。`)
+    if (candidate[field] !== undefined && typeof candidate[field] !== 'string') {
+      throw new InstructionRepositoryError('invalid_import', `匯入 ${field} 無效。`)
+    }
   }
   for (const field of ['globalCustomInstructionsPresence', 'advancedPersonalityInstructionsPresence'] as const) {
     if (candidate[field] !== undefined && !['unset', 'blank', 'value'].includes(String(candidate[field]))) {
       throw new InstructionRepositoryError('invalid_import', `匯入 ${field} 無效。`)
     }
   }
+}
+
+function assertImportedSnapshotByteLimits(candidate: Record<string, unknown>): void {
   const limits: Record<string, number> = {
     globalCustomInstructions: 512_000,
     advancedPersonalityInstructions: 512_000,
@@ -252,11 +268,23 @@ function validateImportedSnapshot(value: unknown): asserts value is Personalizat
   }
   for (const [field, limit] of Object.entries(limits)) {
     const text = candidate[field]
-    if (typeof text === 'string' && Buffer.byteLength(text) > limit) throw new InstructionRepositoryError('invalid_import', `匯入 ${field} 超過 ${limit} bytes。`)
+    if (typeof text === 'string' && Buffer.byteLength(text) > limit) {
+      throw new InstructionRepositoryError('invalid_import', `匯入 ${field} 超過 ${limit} bytes。`)
+    }
   }
-  if (!Number.isFinite(Date.parse(candidate.updatedAt as string))) throw new InstructionRepositoryError('invalid_import', '匯入 snapshot updatedAt 無效。')
+}
+
+function assertImportedSnapshotTimestamp(candidate: Record<string, unknown>): void {
+  if (!Number.isFinite(Date.parse(candidate.updatedAt as string))) {
+    throw new InstructionRepositoryError('invalid_import', '匯入 snapshot updatedAt 無效。')
+  }
+}
+
+function assertImportedSnapshotHash(candidate: Record<string, unknown>): void {
   const expected = instructionHash(candidate as Omit<PersonalizationInstructionSnapshot, 'hash'>)
-  if (candidate.hash !== expected) throw new InstructionRepositoryError('integrity_failure', '匯入 snapshot hash 驗證失敗。')
+  if (candidate.hash !== expected) {
+    throw new InstructionRepositoryError('integrity_failure', '匯入 snapshot hash 驗證失敗。')
+  }
 }
 
 function legacySourceHash(input: LegacyInstructionMigrationInput): string {
@@ -281,6 +309,57 @@ function migrationReport(
     backup: Object.freeze({ ...input }),
     presence: Object.freeze({ soul: presenceOf(input.soul), agents: presenceOf(input.agents) }),
   })
+}
+
+type LegacyMigrationDraft = {
+  status: LegacyInstructionMigrationReport['status']
+  instructions: PersonalizationInstructionSnapshot
+  report: LegacyInstructionMigrationReport
+}
+
+function readLegacyMigrationReport(db: DatabaseSync): LegacyInstructionMigrationReport | undefined {
+  const existing = db.prepare('SELECT report_json FROM instruction_migrations WHERE migration_id = ?').get('legacy-personalization-v1') as { report_json: string } | undefined
+  return existing ? JSON.parse(existing.report_json) as LegacyInstructionMigrationReport : undefined
+}
+
+function buildLegacyMigrationDraft(
+  current: PersonalizationInstructionSnapshot,
+  input: LegacyInstructionMigrationInput,
+): LegacyMigrationDraft {
+  const status = current.revision === 0 ? 'migrated' as const : 'skipped_existing' as const
+  const instructions = status === 'migrated'
+    ? normalizeSave({
+      expectedRevision: 0,
+      globalCustomInstructions: input.agents ?? '',
+      advancedPersonalityInstructions: input.soul ?? '',
+      ...(input.personality !== undefined ? { personality: input.personality } : {}),
+      ...(input.aboutUser !== undefined ? { aboutUser: input.aboutUser } : {}),
+      ...(input.responseStyle !== undefined ? { responseStyle: input.responseStyle } : {}),
+    }, 1, {
+      globalCustomInstructionsPresence: presenceOf(input.agents),
+      advancedPersonalityInstructionsPresence: presenceOf(input.soul),
+    })
+    : current
+  return { status, instructions, report: migrationReport(status, input, instructions.revision) }
+}
+
+function insertInstructionState(db: DatabaseSync, next: PersonalizationInstructionSnapshot): void {
+  db.prepare(`INSERT INTO instruction_state
+    (singleton, revision, global_custom, advanced_personality, personality, about_user, response_style, global_custom_presence, advanced_personality_presence, hash, updated_at)
+    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(next.revision, next.globalCustomInstructions, next.advancedPersonalityInstructions, next.personality ?? null, next.aboutUser ?? null, next.responseStyle ?? null, next.globalCustomInstructionsPresence ?? null, next.advancedPersonalityInstructionsPresence ?? null, next.hash, next.updatedAt)
+}
+
+function insertLegacyMigrationReport(db: DatabaseSync, report: LegacyInstructionMigrationReport): void {
+  db.prepare('INSERT INTO instruction_migrations (migration_id, source_hash, backup_json, report_json, applied_revision) VALUES (?, ?, ?, ?, ?)')
+    .run('legacy-personalization-v1', report.sourceHash, JSON.stringify(report.backup), JSON.stringify(report), report.appliedRevision)
+}
+
+function mapLegacyMigrationError(error: unknown): never {
+  if (error instanceof InstructionRepositoryError) throw error
+  const mapped = mapSqliteError(error)
+  if (mapped.code === 'corrupt' || mapped.code === 'read_only' || mapped.code === 'busy') throw mapped
+  throw new InstructionRepositoryError('migration_failed', `Legacy personalization migration 失敗：${mapped.message}`, error)
 }
 
 function importPreview(
@@ -617,8 +696,24 @@ export class SqliteInstructionRepository implements InstructionRepository {
       try { this.db.exec('ROLLBACK') } catch { /* preserve original */ }
       if (error instanceof InstructionRepositoryError) throw error
       throw mapSqliteError(error)
-    } finally { release() }
+      } finally { release() }
   }
+
+  private async migrateLegacyTransaction(input: LegacyInstructionMigrationInput) {
+    const existing = readLegacyMigrationReport(this.db)
+    const current = await this.read()
+    if (existing) {
+      return {
+        instructions: current,
+        report: Object.freeze({ ...existing, status: 'already_migrated' as const }),
+      }
+    }
+    const draft = buildLegacyMigrationDraft(current, input)
+    if (draft.status === 'migrated') insertInstructionState(this.db, draft.instructions)
+    insertLegacyMigrationReport(this.db, draft.report)
+    return { instructions: draft.instructions, report: draft.report }
+  }
+
   async migrateLegacy(input: LegacyInstructionMigrationInput) {
     this.ensureOpen()
     if (this.readOnly) throw new InstructionRepositoryError('read_only', 'Instruction Repository recovery mode 為唯讀。')
@@ -628,42 +723,12 @@ export class SqliteInstructionRepository implements InstructionRepository {
     await previous
     try {
       this.db.exec('BEGIN IMMEDIATE')
-      const existing = this.db.prepare('SELECT report_json FROM instruction_migrations WHERE migration_id = ?').get('legacy-personalization-v1') as { report_json: string } | undefined
-      const current = await this.read()
-      if (existing) {
-        this.db.exec('COMMIT')
-        const report = JSON.parse(existing.report_json) as LegacyInstructionMigrationReport
-        return { instructions: current, report: Object.freeze({ ...report, status: 'already_migrated' as const }) }
-      }
-      const status = current.revision === 0 ? 'migrated' as const : 'skipped_existing' as const
-      const next = status === 'migrated' ? normalizeSave({
-        expectedRevision: 0,
-        globalCustomInstructions: input.agents ?? '',
-        advancedPersonalityInstructions: input.soul ?? '',
-        ...(input.personality !== undefined ? { personality: input.personality } : {}),
-        ...(input.aboutUser !== undefined ? { aboutUser: input.aboutUser } : {}),
-        ...(input.responseStyle !== undefined ? { responseStyle: input.responseStyle } : {}),
-      }, 1, {
-        globalCustomInstructionsPresence: presenceOf(input.agents),
-        advancedPersonalityInstructionsPresence: presenceOf(input.soul),
-      }) : current
-      if (status === 'migrated') {
-        this.db.prepare(`INSERT INTO instruction_state
-          (singleton, revision, global_custom, advanced_personality, personality, about_user, response_style, global_custom_presence, advanced_personality_presence, hash, updated_at)
-          VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).run(next.revision, next.globalCustomInstructions, next.advancedPersonalityInstructions, next.personality ?? null, next.aboutUser ?? null, next.responseStyle ?? null, next.globalCustomInstructionsPresence ?? null, next.advancedPersonalityInstructionsPresence ?? null, next.hash, next.updatedAt)
-      }
-      const report = migrationReport(status, input, next.revision)
-      this.db.prepare('INSERT INTO instruction_migrations (migration_id, source_hash, backup_json, report_json, applied_revision) VALUES (?, ?, ?, ?, ?)')
-        .run('legacy-personalization-v1', report.sourceHash, JSON.stringify(report.backup), JSON.stringify(report), report.appliedRevision)
+      const result = await this.migrateLegacyTransaction(input)
       this.db.exec('COMMIT')
-      return { instructions: next, report }
+      return result
     } catch (error) {
       try { this.db.exec('ROLLBACK') } catch { /* preserve original */ }
-      if (error instanceof InstructionRepositoryError) throw error
-      const mapped = mapSqliteError(error)
-      if (mapped.code === 'corrupt' || mapped.code === 'read_only' || mapped.code === 'busy') throw mapped
-      throw new InstructionRepositoryError('migration_failed', `Legacy personalization migration 失敗：${mapped.message}`, error)
+      mapLegacyMigrationError(error)
     } finally { release() }
   }
   async listAuthorizedIncludeTargets(): Promise<readonly string[]> {

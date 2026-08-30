@@ -133,7 +133,7 @@ async function assertAdmissionReadiness(): Promise<void> {
   assert.equal(migrations, 2, 'known-absent authoritative hydration may commit exactly once')
 }
 
-async function assertHostBoundaries(): Promise<void> {
+async function assertHostSkipsLegacyWhenNewerStateExists(): Promise<void> {
   const newerMessages: PiHostMessage[] = []
   const newerRepo = new InMemoryInstructionRepository()
   const newerHost = createPiHostServer((message) => newerMessages.push(message), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, newerRepo)
@@ -144,7 +144,9 @@ async function assertHostBoundaries(): Promise<void> {
   assert.equal(skipped.result?.instructionMigrationReport?.status, 'skipped_existing')
   assert.equal(skipped.result?.instructions?.globalCustomInstructions, 'HOST_NEWER_REVISION')
   assert.equal(newerMessages.some((message) => 'event' in message && message.event === 'instruction/changed' && message.payload?.operation === 'migration'), false)
+}
 
+async function assertHostMigrationFailureStaysUnpublished(): Promise<void> {
   const failureMessages: PiHostMessage[] = []
   const failureHost = createPiHostServer(
     (message) => failureMessages.push(message),
@@ -162,16 +164,22 @@ async function assertHostBoundaries(): Promise<void> {
   const failure = await publicRequest(failureHost, failureMessages, 11, 'instructions/v1/migrate-legacy', migrationInput)
   assert.equal(failure.error?.code, 'io_error')
   assert.equal(failureMessages.some((message) => 'event' in message && message.event === 'instruction/changed'), false)
+}
 
-  const blankMessages: PiHostMessage[] = []
-  const blankHost = createPiHostServer((message) => blankMessages.push(message), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new InMemoryInstructionRepository())
-  await publicRequest(blankHost, blankMessages, 12, 'initialize', { protocolVersion: 5, capabilities: ['instructions-v1'] })
-  const unsetProjection = await publicRequest(blankHost, blankMessages, 13, 'instructions/v1/resolve')
+async function assertHostUnsetProjection(host: ReturnType<typeof createPiHostServer>, messages: PiHostMessage[]): Promise<void> {
+  const unsetProjection = await publicRequest(host, messages, 13, 'instructions/v1/resolve')
   assert.equal(unsetProjection.result?.instructionSnapshot?.presence?.advancedPersonalityInstructions, 'unset')
   assert.equal(unsetProjection.result?.instructionSnapshot?.presence?.globalCustomInstructions, 'unset')
   const unsetText = unsetProjection.result?.instructionSnapshot?.effectiveText || ''
   assert.equal(unsetText.includes(LEGACY_DEFAULT_SOUL), false)
   assert.equal(unsetText.includes(LEGACY_DEFAULT_AGENTS), false)
+}
+
+async function assertHostBlankPresenceSemantics(): Promise<void> {
+  const blankMessages: PiHostMessage[] = []
+  const blankHost = createPiHostServer((message) => blankMessages.push(message), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new InMemoryInstructionRepository())
+  await publicRequest(blankHost, blankMessages, 12, 'initialize', { protocolVersion: 5, capabilities: ['instructions-v1'] })
+  await assertHostUnsetProjection(blankHost, blankMessages)
   const blankHostMigration = await publicRequest(blankHost, blankMessages, 14, 'instructions/v1/migrate-legacy', { soul: '', agents: '' })
   assert.equal(blankHostMigration.result?.instructions?.advancedPersonalityInstructionsPresence, 'blank')
   assert.equal(blankHostMigration.result?.instructions?.globalCustomInstructionsPresence, 'blank')
@@ -181,7 +189,9 @@ async function assertHostBoundaries(): Promise<void> {
   const blankText = blankProjection.result?.instructionSnapshot?.effectiveText || ''
   assert.equal(blankText.includes(LEGACY_DEFAULT_SOUL), true)
   assert.equal(blankText.includes(LEGACY_DEFAULT_AGENTS), true)
+}
 
+async function assertSqliteMigrationRollback(): Promise<void> {
   const faultDir = await mkdtemp(join(tmpdir(), 'agentstudio-instruction-migration-fault-'))
   const faultPath = join(faultDir, 'instructions.sqlite')
   const faultRepo = await SqliteInstructionRepository.open(faultPath)
@@ -203,6 +213,13 @@ async function assertHostBoundaries(): Promise<void> {
   faultCheck.close()
   await faultRestart.close()
   await rm(faultDir, { recursive: true, force: true })
+}
+
+async function assertHostBoundaries(): Promise<void> {
+  await assertHostSkipsLegacyWhenNewerStateExists()
+  await assertHostMigrationFailureStaysUnpublished()
+  await assertHostBlankPresenceSemantics()
+  await assertSqliteMigrationRollback()
 }
 
 type ModelRequest = { messages?: Array<{ role?: string; content?: unknown }> }

@@ -620,48 +620,62 @@ export async function drainExternalRunQueue(
       const batch: Array<{
         item: QueuedExternalRun
         promise: Promise<ExternalRunResult>
+        wasAdmitted: () => boolean
       }> = []
-      for (let i = 0; i < slots && queue.length; i += 1) {
-        const next = queue.shift()
-        if (!next) break
-        recordQueueDispatching({ queueId: next.id, runId: next.runId })
-        emit()
+      const candidates = queue.slice(0, slots)
+      for (const next of candidates) {
+        let admitted = false
         const { id: _id, enqueuedAt: _at, dedupeKey: _k, ...opts } = next
         batch.push({
           item: next,
+          wasAdmitted: () => admitted,
           promise: runner({
             ...opts,
             sourceLabel: opts.sourceLabel
               ? `${opts.sourceLabel}（佇列補跑）`
               : '佇列補跑',
+            _onAdmitted: () => {
+              if (admitted) return
+              admitted = true
+              const index = queue.findIndex((item) => item.id === next.id)
+              if (index >= 0) queue.splice(index, 1)
+              // runTask persists the matching run owner before invoking this
+              // callback, so a dispatching marker can never be orphaned.
+              recordQueueDispatching({ queueId: next.id, runId: next.runId })
+              emit()
+            },
           }),
         })
       }
       if (!batch.length) break
 
       const results = await Promise.all(batch.map((entry) => entry.promise))
-      const busyItems = batch
-        .filter((_entry, index) => {
-          const result = results[index]
-          return result.skipped && result.skipReason === 'busy'
-        })
+      const busyEntries = batch.filter((_entry, index) => {
+        const result = results[index]
+        return result.skipped && result.skipReason === 'busy'
+      })
+      const restoredBusy = busyEntries
+        .filter((entry) => entry.wasAdmitted() && !queue.some((item) => item.id === entry.item.id))
         .map((entry) => entry.item)
-      if (busyItems.length) {
-        queue.unshift(...busyItems.reverse())
-        for (const item of busyItems) {
+      if (restoredBusy.length) queue.unshift(...restoredBusy)
+      for (const [index, entry] of batch.entries()) {
+        const result = results[index]
+        if (result.skipped && result.skipReason === 'busy') {
+          const item = entry.item
           recordQueueEnqueued({
             queueId: item.id,
             runId: item.runId,
             objective: item.objective,
             sourceKind: item.sourceKind,
           })
+          continue
         }
-        emit()
-        break
+        const queuedIndex = queue.findIndex((item) => item.id === entry.item.id)
+        if (queuedIndex >= 0) queue.splice(queuedIndex, 1)
+        recordQueueTerminal({ queueId: entry.item.id, status: result?.status || 'failed' })
       }
-      for (const [index, entry] of batch.entries()) {
-        recordQueueTerminal({ queueId: entry.item.id, status: results[index]?.status || 'failed' })
-      }
+      emit()
+      if (busyEntries.length) break
     }
   } finally {
     draining = false

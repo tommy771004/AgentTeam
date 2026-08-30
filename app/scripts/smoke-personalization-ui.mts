@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 console.log('[personalization-ui] script:start')
 const appRoot = new URL('..', import.meta.url).pathname
 const trace: string[] = []
-const bounded = async <T>(stage: string, operation: Promise<T>, timeoutMs = 10_000): Promise<T> => {
+const bounded = async <T,>(stage: string, operation: Promise<T>, timeoutMs = 10_000): Promise<T> => {
   trace.push(`${stage}:start`)
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
@@ -210,6 +210,8 @@ try {
       responseStyle: editedValues['希望如何回覆'],
       globalCustomInstructions: editedValues['全域自訂指令'],
       advancedPersonalityInstructions: editedValues['進階人格指令'],
+      globalCustomInstructionsPresence: 'value',
+      advancedPersonalityInstructionsPresence: 'value',
       personality: 'none',
       expectedRevision: 12,
     }, `${viewport.name} save carries the real edited fields and expected revision`)
@@ -234,14 +236,17 @@ try {
     assert.equal(await page.getByRole('button', { name: '確認匯出 plaintext JSON' }).count(), 0, `${viewport.name} export armed state clears after commit`)
     const importFile = page.getByLabel('選擇個人化匯入檔')
     const importLabel = page.getByRole('button', { name: '選擇匯入檔' })
-    await importLabel.click()
     await importFile.setInputFiles({ name: 'fixture.json', mimeType: 'application/json', buffer: Buffer.from('{}') })
     await page.getByRole('button', { name: '取消預覽' }).click()
     assert.equal(await page.getByRole('button', { name: '取消預覽' }).count(), 0, `${viewport.name} import cancel clears the preview and apply controls`)
+    await importFile.setInputFiles([])
     await tabTo(page, importLabel, `${viewport.name} import label`)
-    const fileChooserPromise = page.waitForEvent('filechooser')
+    await importFile.evaluate((element: HTMLInputElement) => {
+      element.addEventListener('click', () => { element.dataset.keyboardActivated = 'true' }, { once: true })
+    })
     await page.keyboard.press('Enter')
-    await (await fileChooserPromise).setFiles({ name: 'fixture.json', mimeType: 'application/json', buffer: Buffer.from('{}') })
+    assert.equal(await importFile.getAttribute('data-keyboard-activated'), 'true', `${viewport.name} keyboard activation reaches the native file input`)
+    await importFile.setInputFiles({ name: 'fixture.json', mimeType: 'application/json', buffer: Buffer.from('{}') })
     const revisionBeforeImport = await page.evaluate(() => (window as unknown as { __personalizationFixtureLedger: { revision: number } }).__personalizationFixtureLedger.revision)
     const applyImport = page.getByRole('button', { name: /確認套用 ready/ })
     await tabTo(page, applyImport, `${viewport.name} import apply`)
@@ -326,6 +331,55 @@ try {
     assert.equal(await page.evaluate(() => (window as unknown as { __personalizationFixtureLedger: { projectWrite: number } }).__personalizationFixtureLedger.projectWrite), 1, `${viewport.name} project save crosses Host once`)
     await page.close()
   }
+  const racePage = await bounded('race newPage', browser.newPage({ viewport: { width: 900, height: 900 } }))
+  await bounded('race navigation', racePage.goto(`http://127.0.0.1:${port}/scripts/personalization-ui-fixture.html?race=1`, { waitUntil: 'networkidle', timeout: 10_000 }))
+  await racePage.waitForFunction(() => (window as unknown as { __personalizationFixtureLedger: { get: number } }).__personalizationFixtureLedger.get >= 1, undefined, { timeout: 10_000 })
+  await racePage.evaluate((root) => {
+    const controls = (window as unknown as { __personalizationFixtureControls: { switchProjectRoot?: (value: string) => void } }).__personalizationFixtureControls
+    controls.switchProjectRoot?.(root)
+  }, '/tmp/personalization-ui-project-B')
+  await racePage.evaluate(() => (window as unknown as { __personalizationFixtureControls: { releaseOldGet?: () => void } }).__personalizationFixtureControls.releaseOldGet?.())
+  await bounded('race fresh projection', racePage.getByLabel('Host instruction snapshot').waitFor({ state: 'visible', timeout: 10_000 }))
+  const raceBodyBeforeRelease = await racePage.locator('body').innerText()
+  assert.match(raceBodyBeforeRelease, /personalization-ui-project-B\/AGENTS\.md/, 'fresh project projection must use the switched root')
+  assert.doesNotMatch(raceBodyBeforeRelease, /personalization-ui-project-A\/AGENTS\.md/, 'old project source must not appear before stale resolve release')
+  await racePage.evaluate(() => {
+    const controls = (window as unknown as { __personalizationFixtureControls: { rejectOldResolve?: () => void; releaseOldResolve?: () => void } }).__personalizationFixtureControls
+    controls.rejectOldResolve?.()
+    controls.releaseOldResolve?.()
+  })
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const raceBodyAfterRelease = await racePage.locator('body').innerText()
+  assert.match(raceBodyAfterRelease, /personalization-ui-project-B\/AGENTS\.md/, 'stale old-root resolve must not overwrite the fresh projection')
+  assert.doesNotMatch(raceBodyAfterRelease, /personalization-ui-project-A\/AGENTS\.md/, 'stale old-root result must remain absent after release')
+  await racePage.close()
+
+  const conflictPage = await bounded('conflict newPage', browser.newPage({ viewport: { width: 900, height: 900 } }))
+  await bounded('conflict navigation', conflictPage.goto(`http://127.0.0.1:${port}/scripts/personalization-ui-fixture.html?conflict=1`, { waitUntil: 'networkidle', timeout: 10_000 }))
+  await bounded('conflict projection', conflictPage.getByLabel('Host instruction snapshot').waitFor({ state: 'visible', timeout: 10_000 }))
+  const conflictEditor = conflictPage.getByRole('textbox', { name: '全域自訂指令' })
+  await conflictEditor.fill('LOCAL_CONFLICT_DRAFT')
+  await conflictPage.evaluate(() => (window as unknown as { __personalizationFixtureControls: { bumpHostGlobal?: () => void } }).__personalizationFixtureControls.bumpHostGlobal?.())
+  await conflictPage.getByRole('button', { name: '重新掃描' }).click()
+  const conflictAlert = conflictPage.getByRole('alert', { name: 'Global instruction conflict' })
+  await conflictAlert.waitFor({ state: 'visible', timeout: 10_000 })
+  assert.match(await conflictAlert.innerText(), /HOST_EXTERNAL_GLOBAL/)
+  assert.match(await conflictAlert.innerText(), /LOCAL_CONFLICT_DRAFT/)
+  await conflictPage.getByRole('button', { name: '載入 Host 版本（捨棄本地草稿）' }).click()
+  assert.equal(await conflictEditor.inputValue(), 'HOST_EXTERNAL_GLOBAL', 'discard recovery must load the Host body')
+  await conflictEditor.fill('LOCAL_REBASE_DRAFT')
+  await conflictPage.evaluate(() => (window as unknown as { __personalizationFixtureControls: { bumpHostGlobal?: () => void } }).__personalizationFixtureControls.bumpHostGlobal?.())
+  await conflictPage.getByRole('button', { name: '重新掃描' }).click()
+  await conflictPage.getByRole('alert', { name: 'Global instruction conflict' }).waitFor({ state: 'visible', timeout: 10_000 })
+  await conflictPage.getByRole('button', { name: '以 Host revision 為基底保留草稿' }).click()
+  assert.equal(await conflictPage.getByRole('alert', { name: 'Global instruction conflict' }).count(), 0, 'rebase recovery clears the conflict panel without discarding draft')
+  const rebaseSave = conflictPage.getByRole('button', { name: '儲存 revision' })
+  await rebaseSave.click()
+  await conflictPage.getByText('已由 Host transaction commit。新的指令從下一個 Task run 生效。', { exact: true }).waitFor({ state: 'visible', timeout: 10_000 })
+  const rebased = await conflictPage.evaluate(async () => window.subagents?.piHost?.instructions?.get?.())
+  assert.equal(rebased?.instructions?.globalCustomInstructions, 'LOCAL_REBASE_DRAFT', 'rebased draft must save against the Host revision')
+  assert.ok((rebased?.instructions?.revision || 0) >= 15, 'rebased save must advance the committed revision')
+  await conflictPage.close()
   const degradedPage = await bounded('degraded newPage', browser.newPage({ viewport: { width: 280, height: 900 } }))
   await bounded('degraded navigation', degradedPage.goto(`http://127.0.0.1:${port}/scripts/personalization-ui-fixture.html?degraded=1`, { waitUntil: 'networkidle', timeout: 10_000 }))
   await bounded('degraded projection mount', degradedPage.getByLabel('Host instruction snapshot').waitFor({ state: 'visible', timeout: 10_000 }))

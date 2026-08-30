@@ -42,6 +42,12 @@ import { orchestrationFromAgent } from './runLifecycle.ts'
 import { resolveTurnTimeout } from './turnTimeout.ts'
 import { clampContinueFreshnessMs, isSnapshotFresh } from './autoContinueFreshness.ts'
 import { applyComposerApprovalHandoff } from './composerApprovalHandoff.ts'
+import {
+  nonCanonicalReviewAdmission,
+  type ReviewAdmissionSnapshot,
+  type ReviewRunnerKind,
+  type ReviewSnapshotRef,
+} from './reviewContract.ts'
 
 import { v4 as uuid } from 'uuid'
 import {
@@ -443,6 +449,64 @@ export async function evaluateBeforeRunHooks(
 
 // ── Phase 3 item 3: dispatch snapshot ─────────────────────────────
 
+async function admitRunReviewWorkspace(input: {
+  runId: string
+  threadId: string
+  projectRoot?: string
+  runnerKind: ReviewRunnerKind
+}): Promise<ReviewAdmissionSnapshot> {
+  const projectRoot = input.projectRoot?.trim()
+  if (!projectRoot) {
+    return nonCanonicalReviewAdmission(input.runId, input.runnerKind, 'Run Review project root is unavailable')
+  }
+  const admit = typeof window === 'undefined'
+    ? undefined
+    : window.subagents?.piHost?.review?.admit
+  if (!admit) {
+    return nonCanonicalReviewAdmission(input.runId, input.runnerKind, 'Pi Host Run Review bridge is unavailable')
+  }
+  try {
+    return (await admit({ ...input, projectRoot })).reviewAdmission
+  } catch (error) {
+    return nonCanonicalReviewAdmission(
+      input.runId,
+      input.runnerKind,
+      error instanceof Error ? error.message : 'Pi Host Run Review admission failed',
+    )
+  }
+}
+
+function reviewRunnerKind(runner: string): ReviewRunnerKind {
+  return executionKindForRunner(runner) === 'external' ? 'external' : 'builtin'
+}
+
+function reviewSettlementKindForFinalization(
+  agent: import('./types.ts').AgentState,
+  result: DispatchResult,
+): 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash' {
+  if (agent.interruptReason === 'timeout') return 'timeout'
+  if (agent.interruptReason) return 'cancelled'
+  if (result.status === 'failed' || result.error) return 'failed'
+  return 'completed'
+}
+
+async function finalizeRunReviewSnapshot(
+  admission: ReviewAdmissionSnapshot | undefined,
+  runId: string,
+  settlementKind: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash',
+): Promise<ReviewSnapshotRef | undefined> {
+  try {
+    const finalize = typeof window === 'undefined' ? undefined : window.subagents?.piHost?.review?.finalize
+    if (!finalize) throw new Error('Pi Host Run Review finalization bridge is unavailable')
+    return (await finalize({ ...(admission?.canonical && admission.snapshotId ? { snapshotId: admission.snapshotId } : { runId }), settlementKind })).reviewSnapshotRef
+  } catch {
+    // Review failure is visible but never rewrites task success/failure.
+    return admission?.canonical && admission.snapshotId
+      ? { snapshotId: admission.snapshotId, runId: admission.runId, status: 'failed', attributionFidelity: 'partial' }
+      : undefined
+  }
+}
+
 /**
  * Frozen fields for one adapter dispatch. Built once after admit; runDispatch
  * must not re-read capacity, materialize attachments, or invent a new runId.
@@ -458,6 +522,8 @@ export type RunDispatchSnapshot = {
   attachments: ChatAttachment[]
   /** Deep-cloned at admission; adapters must never re-read mutable Settings. */
   settings: LlmSettings
+  /** Host-frozen workspace identity and baseline captured once at admission. */
+  reviewAdmission: ReviewAdmissionSnapshot
   /** Full runtime overrides; always carries coordinator-owned run/thread identity. */
   overrides: RuntimeOverrides
 }
@@ -471,6 +537,7 @@ export function buildRunDispatchSnapshot(parts: {
   forceLoopType?: LoopType
   attachments?: ChatAttachment[]
   settings: LlmSettings
+  reviewAdmission: ReviewAdmissionSnapshot
   overrides: RuntimeOverrides
 }): RunDispatchSnapshot {
   const attachments =
@@ -488,6 +555,7 @@ export function buildRunDispatchSnapshot(parts: {
     forceLoopType,
     attachments: attachments.slice(),
     settings: snapshotRunSettings(parts.settings),
+    reviewAdmission: parts.reviewAdmission,
     overrides: {
       ...parts.overrides,
       runId: parts.runId,
@@ -525,6 +593,8 @@ export type FinalizeTaskRunInput = {
   sourceKind?: RunSourceKind
   projectRoot?: string
   settings: LlmSettings
+  /** Reuses admission evidence; settlement must never recalculate Git identity. */
+  reviewAdmission?: ReviewAdmissionSnapshot
   /** Present after a successful dispatchThreadTask return (including failed status). */
   dispatchResult?: DispatchResult
   onSettled?: (result: ExternalRunResult) => void | Promise<void>
@@ -916,6 +986,18 @@ async function runFinalizationSequence(
       threadId: tid,
       runId,
     }
+    const reviewSnapshotRef = await finalizeRunReviewSnapshot(input.reviewAdmission, runId, 'failed')
+    await pushEarlyFailureSummary({
+      thr,
+      tid,
+      runId,
+      objective,
+      finalAgent: failureAgent,
+      result: failResult,
+      projectRoot: input.projectRoot,
+      settings,
+      reviewSnapshotRef,
+    })
     await persistArtifactIndexForRun({
       threadId: tid,
       runId,
@@ -985,6 +1067,12 @@ async function runFinalizationSequence(
         }
       : storedAgent
   const postState = finalAgent.postState
+
+  const reviewSnapshotRef = await finalizeRunReviewSnapshot(
+    input.reviewAdmission,
+    runId,
+    reviewSettlementKindForFinalization(finalAgent, result),
+  )
 
   // 1) Thread summary / bubbles / plan
   if (postState?.status === 'failed') {
@@ -1071,6 +1159,7 @@ async function runFinalizationSequence(
       status: String(status),
       projectRoot: input.projectRoot,
       settings,
+      reviewSnapshotRef,
     })
   } catch {
     /* execution summary must not break the task lifecycle */
@@ -1436,6 +1525,58 @@ function buildResumeSummary(agent: import('./types.ts').AgentState): string {
   ].join('\n').trim()
 }
 
+async function pushEarlyFailureSummary(input: {
+  thr: ReturnType<typeof import('../store/threadStore.ts').useThreadStore.getState>
+  tid: string
+  runId: string
+  objective: string
+  finalAgent?: import('./types.ts').AgentState
+  result: DispatchResult
+  projectRoot?: string
+  settings: import('./types.ts').LlmSettings
+  reviewSnapshotRef?: ReviewSnapshotRef
+}): Promise<void> {
+  if (!input.finalAgent) return
+  try {
+    await pushRunProcessSummary({
+      thr: input.thr,
+      tid: input.tid,
+      runId: input.runId,
+      objective: input.objective,
+      finalAgent: input.finalAgent,
+      result: input.result,
+      status: 'failed',
+      projectRoot: input.projectRoot,
+      settings: input.settings,
+      reviewSnapshotRef: input.reviewSnapshotRef,
+    })
+  } catch {
+    /* review summary must not block early settlement */
+  }
+}
+
+async function legacySummaryDiff(input: {
+  reviewSnapshotRef?: ReviewSnapshotRef
+  producedFiles: Array<{ path: string }>
+  projectRoot?: string
+}): Promise<string | undefined> {
+  if (input.reviewSnapshotRef || input.producedFiles.length === 0) return undefined
+  try {
+    const { useProjectStore } = await import('../store/projectStore.ts')
+    const projectRoot = input.projectRoot || useProjectStore.getState().root || undefined
+    const diffResult = await window.subagents?.tools?.workspaceDiff?.(
+      input.producedFiles.map((file) => file.path),
+      projectRoot,
+    )
+    return diffResult?.ok && diffResult.diff.trim()
+      ? diffResult.diff.slice(0, 200_000)
+      : undefined
+  } catch {
+    /* Legacy diff is optional; it is never historical review authority. */
+    return undefined
+  }
+}
+
 async function pushRunProcessSummary(args: {
   thr: ReturnType<typeof import('../store/threadStore.ts').useThreadStore.getState>
   tid: string
@@ -1447,6 +1588,7 @@ async function pushRunProcessSummary(args: {
   projectRoot?: string
   /** The run's frozen settings — the only place user-stated model rates live. */
   settings?: import('./types.ts').LlmSettings
+  reviewSnapshotRef?: ReviewSnapshotRef
 }): Promise<void> {
   const { thr, tid, runId, finalAgent, result, status } = args
   const {
@@ -1477,22 +1619,11 @@ async function pushRunProcessSummary(args: {
     removed: row.removed,
   }))
   const producedFiles = projectProducedFiles(finalAgent.turnRecord)
-  let diff: string | undefined
-  if (producedFiles.length > 0) {
-    try {
-      const { useProjectStore } = await import('../store/projectStore.ts')
-      const projectRoot = args.projectRoot || useProjectStore.getState().root || undefined
-      const diffResult = await window.subagents?.tools?.workspaceDiff?.(
-        producedFiles.map((file) => file.path),
-        projectRoot,
-      )
-      if (diffResult?.ok && diffResult.diff.trim()) {
-        diff = diffResult.diff.slice(0, 200_000)
-      }
-    } catch {
-      /* Diff is an optional review aid; never fail the run summary. */
-    }
-  }
+  const diff = await legacySummaryDiff({
+    reviewSnapshotRef: args.reviewSnapshotRef,
+    producedFiles,
+    projectRoot: args.projectRoot,
+  })
   const plan = (thr.threads.find((thread) => thread.id === tid)?.runPlan || []).slice(0, 40)
   const subDesignBrief = useSubDesignStore.getState().findByThreadId(tid)
   const subDesignArtifact = subDesignBrief
@@ -1526,6 +1657,7 @@ async function pushRunProcessSummary(args: {
     maxIterations: settlement?.maxIterations,
     executionKind: settlement?.executionKind,
     interruptReason: finalAgent.interruptReason,
+    reviewSnapshotRef: args.reviewSnapshotRef,
     // Written only when something was actually measured; a runner that
     // reported nothing archives no figure rather than a zero.
     ...(usage.measuredSteps > 0 ? { tokens: usage.tokens.total } : {}),
@@ -1667,6 +1799,13 @@ async function persistArtifactIndexForRun(args: {
   }
 }
 
+function isUnexpectedQueuedDuplicate(
+  opts: ExternalRunOpts,
+  queued: { id: string } | undefined,
+): queued is { id: string } {
+  return Boolean(queued && !opts._fromQueue)
+}
+
 /**
  * Coordinate one Task run: admission → immutable dispatch snapshot → adapter → finalization.
  * This is the only lifecycle implementation behind the public runTask seam.
@@ -1726,7 +1865,7 @@ async function coordinateTaskRun(
   } = lifecycleHelpers
 
   const queuedDuplicate = listQueuedRuns().find((queued) => queued.runId === runId)
-  if (queuedDuplicate) {
+  if (isUnexpectedQueuedDuplicate(opts, queuedDuplicate)) {
     return {
       path: 'builtin',
       status: 'skipped',
@@ -2051,11 +2190,13 @@ async function coordinateTaskRun(
     objective,
     sourceKind: opts.sourceKind,
     scheduleJobId: opts.meta?.scheduleJobId,
+    onPersisted: opts._onAdmitted,
   })
 
   const settings = admissionSettings
   const thr = useThreadStore.getState()
   let boundThreadId = opts.reuseThreadId || ''
+  let reviewAdmission: ReviewAdmissionSnapshot | undefined
 
   try {
 
@@ -2302,6 +2443,25 @@ async function coordinateTaskRun(
         : undefined),
   }
 
+  // Freeze the conversation's effective workspace before hooks or outbound
+  // isolation can alter later execution paths. Settlement and recovery receive
+  // this same Host-authored object; renderer code never derives Git identity.
+  if (!overrides.projectRoot) {
+    const boundRoot = useThreadStore.getState().threads.find((thread) => thread.id === tid)?.projectRoot
+    overrides.projectRoot =
+      opts.projectRoot?.trim() ||
+      boundRoot?.trim() ||
+      (await import('../store/projectStore.ts')).useProjectStore.getState().root ||
+      undefined
+  }
+  if (overrides.projectRoot) useThreadStore.getState().setThreadProject(tid, overrides.projectRoot)
+  reviewAdmission = await admitRunReviewWorkspace({
+    runId,
+    threadId: tid,
+    projectRoot: overrides.projectRoot,
+    runnerKind: reviewRunnerKind(intendedRunner),
+  })
+
   // Coordinator owns beforeRun once: deny / append-context / log / notify
   const beforeRun = await evaluateBeforeRunHooks({
     settings,
@@ -2320,6 +2480,7 @@ async function coordinateTaskRun(
       sourceKind: opts.sourceKind,
       projectRoot: opts.projectRoot,
       settings,
+      reviewAdmission,
       onSettled: opts.onSettled,
       early: {
         error: `執行被 hook 政策拒絕：${beforeRun.denyReason}`,
@@ -2364,25 +2525,6 @@ async function coordinateTaskRun(
       /* non-fatal */
     }
   }
-
-  // Phase 3 item 3: freeze dispatch fields once; runDispatch only selects runner.
-  // Pin project root on the snapshot so later UI project switches cannot leak in.
-  //
-  // Order matters. An explicit root (a scheduler pinning its own project) wins;
-  // then the conversation's OWN binding, so a run started here cannot inherit
-  // whichever folder some other conversation last left in the global picker;
-  // the global root is only the default for a thread that has never been bound.
-  if (!overrides.projectRoot) {
-    const boundRoot = useThreadStore.getState().threads.find((thread) => thread.id === tid)?.projectRoot
-    overrides.projectRoot =
-      opts.projectRoot?.trim() ||
-      boundRoot?.trim() ||
-      (await import('../store/projectStore.ts')).useProjectStore.getState().root ||
-      undefined
-  }
-  // Whatever it resolved to is now this conversation's project, so the next run
-  // resolves the same way instead of falling back to the picker again.
-  if (overrides.projectRoot) useThreadStore.getState().setThreadProject(tid, overrides.projectRoot)
 
   // Migration is an admission precondition, not a Settings-page side effect.
   // Existing users therefore cannot run once with silently missing legacy
@@ -2483,6 +2625,7 @@ async function coordinateTaskRun(
           sourceKind: opts.sourceKind,
           projectRoot: opts.projectRoot,
           settings,
+          reviewAdmission,
           onSettled: opts.onSettled,
           early: {
             error: `出站資料閘門：${admission.reason}`,
@@ -2536,6 +2679,7 @@ async function coordinateTaskRun(
           sourceKind: opts.sourceKind,
           projectRoot: opts.projectRoot,
           settings,
+          reviewAdmission,
           onSettled: opts.onSettled,
           early: {
             error: `出站資料閘門：受控視圖準備例外（${e instanceof Error ? e.message : String(e)}）`,
@@ -2556,6 +2700,7 @@ async function coordinateTaskRun(
     attachments,
     settings,
     overrides,
+    reviewAdmission,
   })
 
   const result = await dispatchThreadTask(snapshot)
@@ -2566,6 +2711,7 @@ async function coordinateTaskRun(
     sourceKind: opts.sourceKind,
     projectRoot: snapshot.overrides.projectRoot || opts.projectRoot,
     settings,
+    reviewAdmission: snapshot.reviewAdmission,
     dispatchResult: result,
     onSettled: opts.onSettled,
   })
@@ -2581,6 +2727,7 @@ async function coordinateTaskRun(
       sourceKind: opts.sourceKind,
       projectRoot: opts.projectRoot,
       settings,
+      reviewAdmission,
       onSettled: opts.onSettled,
       early: {
         error: `執行失敗：${msg}`,

@@ -285,10 +285,11 @@ function TimelineActivityGroup({
   )
 }
 
-export function RunTimelineList({ rows }: { rows: readonly TimelineItem[] }) {
+export function RunTimelineList({ rows, hideReasoning = false }: { rows: readonly TimelineItem[]; hideReasoning?: boolean }) {
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set())
-  const entries = groupTimelineItems(rows)
+  const visibleRows = hideReasoning ? rows.filter((row) => row.kind !== 'reasoning') : rows
+  const entries = groupTimelineItems(visibleRows)
   const toggleRow = (id: string) => setExpandedRow((current) => (current === id ? null : id))
   const toggleGroup = (id: string) => setExpandedGroups((current) => {
     const next = new Set(current)

@@ -28,6 +28,7 @@ type Message = {
 
 const agentDir = await mkdtemp(join(tmpdir(), 'pi-qual-agent-'))
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-qual-state-'))
+const outboundPolicyDir = await mkdtemp(join(tmpdir(), 'pi-qual-outbound-policy-'))
 const workspace = await mkdtemp(join(tmpdir(), 'pi-qual-cwd-'))
 const skillsDir = join(agentDir, 'skills')
 await mkdir(skillsDir, { recursive: true })
@@ -66,6 +67,8 @@ let requests: string[] = []
 let pendingScript: { tool: string; args: Record<string, unknown> } | undefined
 let mutateSkillSourceDuringTurn = false
 let advertisedSnapshotRoot: string | undefined
+const advertisedSnapshotRoots: string[] = []
+let toolCallSequence = 0
 const sse = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`
 const chunk = (delta: unknown, finish: string | null) => sse({
   id: `qual-${requests.length}`,
@@ -92,6 +95,7 @@ const modelServer = createServer(async (request, response) => {
       const advertised = body.match(/<location>([^<]*deploy-checklist\/SKILL\.md)<\/location>/)?.[1]
       if (advertised) {
         advertisedSnapshotRoot = dirname(dirname(advertised))
+        advertisedSnapshotRoots.push(advertisedSnapshotRoot)
         const requestedPath = script.args.path === '__relative_resource__'
           ? advertised.replace(/SKILL\.md$/, 'references/check.md')
           : advertised
@@ -115,7 +119,7 @@ const modelServer = createServer(async (request, response) => {
     response.write(chunk({ role: 'assistant', content: '執行工具。' }, null))
     response.write(chunk({ tool_calls: [{
       index: 0,
-      id: `call_${script.tool}`,
+      id: `call_${script.tool}_${++toolCallSequence}`,
       type: 'function',
       function: { name: script.tool, arguments: JSON.stringify(script.args) },
     }] }, null))
@@ -154,7 +158,13 @@ await writeFile(join(agentDir, 'auth.json'), JSON.stringify({ loopback: { type: 
 await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'loopback', defaultModel: 'smoke-model', defaultThinkingLevel: 'off' }))
 
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
-  env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'), SUBAGENTS_PI_AGENT_DIR: agentDir, SUBAGENTS_PI_SKILLS_DIR: skillsDir },
+  env: {
+    ...process.env,
+    SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'),
+    SUBAGENTS_PI_AGENT_DIR: agentDir,
+    SUBAGENTS_PI_SKILLS_DIR: skillsDir,
+    SUBAGENTS_OUTBOUND_POLICY_DIR: outboundPolicyDir,
+  },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 const output = createInterface({ input: host.stdout })
@@ -264,7 +274,18 @@ try {
   })
   const reloadTurn = await waitFor(18)
   assert.equal(reloadTurn.error, undefined)
+  assert.equal(reloadTurn.result?.settlement, 'answered')
   assert.match(requests.at(-1) || '', /NEXT TURN BODY V2/, 'next turn sees the changed source through a new snapshot')
+  const reloadEntries = reloadTurn.result?.record?.entries || []
+  const reloadReadCall = reloadEntries.find((entry: any) => entry.kind === 'tool-call' && entry.tool === 'read')
+  assert.ok(reloadReadCall, 'reload turn records the native read call')
+  assert.equal(advertisedSnapshotRoots.length >= 2, true, 'reload turn discovers a fresh resource snapshot')
+  assert.equal(reloadReadCall?.args?.path, join(advertisedSnapshotRoots.at(-1)!, 'deploy-checklist', 'SKILL.md'))
+  const reloadReadResult = reloadEntries.find((entry: any) => entry.kind === 'tool-result' && entry.tool === 'read')
+  assert.ok(reloadReadResult, 'reload turn records the native read result')
+  assert.equal(reloadReadResult?.settlement, 'success')
+  assert.equal(reloadEntries.some((entry: any) => entry.kind === 'skill-context'), false,
+    'native read reload does not fabricate a Skill preflight context entry')
 
   pendingScript = { tool: 'read', args: { path: '__relative_resource__' } }
   send(19, 'turn/submit', {
@@ -294,19 +315,30 @@ try {
   assert.match(requests.at(-1) || '', /qualification page hit/, 'its result fed back into the conversation')
 
   // ── 5. Approvals cover packs like builtins: unattended denies fail-closed ──
+  // The approval-mode change forces a runtime replacement without changing
+  // the skill digest. The deterministic resource root must remain readable
+  // while the replacement is built and after the new runtime is live.
+  const sameDigestRoot = advertisedSnapshotRoots.at(-1)
+  assert.ok(sameDigestRoot, 'same-digest replacement has an advertised root')
+  await access(join(sameDigestRoot!, 'deploy-checklist', 'SKILL.md'))
+  pendingScript = { tool: 'message_send', args: { chatId: 'ops', text: 'hi' } }
   send(15, 'turn/submit', {
     sessionId,
     runId: 'qual-denial-run',
     cwd: workspace,
     prompt: '送出通知',
     preloadedCapabilities: ['messaging'],
-    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: true },
+    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: true, activeTools: ['message_send'] },
   })
-  pendingScript = { tool: 'message_send', args: { chatId: 'ops', text: 'hi' } }
   const denialTurn = await waitFor(15)
   assert.equal(denialTurn.result.settlement, 'answered')
+  assert.equal(advertisedSnapshotRoots.at(-1), sameDigestRoot, 'same-digest replacement reuses the resource root')
+  await access(join(sameDigestRoot!, 'deploy-checklist', 'SKILL.md'))
   const denyDecision = messages.find((message) => message.event === 'host/tool-decision' && message.payload?.tool === 'message_send' && message.payload?.decision === 'deny')
   assert.ok(denyDecision, 'the outbound denial was audited on the same channel as builtins')
+  const denialEntries = denialTurn.result?.record?.entries || []
+  const denialResult = denialEntries.find((entry: { kind: string; tool?: string }) => entry.kind === 'tool-result' && entry.tool === 'message_send')
+  assert.equal(denialResult?.settlement, 'denied', 'the approval denial is durable in the Turn Record')
 
   // ── 6. ADR-0047: builtin shell fails closed under Outbound Guard required ──
   pendingScript = { tool: 'bash', args: { command: `cat ${webUrl.replace('http://127.0.0.1', '/etc')}` } }
@@ -343,6 +375,32 @@ try {
   const deniedResult = qualResults.find((result: { tool: string; settlement: string }) => result.tool === 'message_send')
   assert.equal(deniedResult?.settlement, 'denied', 'denials persist as denials in the durable record')
 
+  // A failed replacement must not leave the retired same-digest root orphaned.
+  // The next valid admission must safely rematerialize and reuse that root.
+  send(151, 'turn/submit', {
+    sessionId,
+    runId: 'qual-runtime-construction-failure',
+    cwd: workspace,
+    prompt: '觸發 runtime 建構失敗',
+    profile: { provider: 'loopback', model: 'missing-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: true, activeTools: ['message_send'] },
+  })
+  const failedReplacement = await waitFor(151)
+  assert.equal(failedReplacement.result, undefined)
+  assert.equal(failedReplacement.error?.code, 'runtime_error')
+  await assert.rejects(access(join(sameDigestRoot!, 'deploy-checklist', 'SKILL.md')), /ENOENT/)
+  pendingScript = undefined
+  send(152, 'turn/submit', {
+    sessionId,
+    runId: 'qual-runtime-construction-retry',
+    cwd: workspace,
+    prompt: '重試 runtime',
+    profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: true, activeTools: ['message_send'] },
+  })
+  const retriedReplacement = await waitFor(152)
+  assert.equal(retriedReplacement.result?.settlement, 'answered')
+  assert.equal(advertisedSnapshotRoots.at(-1), sameDigestRoot, 'retry rematerializes the same-digest resource root')
+  await access(join(sameDigestRoot!, 'deploy-checklist', 'SKILL.md'))
+
   console.log('QUALIFICATION PASSED: listed=callable across the whole catalog, approvals cover packs, skills live through the loader, removals stay removed, records replay')
 } finally {
   if (host.exitCode === null) {
@@ -356,5 +414,6 @@ try {
   webServer.close()
   await rm(agentDir, { recursive: true, force: true })
   await rm(stateDir, { recursive: true, force: true })
+  await rm(outboundPolicyDir, { recursive: true, force: true })
   await rm(workspace, { recursive: true, force: true })
 }

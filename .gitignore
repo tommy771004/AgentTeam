@@ -53,3 +53,15 @@ test-results/
 .claude/*
 docs/ui/sample/*
 .subagents/memory/runs/*
+.scratch/codex-aligned-personalization-instructions/spec.md
+.scratch/codex-aligned-personalization-instructions/issues/11-external-cli-instruction-delivery-modes.md
+.scratch/codex-aligned-personalization-instructions/issues/13-contract-cleanup-ui-and-release-qualification.md
+.scratch/codex-aligned-personalization-instructions/qualification.md
+.scratch/codex-aligned-personalization-instructions/spec.md
+.scratch/codex-aligned-personalization-instructions/evidence/ui-audit-2026-08-30/01-personalization-desktop.jpg
+.scratch/codex-aligned-personalization-instructions/evidence/ui-audit-2026-08-30/01-personalization-desktop.png
+.scratch/codex-aligned-personalization-instructions/evidence/ui-audit-2026-08-30/02-personalization-narrow.jpg
+.scratch/codex-aligned-personalization-instructions/evidence/ui-audit-2026-08-30/03-personalization-conflict.jpg
+.scratch/codex-aligned-personalization-instructions/evidence/ui-audit-2026-08-30/04-personalization-narrow-final.jpg
+.scratch/codex-aligned-personalization-instructions/issues/11-external-cli-instruction-delivery-modes.md
+.scratch/codex-aligned-personalization-instructions/issues/13-contract-cleanup-ui-and-release-qualification.md

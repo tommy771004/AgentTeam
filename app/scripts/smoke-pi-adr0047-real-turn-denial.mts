@@ -18,7 +18,17 @@ type Message = {
 const agentDir = await mkdtemp(join(tmpdir(), 'pi-adr0047-agent-'))
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-adr0047-state-'))
 const workspace = await mkdtemp(join(tmpdir(), 'pi-adr0047-workspace-'))
+const outboundPolicyDir = await mkdtemp(join(tmpdir(), 'pi-adr0047-outbound-policy-'))
 await mkdir(join(agentDir, 'skills'), { recursive: true })
+const turnProfile = {
+  provider: 'loopback',
+  model: 'smoke-model',
+  thinkingLevel: 'off',
+  activeTools: ['bash'],
+  compaction: 'manual',
+  approvalMode: 'full',
+  unattended: false,
+} as const
 
 let pendingCall: { id: string; command: string } | undefined
 const sse = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`
@@ -73,34 +83,52 @@ const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-elec
     SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'),
     SUBAGENTS_PI_AGENT_DIR: agentDir,
     SUBAGENTS_PI_SKILLS_DIR: join(agentDir, 'skills'),
+    SUBAGENTS_OUTBOUND_POLICY_DIR: outboundPolicyDir,
   },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
 const output = createInterface({ input: host.stdout })
 const messages: Message[] = []
 output.on('line', (line) => messages.push(JSON.parse(line) as Message))
-const waitFor = async (id: number) => {
+const hostExited = new Promise<void>((resolveExit) => host.once('exit', () => resolveExit()))
+const waitFor = async (id: number, timeoutMs = 25_000) => {
+  const deadline = Date.now() + timeoutMs
   for (;;) {
     const found = messages.find((message) => message.id === id)
     if (found) return found
-    await Promise.race([
-      once(output, 'line'),
-      new Promise((_, reject) => {
-        const timer = setTimeout(() => reject(new Error(`timed out waiting for ${id}`)), 25_000)
-        timer.unref()
-      }),
-    ])
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) throw new Error(`timed out waiting for ${id}: ${JSON.stringify(messages.slice(-5))}`)
+    await new Promise<Array<unknown>>((resolveLine, reject) => {
+      let timer: NodeJS.Timeout
+      const onLine = (...value: Array<unknown>) => { clearTimeout(timer); output.off('line', onLine); resolveLine(value) }
+      timer = setTimeout(() => { output.off('line', onLine); reject(new Error(`timed out waiting for ${id}: ${JSON.stringify(messages.slice(-5))}`)) }, remaining)
+      output.once('line', onLine)
+    })
   }
 }
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => {
-  host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+  if (host.exitCode !== null || host.stdin.destroyed || host.stdin.writableEnded) return false
+  return host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 }
+let activeRunId: string | undefined
 
 try {
   send(1, 'initialize', { protocolVersion: 2 })
   assert.equal((await waitFor(1)).error, undefined)
   send(2, 'sessions/create')
   const sessionId = String((await waitFor(2)).result?.sessionId)
+
+  send(3, 'settings/update', turnProfile)
+  const settingsAck = await waitFor(3)
+  assert.equal(settingsAck.error, undefined, `settings/update failed: ${settingsAck.error?.message}`)
+  const acknowledgedSettings = settingsAck.result?.settings
+  assert.equal(acknowledgedSettings?.provider, turnProfile.provider)
+  assert.equal(acknowledgedSettings?.model, turnProfile.model)
+  assert.equal(acknowledgedSettings?.thinkingLevel, turnProfile.thinkingLevel)
+  assert.deepEqual(acknowledgedSettings?.activeTools, turnProfile.activeTools)
+  assert.equal(acknowledgedSettings?.compaction, turnProfile.compaction)
+  assert.equal(acknowledgedSettings?.approvalMode, turnProfile.approvalMode)
+  assert.equal(acknowledgedSettings?.unattended, turnProfile.unattended)
 
   const runId = 'adr0047-required-run'
   const callId = 'call_shell_required'
@@ -115,7 +143,8 @@ try {
   const expectsVerifiedShell = process.platform === 'darwin'
   const insideEffect = join(workspace, 'required-effect.txt')
   pendingCall = { id: callId, command: `printf executed > ${JSON.stringify(insideEffect)}` }
-  send(3, 'turn/submit', {
+  activeRunId = runId
+  send(4, 'turn/submit', {
     sessionId,
     runId,
     cwd: workspace,
@@ -128,16 +157,10 @@ try {
       outboundShellMode: 'required',
       viewRoot: workspace,
     },
-    profile: {
-      provider: 'loopback',
-      model: 'smoke-model',
-      thinkingLevel: 'off',
-      compaction: 'manual',
-      approvalMode: 'full',
-      unattended: false,
-    },
+    profile: turnProfile,
   })
-  const turn = await waitFor(3)
+  const turn = await waitFor(4)
+  activeRunId = undefined
   assert.equal(turn.error, undefined)
   assert.equal(turn.result?.settlement, 'answered')
   if (expectsVerifiedShell) {
@@ -224,19 +247,19 @@ try {
 
   const failClosedCases = [
     {
-      id: 4,
+      id: 5,
       runId: 'adr0047-missing-view-run',
       callId: 'call_shell_missing_view',
       contextPolicy: { outboundShellMode: 'required', shellIsolationVerified: true },
     },
     {
-      id: 5,
+      id: 6,
       runId: 'adr0047-malformed-isolation-run',
       callId: 'call_shell_malformed_isolation',
       contextPolicy: { outboundShellMode: 'required', viewRoot: unverifiableView, shellIsolationVerified: 'verified' },
     },
     {
-      id: 8,
+      id: 7,
       runId: 'adr0051-forged-isolation-run',
       callId: 'call_shell_forged_isolation',
       contextPolicy: {
@@ -254,6 +277,7 @@ try {
   for (const probe of failClosedCases) {
     const effect = join(workspace, `${probe.callId}.txt`)
     pendingCall = { id: probe.callId, command: `printf executed > ${JSON.stringify(effect)}` }
+    activeRunId = probe.runId
     send(probe.id, 'turn/submit', {
       sessionId,
       runId: probe.runId,
@@ -266,12 +290,10 @@ try {
         temporary: false,
         ...probe.contextPolicy,
       },
-      profile: {
-        provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off',
-        compaction: 'manual', approvalMode: 'full', unattended: false,
-      },
+      profile: turnProfile,
     })
     const probeTurn = await waitFor(probe.id)
+    activeRunId = undefined
     assert.equal(probeTurn.error, undefined)
     await assert.rejects(access(effect), `${probe.callId} must not execute`)
     const probeResult = probeTurn.result?.record?.entries?.find((entry: any) =>
@@ -282,11 +304,12 @@ try {
   // Optional keeps the lexical guard but says explicitly that it is degraded,
   // never a verified sandbox. Off bypasses that degraded shell posture.
   for (const probe of [
-    { id: 6, mode: 'optional', runId: 'adr0047-optional-run', callId: 'call_shell_optional', degraded: true },
-    { id: 7, mode: 'off', runId: 'adr0047-off-run', callId: 'call_shell_off', degraded: false },
+    { id: 8, mode: 'optional', runId: 'adr0047-optional-run', callId: 'call_shell_optional', degraded: true },
+    { id: 9, mode: 'off', runId: 'adr0047-off-run', callId: 'call_shell_off', degraded: false },
   ] as const) {
     const effect = join(workspace, `${probe.callId}.txt`)
     pendingCall = { id: probe.callId, command: `printf executed > ${JSON.stringify(effect)}` }
+    activeRunId = probe.runId
     send(probe.id, 'turn/submit', {
       sessionId,
       runId: probe.runId,
@@ -300,12 +323,10 @@ try {
         outboundShellMode: probe.mode,
         viewRoot: workspace,
       },
-      profile: {
-        provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off',
-        compaction: 'manual', approvalMode: 'full', unattended: false,
-      },
+      profile: turnProfile,
     })
     const probeTurn = await waitFor(probe.id)
+    activeRunId = undefined
     assert.equal(probeTurn.error, undefined)
     await access(effect)
     const probeEntries = probeTurn.result?.record?.entries || []
@@ -322,18 +343,29 @@ try {
     }
   }
 
+  assert.equal(messages.some((message) => message.event === 'host/approval-requested'), false,
+    'attended full shell posture should not request interactive approval')
+
   console.log('ADR-0047 real Pi turns prove required fail-closed, optional degraded, and off unrestricted shell posture')
 } finally {
+  if (activeRunId) {
+    send(90, 'turn/cancel', { runId: activeRunId })
+    await waitFor(90, 2_000).catch(() => undefined)
+  }
+  if (host.exitCode === null && !host.stdin.destroyed) host.stdin.end()
   if (host.exitCode === null) {
-    const exited = once(host, 'exit')
-    host.stdin.destroy()
-    host.kill('SIGKILL')
-    await exited
+    await Promise.race([hostExited, new Promise((resolveExit) => setTimeout(resolveExit, 4_000))])
+    if (host.exitCode === null) host.kill()
+    await Promise.race([hostExited, new Promise((resolveExit) => setTimeout(resolveExit, 2_000))])
+    if (host.exitCode === null) host.kill('SIGKILL')
   }
   output.close()
+  await new Promise<void>((resolveClose) => modelServer.close(() => resolveClose()))
   modelServer.closeAllConnections()
-  modelServer.close()
-  await rm(agentDir, { recursive: true, force: true })
-  await rm(stateDir, { recursive: true, force: true })
-  await rm(workspace, { recursive: true, force: true })
+  await Promise.all([
+    rm(agentDir, { recursive: true, force: true }),
+    rm(stateDir, { recursive: true, force: true }),
+    rm(workspace, { recursive: true, force: true }),
+    rm(outboundPolicyDir, { recursive: true, force: true }),
+  ])
 }

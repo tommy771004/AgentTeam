@@ -142,25 +142,3 @@ export function clearPiContinuationItems(sessionId: string, runId?: string): voi
   continuationItems.delete(sessionId)
 }
 
-/* ── Tool output store ───────────────────────────────────────────────── */
-
-export type PiStoredToolOutput = { id: string; tool: string; text: string; at: number }
-
-const MAX_STORED_OUTPUTS = 64
-
-/**
- * Full outputs of recent pack executions, so `tool_output_read` can page back
- * through something that was truncated in the model-visible content.
- */
-const storedOutputs: PiStoredToolOutput[] = []
-
-export function storePiToolOutput(tool: string, text: string): string {
-  const id = `out-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-  storedOutputs.push({ id, tool, text, at: Date.now() })
-  while (storedOutputs.length > MAX_STORED_OUTPUTS) storedOutputs.shift()
-  return id
-}
-
-export function readPiStoredOutput(id: string): PiStoredToolOutput | undefined {
-  return storedOutputs.find((output) => output.id === id)
-}

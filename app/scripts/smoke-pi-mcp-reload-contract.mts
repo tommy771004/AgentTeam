@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawn } from 'node:child_process'
 
-type Message = { id?: number; result?: Record<string, any>; error?: { code: string; message: string } }
+type Message = { id?: number; event?: string; payload?: Record<string, any>; result?: Record<string, any>; error?: { code: string; message: string } }
 type ModelRequest = { tools?: Array<{ function?: { name?: string; description?: string; parameters?: Record<string, unknown> } }>; messages?: unknown[] }
 
 const agentDir = await mkdtemp(join(tmpdir(), 'pi-mcp-reload-agent-'))
@@ -33,6 +33,15 @@ await Promise.all([
 
 const requests: ModelRequest[] = []
 const nativeName = 'mcp_reload-mcp_inspect-item'
+const turnProfile = {
+  provider: 'loopback',
+  model: 'smoke-model',
+  thinkingLevel: 'off',
+  activeTools: ['load_capability'],
+  approvalMode: 'full',
+  unattended: false,
+  compaction: 'manual',
+} as const
 const scripts: Array<{ name: string; args: Record<string, unknown> } | undefined> = [
   { name: 'load_capability', args: { id: 'mcp-bridge' } },
   { name: nativeName, args: { itemId: 'alpha' } },
@@ -79,21 +88,31 @@ const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-elec
 const output = createInterface({ input: host.stdout })
 const messages: Message[] = []
 output.on('line', (line) => messages.push(JSON.parse(line) as Message))
-const wait = async (id: number) => {
+const hostExited = new Promise<void>((resolveExit) => host.once('exit', () => resolveExit()))
+const wait = async (id: number, timeoutMs = 30_000) => {
+  const deadline = Date.now() + timeoutMs
   for (;;) {
     const found = messages.find((message) => message.id === id)
     if (found) return found
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) throw new Error(`timeout waiting for ${id}: ${JSON.stringify(messages.slice(-5))}`)
     await new Promise<Array<unknown>>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`timeout waiting for ${id}: ${JSON.stringify(messages.slice(-5))}`)), 30_000)
-      once(output, 'line').then((value) => { clearTimeout(timer); resolve(value) }, (error) => { clearTimeout(timer); reject(error) })
+      let timer: NodeJS.Timeout
+      const onLine = (...value: Array<unknown>) => { clearTimeout(timer); output.off('line', onLine); resolve(value) }
+      timer = setTimeout(() => { output.off('line', onLine); reject(new Error(`timeout waiting for ${id}: ${JSON.stringify(messages.slice(-5))}`)) }, remaining)
+      output.once('line', onLine)
     })
   }
 }
-const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+const send = (id: number, method: string, params: Record<string, unknown> = {}) => {
+  if (host.exitCode !== null || host.stdin.destroyed || host.stdin.writableEnded) return false
+  return host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+}
 const install = async (id: number, extension: Record<string, unknown>) => {
   send(id, 'extensions/install', extension)
   assert.equal((await wait(id)).error, undefined)
 }
+let activeRunId: string | undefined
 
 try {
   send(1, 'initialize', { protocolVersion: 2, capabilities: ['tool-contract-v1'] })
@@ -120,8 +139,22 @@ try {
     assert.match(String(entry?.reason), new RegExp(category))
   }
 
-  send(11, 'turn/submit', { sessionId, runId: 'mcp-reload-v1', cwd: workspace, prompt: 'Load and call v1.', profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false } })
-  const first = await wait(11)
+  send(11, 'settings/update', turnProfile)
+  const settingsAck = await wait(11)
+  assert.equal(settingsAck.error, undefined, `settings/update failed: ${settingsAck.error?.message}`)
+  const acknowledgedSettings = settingsAck.result?.settings
+  assert.equal(acknowledgedSettings?.provider, turnProfile.provider)
+  assert.equal(acknowledgedSettings?.model, turnProfile.model)
+  assert.equal(acknowledgedSettings?.thinkingLevel, turnProfile.thinkingLevel)
+  assert.deepEqual(acknowledgedSettings?.activeTools, turnProfile.activeTools)
+  assert.equal(acknowledgedSettings?.approvalMode, turnProfile.approvalMode)
+  assert.equal(acknowledgedSettings?.unattended, turnProfile.unattended)
+  assert.equal(acknowledgedSettings?.compaction, turnProfile.compaction)
+
+  activeRunId = 'mcp-reload-v1'
+  send(12, 'turn/submit', { sessionId, runId: activeRunId, cwd: workspace, prompt: 'Load and call v1.', profile: turnProfile })
+  const first = await wait(12)
+  activeRunId = undefined
   assert.equal(first.error, undefined)
   const v1Definition = requests[1]?.tools?.find((tool) => tool.function?.name === nativeName)?.function
   assert.equal(v1Definition?.description, 'Reload fixture v1')
@@ -131,15 +164,17 @@ try {
   const firstCall = first.result?.record?.entries?.find((entry: any) => entry.kind === 'tool-call' && entry.tool === nativeName)
   assert.ok(firstCall?.schemaDigest)
 
-  send(12, 'tools/list', { sessionId, requireContract: true })
-  const stale = (await wait(12)).result?.catalog?.find((entry: any) => entry.name === nativeName)
+  send(13, 'tools/list', { sessionId, requireContract: true })
+  const stale = (await wait(13)).result?.catalog?.find((entry: any) => entry.name === nativeName)
   assert.equal(stale?.available, false)
   assert.match(String(stale?.reason), /stale/)
 
-  send(13, 'extensions/reload', { id: 'reload-mcp' })
-  assert.equal((await wait(13)).error, undefined)
-  send(14, 'turn/submit', { sessionId, runId: 'mcp-reload-v2', cwd: workspace, prompt: 'Call v2.', profile: { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', approvalMode: 'full', unattended: false } })
-  const second = await wait(14)
+  send(14, 'extensions/reload', { id: 'reload-mcp' })
+  assert.equal((await wait(14)).error, undefined)
+  activeRunId = 'mcp-reload-v2'
+  send(15, 'turn/submit', { sessionId, runId: activeRunId, cwd: workspace, prompt: 'Call v2.', profile: turnProfile })
+  const second = await wait(15)
+  activeRunId = undefined
   assert.equal(second.error, undefined)
   const v2Definition = requests[3]?.tools?.find((tool) => tool.function?.name === nativeName)?.function
   assert.equal(v2Definition?.description, 'Reload fixture v2')
@@ -150,11 +185,27 @@ try {
   assert.ok(!requests[3]?.tools?.some((tool) => tool.function?.name === 'mcp_call' || tool.function?.name === 'mcp_list_tools'))
   assert.match(JSON.stringify(requests[4]?.messages), /count.*required|required.*count/, 'v2 native validation rejects the stale v1 argument shape')
   assert.match(JSON.stringify(requests[5]?.messages), /v2:inspect-item.*count/, 'v2 valid arguments reach the existing Host MCP transport')
+  assert.equal(messages.some((message) => message.event === 'host/approval-requested'), false, 'full attended MCP reload runs should not request interactive approval')
+  for (const record of [first.result?.record, second.result?.record]) {
+    const entries = record?.entries || []
+    const nativeEvidence = entries.filter((entry: any) => entry.kind === 'tool-evidence' && entry.tool === nativeName)
+    assert.ok(nativeEvidence.some((entry: any) => entry.phase === 'decision' && entry.decision === 'allow'), 'successful native calls carry Host allow evidence')
+  }
   console.log('MCP names are collision-safe; reload is next-turn only; native contracts own activation, validation, execution, and structured failure states')
 } finally {
-  host.stdin.end()
-  if (host.exitCode === null) await once(host, 'exit').catch(() => host.kill())
-  modelServer.close()
+  if (activeRunId) {
+    send(90, 'turn/cancel', { runId: activeRunId })
+    await wait(90, 2_000).catch(() => undefined)
+  }
+  if (host.exitCode === null && !host.stdin.destroyed) host.stdin.end()
+  if (host.exitCode === null) {
+    await Promise.race([hostExited, new Promise((resolveExit) => setTimeout(resolveExit, 4_000))])
+    if (host.exitCode === null) host.kill()
+    await Promise.race([hostExited, new Promise((resolveExit) => setTimeout(resolveExit, 2_000))])
+    if (host.exitCode === null) host.kill('SIGKILL')
+  }
+  output.close()
+  await new Promise<void>((resolveClose) => modelServer.close(() => resolveClose()))
   modelServer.closeAllConnections()
   await Promise.all([rm(agentDir, { recursive: true, force: true }), rm(stateDir, { recursive: true, force: true }), rm(workspace, { recursive: true, force: true })])
 }

@@ -5,7 +5,7 @@ import {
   grepWorkspaceFiles,
   type WorkspaceSearchResult,
 } from '../workspaceFs.ts'
-import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
+import { registerPiExtensionPack, type PiPackTool, type PiToolContext } from '../piToolHost.ts'
 import { WORKSPACE_TEXT_SEARCH_CAPABILITY_ID, workspaceTextSearchAvailability } from '../piWorkspaceTextSearchRuntime.ts'
 import { structuredFailure } from './packResults.ts'
 import { pagedText } from './utility.ts'
@@ -76,8 +76,8 @@ export function formatWorkspaceGlobContent(result: WorkspaceSearchResult): strin
   return [header, ...result.files].join('\n')
 }
 
-function pagedWorkspaceResult(text: string, result: WorkspaceSearchResult) {
-  const page = pagedText(text, WORKSPACE_SEARCH_PAGE_CHARS)
+function pagedWorkspaceResult(text: string, result: WorkspaceSearchResult, ctx: PiToolContext) {
+  const page = pagedText(text, WORKSPACE_SEARCH_PAGE_CHARS, ctx)
   return {
     content: page.content,
     details: {
@@ -127,7 +127,7 @@ const workspaceGrep: PiPackTool = {
       maxFiles: Number(args.maxFiles) || undefined,
     })
     if (!result.ok) return structuredFailure(result.error || 'workspace grep failed')
-    return pagedWorkspaceResult(formatWorkspaceGrepContent(result), result)
+    return pagedWorkspaceResult(formatWorkspaceGrepContent(result), result, ctx)
   },
 }
 
@@ -164,7 +164,7 @@ const workspaceGlob: PiPackTool = {
       maxFiles: Number(args.maxFiles) || undefined,
     })
     if (!result.ok) return structuredFailure(result.error || 'workspace glob failed')
-    return pagedWorkspaceResult(formatWorkspaceGlobContent(result), result)
+    return pagedWorkspaceResult(formatWorkspaceGlobContent(result), result, ctx)
   },
 }
 

@@ -166,9 +166,19 @@ try {
   const parentSessionId = String((await waitFor(2)).result?.sessionId)
   const profile = {
     provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off',
-    activeTools: [], approvalMode: 'full', unattended: false, compaction: 'manual',
+    activeTools: ['delegate_task', 'write'], approvalMode: 'full', unattended: false, compaction: 'manual',
   }
-  send(3, 'turn/submit', {
+  send(3, 'settings/update', profile)
+  const settings = await waitFor(3)
+  assert.equal(settings.error, undefined, JSON.stringify(settings))
+  assert.equal(settings.result?.settings?.provider, profile.provider)
+  assert.equal(settings.result?.settings?.model, profile.model)
+  assert.equal(settings.result?.settings?.thinkingLevel, profile.thinkingLevel)
+  assert.deepEqual(settings.result?.settings?.activeTools, profile.activeTools)
+  assert.equal(settings.result?.settings?.approvalMode, profile.approvalMode)
+  assert.equal(settings.result?.settings?.unattended, profile.unattended)
+  assert.equal(settings.result?.settings?.compaction, profile.compaction)
+  send(4, 'turn/submit', {
     sessionId: parentSessionId,
     runId: 'delegated-parent-run',
     cwd: workspace,
@@ -244,7 +254,7 @@ try {
     await waitFor(nextId++)
   }
   releaseParentStatus()
-  const parentResult = await waitFor(3)
+  const parentResult = await waitFor(4)
   assert.equal(parentResult.result?.workingState?.revision, 2)
   assert.deepEqual(parentResult.result?.workingState?.goals.map((goal: { status: string }) => goal.status), ['done', 'pending', 'pending'])
   const entries = turnRecordEntries({ version: TURN_RECORD_FORMAT_VERSION, entries: parentResult.result?.record?.entries || [] })

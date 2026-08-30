@@ -169,7 +169,7 @@ export const settingsInputCls =
   'w-full bg-inset border border-line focus:border-primary/35 rounded-control px-3 py-2 text-[13px] text-on-surface outline-none placeholder:text-outline/60'
 
 export const settingsBtnCls =
-  'px-3 py-1.5 rounded-control border border-line text-[12px] font-semibold text-on-surface-variant hover:bg-hover-2 hover:text-on-surface transition-colors'
+  'min-h-10 px-3 py-1.5 rounded-control border border-line text-[12px] font-semibold text-on-surface-variant outline-none hover:bg-hover-2 hover:text-on-surface focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 focus-visible:ring-offset-surface transition-colors disabled:cursor-not-allowed disabled:opacity-50'
 
 export const settingsBtnPrimaryCls =
-  'px-3 py-1.5 rounded-control border border-primary/30 text-[12px] font-semibold text-primary bg-primary/10 hover:bg-primary/15 transition-colors'
+  'min-h-10 px-3 py-1.5 rounded-control border border-primary/30 text-[12px] font-semibold text-primary bg-primary/10 outline-none hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 focus-visible:ring-offset-surface transition-colors disabled:cursor-not-allowed disabled:opacity-50'

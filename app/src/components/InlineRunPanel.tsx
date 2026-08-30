@@ -29,6 +29,7 @@ import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
 import { useWorkingStateProjectionStore } from '../store/workingStateProjectionStore'
 import { loopTypeZh } from '../i18n/zh'
 import type { AgentState, ExecutionStep } from '../agent/types'
+import type { ReviewTarget } from '../agent/reviewContract.ts'
 import { WorkingStateView } from './WorkingStateView'
 
 /**
@@ -281,14 +282,77 @@ function PanelSection({
   )
 }
 
+function RunPanelHeaderActions({
+  reviewSnapshotRef,
+  onOpenReview,
+  onOpenVerification,
+  onClose,
+}: {
+  reviewSnapshotRef?: { snapshotId: string }
+  onOpenReview?: (target: ReviewTarget) => void
+  onOpenVerification?: (snapshotId: string) => void
+  onClose?: () => void
+}) {
+  const [verificationStatus, setVerificationStatus] = useState<string>()
+  useEffect(() => {
+    const snapshotId = reviewSnapshotRef?.snapshotId
+    const list = window.subagents?.piHost?.review?.listVerifications
+    if (!snapshotId || !list) { setVerificationStatus(undefined); return }
+    let cancelled = false
+    void list(snapshotId).then(({ reviewVerifications }) => {
+      if (!cancelled) setVerificationStatus(reviewVerifications[0]?.status)
+    }).catch(() => { if (!cancelled) setVerificationStatus(undefined) })
+    return () => { cancelled = true }
+  }, [reviewSnapshotRef?.snapshotId])
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      {reviewSnapshotRef && onOpenReview ? (
+        <button
+          type="button"
+          onClick={() => onOpenReview({ kind: 'run-snapshot', snapshotId: reviewSnapshotRef.snapshotId })}
+          className="flex items-center gap-1 rounded-control px-2 py-1.5 text-[11px] text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          aria-label="開啟本次執行的審查快照"
+        >
+          <Icon name="difference" size={15} />審查
+        </button>
+      ) : null}
+      {reviewSnapshotRef && onOpenVerification ? (
+        <button
+          type="button"
+          onClick={() => onOpenVerification(reviewSnapshotRef.snapshotId)}
+          className="flex items-center gap-1 rounded-control px-2 py-1.5 text-[11px] text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          aria-label="開啟本次執行的驗證記錄"
+        >
+          <Icon name="fact_check" size={15} />驗證{verificationStatus ? ` · ${verificationStatus}` : ''}
+        </button>
+      ) : null}
+      {onClose ? (
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-control p-1.5 text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
+          title="收合面板"
+          aria-label="收合執行面板"
+        >
+          <Icon name="close" size={16} />
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
 export function InlineRunPanel({
   runId,
   threadId,
   onClose,
+  onOpenReview,
+  onOpenVerification,
 }: {
   runId: string
   threadId: string
   onClose?: () => void
+  onOpenReview?: (target: ReviewTarget) => void
+  onOpenVerification?: (snapshotId: string) => void
 }) {
   const [progressOpen, setProgressOpen] = useState(true)
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -312,6 +376,9 @@ export function InlineRunPanel({
   const persistedPlan = useThreadStore(
     (s) => s.threads.find((t) => t.id === threadId)?.runPlan || EMPTY_RUN_PLAN,
   )
+  const reviewSnapshotRef = useThreadStore((state) => state.threads
+    .find((thread) => thread.id === threadId)?.bubbles
+    .find((bubble) => bubble.role === 'run' && bubble.runSummary?.runId === runId)?.runSummary?.reviewSnapshotRef)
   const tasks = activity.tasks.length
     ? activity.tasks
     : persistedPlan.map((item) => ({
@@ -405,19 +472,12 @@ export function InlineRunPanel({
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {onClose ? (
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-control p-1.5 text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
-              title="收合面板"
-              aria-label="收合執行面板"
-            >
-              <Icon name="close" size={16} />
-            </button>
-          ) : null}
-        </div>
+        <RunPanelHeaderActions
+          reviewSnapshotRef={reviewSnapshotRef}
+          onOpenReview={onOpenReview}
+          onOpenVerification={onOpenVerification}
+          onClose={onClose}
+        />
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">

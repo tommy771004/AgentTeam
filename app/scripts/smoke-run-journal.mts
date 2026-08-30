@@ -148,10 +148,9 @@ const retained = JSON.parse(memory.getItem('subagents.runJournal.v1') || '{}')
 assert.ok(retained.entries.length <= 300)
 assert.equal(getJournalEntry('run', 'active-304')?.status, 'admitted')
 
-// Exercise the real queue drain boundary: the item is marked dispatching and
-// removed from persisted queue state before a deferred runner settles. A
-// fresh queue hydrate sees the stale copy plus interrupted marker and refuses
-// to replay it.
+// Exercise the real queue drain boundary: durable work must remain queued
+// until runTask has recorded the matching admitted owner. Once admission is
+// handed back synchronously, the item becomes dispatching and cannot replay.
 resetRunJournalForTests()
 resetRunQueueForTests()
 memory.setItem('subagents.runQueue.v1', JSON.stringify({ v: 1, items: { invalid: true } }))
@@ -165,15 +164,30 @@ assert.ok(queued)
 const staleQueuePayload = memory.getItem('subagents.runQueue.v1')
 let releaseRunner!: () => void
 let runnerStarted!: () => void
+let admitRunner!: () => void
 const started = new Promise<void>((resolve) => { runnerStarted = resolve })
 const release = new Promise<void>((resolve) => { releaseRunner = resolve })
-const draining = drainExternalRunQueue(async () => {
+const draining = drainExternalRunQueue(async (opts) => {
+  admitRunner = () => {
+    recordRunAdmitted({
+      runId: 'run-drain',
+      objective: 'deferred drain',
+      sourceKind: 'composer',
+      onPersisted: opts._onAdmitted,
+    })
+  }
   runnerStarted()
   await release
   return { path: 'builtin', status: 'success', threadId: null, runId: 'run-drain' }
 })
 await started
+assert.equal(getJournalEntry('queue', queued!.id)?.status, 'queued')
+assert.equal(JSON.parse(memory.getItem('subagents.runQueue.v1') || '{}').items.length, 1)
+assert.equal(getJournalEntry('run', 'run-drain'), undefined)
+admitRunner()
 assert.equal(getJournalEntry('queue', queued!.id)?.status, 'dispatching')
+assert.equal(getJournalEntry('run', 'run-drain')?.status, 'admitted')
+assert.equal(JSON.parse(memory.getItem('subagents.runQueue.v1') || '{}').items.length, 0)
 assert.ok(staleQueuePayload)
 memory.setItem('subagents.runQueue.v1', staleQueuePayload!)
 reconcileStartup()

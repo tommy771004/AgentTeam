@@ -64,7 +64,7 @@ await test('source drift guard pins the single Host gate and run_code re-entry',
 })
 
 await test('truncated paged output exposes its outputId to the model', () => {
-  const result = pagedText('abcdefghijklmnopqrstuvwxyz', 10)
+  const result = pagedText('abcdefghijklmnopqrstuvwxyz', 10, { sessionId: 'smoke', runId: 'run-paged-output', cwd: tmpdir() })
   const outputId = String(result.details.outputId || '')
   assert.ok(outputId)
   assert.match(result.content[0]?.text || '', new RegExp(outputId))
@@ -196,16 +196,41 @@ try {
   lines.on('line', (line) => {
     try { messages.push(JSON.parse(line) as Message) } catch { /* test reports timeout */ }
   })
-  const send = (id: number, method: string, params: Record<string, unknown> = {}) =>
-    host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
-  const wait = async (id: number) => {
+  const hostExited = new Promise<void>((resolveExit) => host.once('exit', () => resolveExit()))
+  const turnProfile = {
+    provider: 'loopback',
+    model: 'smoke-model',
+    thinkingLevel: 'off',
+    activeTools: [],
+    compaction: 'manual',
+    approvalMode: 'full',
+    unattended: false,
+  } as const
+  let activeRunId: string | undefined
+  const send = (id: number, method: string, params: Record<string, unknown> = {}) => {
+    if (host.exitCode !== null || host.stdin.destroyed || host.stdin.writableEnded) return false
+    return host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+  }
+  const wait = async (id: number, timeoutMs = 25_000) => {
+    const deadline = Date.now() + timeoutMs
     for (;;) {
       const found = messages.find((message) => message.id === id)
       if (found) return found
-      await Promise.race([
-        once(lines, 'line'),
-        new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout waiting for Host id ${id}`)), 15_000)),
-      ])
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) throw new Error(`timeout waiting for Host id ${id}: ${JSON.stringify(messages.slice(-5))}`)
+      await new Promise<void>((resolveLine, reject) => {
+        let timer: NodeJS.Timeout
+        const onLine = () => {
+          clearTimeout(timer)
+          lines.off('line', onLine)
+          resolveLine()
+        }
+        timer = setTimeout(() => {
+          lines.off('line', onLine)
+          reject(new Error(`timeout waiting for Host id ${id}: ${JSON.stringify(messages.slice(-5))}`))
+        }, remaining)
+        lines.once('line', onLine)
+      })
     }
   }
 
@@ -213,8 +238,17 @@ try {
     send(1, 'initialize', { protocolVersion: 4 })
     assert.equal((await wait(1)).error, undefined)
 
-    send(2, 'settings/update', { workspaceTextSearch: false })
-    assert.equal((await wait(2)).error, undefined)
+    send(2, 'settings/update', { ...turnProfile, workspaceTextSearch: false })
+    const offSettings = await wait(2)
+    assert.equal(offSettings.error, undefined)
+    assert.equal(offSettings.result?.settings?.provider, turnProfile.provider)
+    assert.equal(offSettings.result?.settings?.model, turnProfile.model)
+    assert.equal(offSettings.result?.settings?.thinkingLevel, turnProfile.thinkingLevel)
+    assert.deepEqual(offSettings.result?.settings?.activeTools, turnProfile.activeTools)
+    assert.equal(offSettings.result?.settings?.compaction, turnProfile.compaction)
+    assert.equal(offSettings.result?.settings?.approvalMode, turnProfile.approvalMode)
+    assert.equal(offSettings.result?.settings?.unattended, turnProfile.unattended)
+    assert.equal(offSettings.result?.settings?.workspaceTextSearch, false)
 
     send(3, 'tools/list', { cwd: workspace })
     const offCatalog = (await wait(3)).result?.catalog || []
@@ -236,8 +270,17 @@ try {
       assert.match(String(response.error?.message || ''), /工作區文字檢索/)
     })
 
-    send(6, 'settings/update', { workspaceTextSearch: true })
-    assert.equal((await wait(6)).error, undefined)
+    send(6, 'settings/update', { ...turnProfile, workspaceTextSearch: true })
+    const onSettings = await wait(6)
+    assert.equal(onSettings.error, undefined)
+    assert.equal(onSettings.result?.settings?.provider, turnProfile.provider)
+    assert.equal(onSettings.result?.settings?.model, turnProfile.model)
+    assert.equal(onSettings.result?.settings?.thinkingLevel, turnProfile.thinkingLevel)
+    assert.deepEqual(onSettings.result?.settings?.activeTools, turnProfile.activeTools)
+    assert.equal(onSettings.result?.settings?.compaction, turnProfile.compaction)
+    assert.equal(onSettings.result?.settings?.approvalMode, turnProfile.approvalMode)
+    assert.equal(onSettings.result?.settings?.unattended, turnProfile.unattended)
+    assert.equal(onSettings.result?.settings?.workspaceTextSearch, true)
 
     send(7, 'tools/list', { cwd: workspace })
     const onCatalog = (await wait(7)).result?.catalog || []
@@ -344,15 +387,20 @@ try {
       cwd: workspace,
       prompt: '建立搜尋工具 contract',
       preloadedCapabilities: ['workspace-text-search'],
+      // Do not pin activeTools here: this run tests capability preload and
+      // must keep run_code available for the nested call.
       profile: {
-        provider: 'loopback',
-        model: 'smoke-model',
-        thinkingLevel: 'off',
-        approvalMode: 'full',
-        unattended: false,
+        provider: turnProfile.provider,
+        model: turnProfile.model,
+        thinkingLevel: turnProfile.thinkingLevel,
+        compaction: turnProfile.compaction,
+        approvalMode: turnProfile.approvalMode,
+        unattended: turnProfile.unattended,
       },
     })
+    activeRunId = 'workspace-contract'
     assert.equal((await wait(16)).error, undefined)
+    activeRunId = undefined
     await test('run_code nested call executes workspace search inside an admitted ON run', () => {
       const nestedResult = messages.find((message) =>
         message.event === 'host/record-append'
@@ -361,6 +409,7 @@ try {
           entry.kind === 'tool-result'
           && entry.tool === 'workspace_glob'
           && entry.settlement === 'success'))
+      if (!nestedResult) console.error('DEBUG model requests', modelRequests.length, JSON.stringify(messages.filter((message) => message.payload?.runId === 'workspace-contract').slice(-5), null, 2))
       assert.ok(nestedResult, 'nested workspace_glob must record Host-issued success evidence')
       const codeResult = messages.find((message) =>
         message.event === 'host/turn-item'
@@ -380,22 +429,35 @@ try {
       cwd: workspace,
       prompt: '找出 needle 的檔案與行號',
       preloadedCapabilities: ['workspace-text-search'],
+      // Keep the profile open so the preloaded capability is model-visible.
       profile: {
-        provider: 'loopback',
-        model: 'smoke-model',
-        thinkingLevel: 'off',
-        approvalMode: 'full',
-        unattended: false,
+        provider: turnProfile.provider,
+        model: turnProfile.model,
+        thinkingLevel: turnProfile.thinkingLevel,
+        compaction: turnProfile.compaction,
+        approvalMode: turnProfile.approvalMode,
+        unattended: turnProfile.unattended,
       },
     })
+    activeRunId = 'workspace-model-visible'
     assert.equal((await wait(17)).error, undefined)
+    activeRunId = undefined
     await test('workspace_grep path, line, and snippet reach the model context', () => {
       const serialized = modelRequests.map((request) => JSON.stringify(request)).join('\n')
       assert.match(serialized, /src\/answer\.ts:1[^\n]*export const needle = 42/)
     })
 
     send(18, 'settings/update', { workspaceTextSearch: false })
-    assert.equal((await wait(18)).error, undefined)
+    const offAgain = await wait(18)
+    assert.equal(offAgain.error, undefined)
+    assert.equal(offAgain.result?.settings?.provider, turnProfile.provider)
+    assert.equal(offAgain.result?.settings?.model, turnProfile.model)
+    assert.equal(offAgain.result?.settings?.thinkingLevel, turnProfile.thinkingLevel)
+    assert.deepEqual(offAgain.result?.settings?.activeTools, turnProfile.activeTools)
+    assert.equal(offAgain.result?.settings?.compaction, turnProfile.compaction)
+    assert.equal(offAgain.result?.settings?.approvalMode, turnProfile.approvalMode)
+    assert.equal(offAgain.result?.settings?.unattended, turnProfile.unattended)
+    assert.equal(offAgain.result?.settings?.workspaceTextSearch, false)
     send(19, 'tools/code', {
       cwd: workspace,
       sessionId,
@@ -409,11 +471,23 @@ try {
       assert.equal(response.result?.settlement, 'failed')
       assert.match(String(response.result?.content?.[0]?.text || ''), /工作區文字檢索|workspace/i)
     })
+    assert.equal(messages.some((message) => message.event === 'host/approval-requested'), false,
+      'workspace search turns must not request approval with the acknowledged profile')
   } finally {
-    host.stdin.end()
-    if (host.exitCode === null) await once(host, 'exit').catch(() => host.kill())
+    if (activeRunId) {
+      send(90, 'turn/cancel', { runId: activeRunId })
+      await wait(90, 2_000).catch(() => undefined)
+    }
+    if (host.exitCode === null && !host.stdin.destroyed) host.stdin.end()
+    if (host.exitCode === null) {
+      await Promise.race([hostExited, new Promise((resolveExit) => setTimeout(resolveExit, 4_000))])
+      if (host.exitCode === null) host.kill()
+      await Promise.race([hostExited, new Promise((resolveExit) => setTimeout(resolveExit, 2_000))])
+      if (host.exitCode === null) host.kill('SIGKILL')
+    }
     lines.close()
     await new Promise<void>((done) => modelServer.close(() => done()))
+    modelServer.closeAllConnections()
     await rm(stateDir, { recursive: true, force: true })
     await rm(agentDir, { recursive: true, force: true })
   }

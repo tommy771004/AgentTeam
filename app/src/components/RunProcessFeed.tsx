@@ -166,7 +166,6 @@ export function RunProcessFeed({
   const activityActive = activity?.active || false
   const startedAt = activity?.startedAt ?? 0
   const events = activity?.events ?? EMPTY_EVENTS
-  const thought = activity?.thought || ''
   const draftText = activity?.draftText || ''
   const statusLine = activity?.statusLine || ''
   const activityPhase = activity?.phase || 'starting'
@@ -176,16 +175,12 @@ export function RunProcessFeed({
   const recordTotal = activity?.recordTotal ?? 0
   const reattaching = activity?.reattaching ?? false
   const reattachGap = activity?.reattachGap ?? null
-  // Keep reasoning compact by default; raw streamed thought remains
-  // available for inspection without pushing the answer below the fold.
-  const [thoughtOpen, setThoughtOpen] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [processOpen, setProcessOpen] = useState(true)
 
   useEffect(() => {
     // Each submitted prompt starts with the compact run trace available. The
     // user's previous disclosure choice must not hide the next run's status.
-    setThoughtOpen(false)
     setExpanded(null)
     setProcessOpen(true)
   }, [runId])
@@ -524,9 +519,9 @@ export function RunProcessFeed({
 
       <ExecutionStepsProgress tasks={tasks} />
 
-      {/* Codex-style conversation stream: narration, reasoning and tool calls
-          remain visible in one sequence. Only each row's detail is disclosed;
-          collapsing run diagnostics must not reorder or hide the conversation. */}
+      {/* The task conversation shows narration and actions. Reasoning remains
+          in the Host Turn Record for Trajectory/audit views, but is not exposed
+          as conversational content. */}
       {hasRecordTimeline ? (
         <section
           aria-label="執行時間軸"
@@ -539,7 +534,7 @@ export function RunProcessFeed({
             error={olderError}
             onLoad={() => { void loadOlderRecordEntries() }}
           />
-          <RunTimelineList rows={recordTimeline} />
+          <RunTimelineList rows={recordTimeline} hideReasoning />
         </section>
       ) : null}
 
@@ -606,32 +601,6 @@ export function RunProcessFeed({
               {interactionStatus ? <div className="text-[11px] text-ink-3">{interactionStatus}</div> : null}
             </div>
           ) : null}
-          {/* Reasoning is an optional detail, not a competing second answer.
-              Only on the fallback path: a run with a Turn Record shows its
-              thinking inside the timeline above, in the place it happened. */}
-          {!hasRecordTimeline && thought.trim() ? (
-            <div className="agent-process-disclosure">
-              <button
-                type="button"
-                aria-expanded={thoughtOpen}
-                className="agent-process-toggle flex items-center gap-1.5 text-[12.5px] text-ink-2"
-                onClick={() => setThoughtOpen((v) => !v)}
-              >
-                <Icon name="auto_awesome" size={15} className="text-ink-3" />
-                <span className="font-medium">推理摘要</span>
-                <span className="text-[10px] text-ink-3">
-                  {thought.length.toLocaleString()} 字 · {thoughtOpen ? '收合內容' : '檢視內容'}
-                </span>
-                <Icon name={thoughtOpen ? 'expand_less' : 'expand_more'} size={14} className="ml-0.5 text-ink-3" />
-              </button>
-              <Reveal open={thoughtOpen}>
-                <pre className="agent-process-detail mt-1 max-h-36 overflow-y-auto whitespace-pre-wrap text-[12px] leading-relaxed text-ink-2 font-[family-name:var(--font-mono)] custom-scrollbar">
-                  {thought}
-                </pre>
-              </Reveal>
-            </div>
-          ) : null}
-
           {/* Consecutive read/search parts become one compact context group.
               This is the fallback trace, for a runner that publishes no Turn
               Record; the timeline above owns the Pi path and this must never
