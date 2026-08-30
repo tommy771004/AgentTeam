@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { lstat, readlink } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import type { ReviewAdmissionSnapshot, ReviewFileManifestEntry, ReviewWorkspaceBaseline } from '../src/agent/reviewContract.ts'
 import type { ReviewArtifactFinalizeInput } from './reviewArtifactStore.ts'
@@ -27,6 +26,8 @@ export type ReviewSnapshotCaptureInput = {
   contaminationReasons?: string[]
   settlementKind?: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash'
   capturedAt?: string
+  /** Deterministic qualification override; protocol callers never receive this field. */
+  qualificationLimits?: { payloadBytes: number; totalBytes: number }
 }
 
 export type ReviewSnapshotCaptureResult = ReviewArtifactFinalizeInput & {
@@ -37,12 +38,11 @@ function hash(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-async function git(cwd: string, args: string[], acceptOne = false): Promise<string> {
+async function git(cwd: string, args: string[]): Promise<string> {
   try {
     return (await exec('git', ['-C', cwd, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })).stdout
   } catch (error) {
     const failure = error as { code?: number; stdout?: string; stderr?: string }
-    if (acceptOne && failure.code === 1) return failure.stdout || ''
     throw new Error((failure.stderr || `git ${args[0]} failed`).trim())
   }
 }
@@ -52,6 +52,7 @@ function splitZero(value: string): string[] {
 }
 
 type ChangedPath = { status: ReviewFileManifestEntry['status']; path: string; oldPath?: string }
+type FileStat = { additions?: number; removals?: number; binary: boolean }
 
 function parseNameStatus(value: string): ChangedPath[] {
   const fields = splitZero(value)
@@ -105,32 +106,9 @@ async function treeMode(cwd: string, ref: string, path: string): Promise<string 
   return line ? line.split(/\s+/, 1)[0] : undefined
 }
 
-async function currentMode(cwd: string, path: string, untracked = false): Promise<string | undefined> {
-  try {
-    const info = await lstat(`${cwd}/${path}`)
-    if (info.isSymbolicLink()) return '120000'
-    if (info.isDirectory() && !untracked) {
-      const line = (await git(cwd, ['ls-files', '-s', '--', path])).trim()
-      if (line) return line.split(/\s+/, 1)[0]
-    }
-    return info.mode & 0o111 ? '100755' : '100644'
-  } catch {
-    return undefined
-  }
-}
-
-async function filePatch(cwd: string, baseline: string, change: ChangedPath): Promise<string> {
+async function filePatch(cwd: string, baseline: string, settlement: string, change: ChangedPath): Promise<string> {
   const paths = change.oldPath ? [change.oldPath, change.path] : [change.path]
-  return git(cwd, ['diff', '--binary', '--no-ext-diff', '--find-renames', '--find-copies', baseline, '--', ...paths])
-}
-
-async function untrackedPatch(cwd: string, path: string): Promise<string> {
-  const mode = await currentMode(cwd, path, true)
-  if (mode === '120000') {
-    const target = await readlink(`${cwd}/${path}`)
-    return `diff --git a/${path} b/${path}\nnew file mode 120000\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1 @@\n+${target}\n\\ No newline at end of file\n`
-  }
-  return git(cwd, ['diff', '--no-index', '--binary', '--no-ext-diff', '--', '/dev/null', path], true)
+  return git(cwd, ['diff', '--binary', '--no-ext-diff', '--find-renames', '--find-copies', baseline, settlement, '--', ...paths])
 }
 
 function normalizedPathSet(mutations: TrustedReviewMutation[] | undefined, runId: string): Set<string> {
@@ -167,6 +145,93 @@ function decideFidelity(input: {
   }
   if (!trustedCoverage && input.changedPaths.length > 0) diagnostics.push('changes-not-fully-covered-by-host-mutation-evidence')
   return { fidelity: input.contaminationReasons.includes('capture-incomplete') ? 'partial' : 'shared', diagnostics }
+}
+
+async function captureChangedFiles(
+  cwd: string,
+  baselineTree: string,
+  settlementTree: string,
+  changes: ChangedPath[],
+  stats: Map<string, FileStat>,
+  limits: { payloadBytes: number; totalBytes: number },
+): Promise<{ manifest: ReviewFileManifestEntry[]; payloads: ReviewArtifactFinalizeInput['payloads']; partial: boolean; diagnostics: string[] }> {
+  const manifest: ReviewFileManifestEntry[] = []
+  const payloads: ReviewArtifactFinalizeInput['payloads'] = []
+  const diagnostics: string[] = []
+  let totalPayloadBytes = 0
+  let partial = false
+  for (const change of changes) {
+    let patch = await filePatch(cwd, baselineTree, settlementTree, change)
+    const stat = stats.get(change.path) || { binary: /GIT binary patch|Binary files/.test(patch) }
+    const manifestEntry = {
+      path: change.path,
+      ...(change.oldPath ? { oldPath: change.oldPath } : {}),
+      status: change.status,
+      oldMode: change.status === 'untracked' ? undefined : await treeMode(cwd, baselineTree, change.oldPath || change.path),
+      newMode: change.status === 'deleted' ? undefined : await treeMode(cwd, settlementTree, change.path),
+      binary: stat.binary,
+      ...(stat.additions === undefined ? {} : { additions: stat.additions }),
+      ...(stat.removals === undefined ? {} : { removals: stat.removals }),
+    }
+    const patchBytes = Buffer.byteLength(patch, 'utf8')
+    if (patchBytes > limits.payloadBytes) {
+      partial = true
+      patch = Buffer.from(patch, 'utf8').subarray(0, limits.payloadBytes).toString('utf8')
+      diagnostics.push(`payload-clipped:${change.path}`)
+    }
+    const boundedBytes = Buffer.byteLength(patch, 'utf8')
+    if (totalPayloadBytes + boundedBytes > limits.totalBytes) {
+      partial = true
+      diagnostics.push(`payload-omitted:${change.path}:${boundedBytes}`)
+      manifest.push(manifestEntry)
+      continue
+    }
+    totalPayloadBytes += boundedBytes
+    const payloadId = `patch_${hash(`${change.oldPath || ''}\0${change.path}\0${patch}`).slice(0, 32)}`
+    payloads.push({ payloadId, content: patch })
+    manifest.push({ ...manifestEntry, payloadRef: payloadId })
+  }
+  return { manifest, payloads, partial, diagnostics }
+}
+
+async function captureGitReview(
+  input: ReviewSnapshotCaptureInput,
+  cwd: string,
+  baseline: ReviewWorkspaceBaseline,
+  settlement: ReviewWorkspaceBaseline,
+): Promise<ReviewSnapshotCaptureResult> {
+  if (!baseline.workingTree || !settlement.workingTree) throw new Error('Working-tree baseline is unavailable')
+  const [nameStatus, numstat, untrackedValue] = await Promise.all([
+    git(cwd, ['diff', '--name-status', '-z', '--find-renames', '--find-copies', baseline.workingTree, settlement.workingTree, '--']),
+    git(cwd, ['diff', '--numstat', '-z', '--find-renames', '--find-copies', baseline.workingTree, settlement.workingTree, '--']),
+    git(cwd, ['ls-files', '--others', '--exclude-standard', '-z']),
+  ])
+  const untracked = new Set(splitZero(untrackedValue))
+  const changes = parseNameStatus(nameStatus)
+    .map((change) => change.status === 'added' && untracked.has(change.path) ? { ...change, status: 'untracked' as const } : change)
+  const limits = input.qualificationLimits || { payloadBytes: MAX_REVIEW_PAYLOAD_BYTES, totalBytes: MAX_REVIEW_TOTAL_BYTES }
+  const captured = await captureChangedFiles(cwd, baseline.workingTree, settlement.workingTree, changes, parseNumstat(numstat), limits)
+  const changedPaths = captured.manifest.flatMap((entry) => [entry.path, ...(entry.oldPath ? [entry.oldPath] : [])])
+  const workspace = input.admission.workspace!
+  const fidelity = decideFidelity({
+    runnerKind: input.admission.runnerKind,
+    isolatedWorktree: workspace.repoRoot !== undefined && workspace.worktreeRoot !== workspace.repoRoot,
+    headChanged: settlement.head !== baseline.head,
+    activeWorkspaceRuns: input.activeWorkspaceRuns || 1,
+    contaminationReasons: [...new Set(input.contaminationReasons || [])],
+    changedPaths,
+    trustedPaths: normalizedPathSet(input.trustedMutations, input.admission.runId),
+  })
+  const partial = captured.partial || fidelity.fidelity === 'partial'
+  return {
+    snapshotId: input.admission.snapshotId,
+    status: partial ? 'partial' : 'ready',
+    attributionFidelity: captured.partial ? 'partial' : fidelity.fidelity,
+    settlement,
+    manifest: captured.manifest,
+    payloads: captured.payloads,
+    diagnostics: [...fidelity.diagnostics, ...captured.diagnostics, ...(captured.partial ? ['capture-incomplete'] : []), `settlement:${input.settlementKind || 'completed'}`],
+  }
 }
 
 /** Capture an immutable, Host-authored settlement snapshot without consulting model claims. */
@@ -217,76 +282,8 @@ export async function captureRunReviewSnapshot(input: ReviewSnapshotCaptureInput
     }
   }
 
-  const cwd = workspace.worktreeRoot
   try {
-    const [nameStatus, numstat, untrackedValue] = await Promise.all([
-      git(cwd, ['diff', '--name-status', '-z', '--find-renames', '--find-copies', baseline.head, '--']),
-      git(cwd, ['diff', '--numstat', '-z', '--find-renames', '--find-copies', baseline.head, '--']),
-      git(cwd, ['ls-files', '--others', '--exclude-standard', '-z']),
-    ])
-    const changes = parseNameStatus(nameStatus)
-    for (const path of splitZero(untrackedValue)) changes.push({ status: 'untracked', path })
-    const stats = parseNumstat(numstat)
-    const manifest: ReviewFileManifestEntry[] = []
-    const payloads: ReviewArtifactFinalizeInput['payloads'] = []
-    let totalPayloadBytes = 0
-    let capturePartial = false
-    const captureDiagnostics: string[] = []
-    for (const change of changes) {
-      let patch = change.status === 'untracked'
-        ? await untrackedPatch(cwd, change.path)
-        : await filePatch(cwd, baseline.head, change)
-      const patchBytes = Buffer.byteLength(patch, 'utf8')
-      if (patchBytes > MAX_REVIEW_PAYLOAD_BYTES) {
-        capturePartial = true
-        patch = Buffer.from(patch, 'utf8').subarray(0, MAX_REVIEW_PAYLOAD_BYTES).toString('utf8')
-      }
-      const boundedBytes = Buffer.byteLength(patch, 'utf8')
-      if (totalPayloadBytes + boundedBytes > MAX_REVIEW_TOTAL_BYTES) {
-        capturePartial = true
-        captureDiagnostics.push(`payload-omitted:${change.path}`)
-        continue
-      }
-      totalPayloadBytes += boundedBytes
-      if (patchBytes > MAX_REVIEW_PAYLOAD_BYTES) {
-        // Keep the omission reason in the durable projection; a clipped patch
-        // must never be presented as a complete historical file.
-        captureDiagnostics.push(`payload-clipped:${change.path}`)
-      }
-      const payloadId = `patch_${hash(`${change.oldPath || ''}\0${change.path}\0${patch}`).slice(0, 32)}`
-      payloads.push({ payloadId, content: patch })
-      const stat = stats.get(change.path) || { binary: /GIT binary patch|Binary files/.test(patch) }
-      manifest.push({
-        path: change.path,
-        ...(change.oldPath ? { oldPath: change.oldPath } : {}),
-        status: change.status,
-        oldMode: change.status === 'untracked' ? undefined : await treeMode(cwd, baseline.head, change.oldPath || change.path),
-        newMode: change.status === 'deleted' ? undefined : await currentMode(cwd, change.path, change.status === 'untracked'),
-        binary: stat.binary,
-        ...(stat.additions === undefined ? {} : { additions: stat.additions }),
-        ...(stat.removals === undefined ? {} : { removals: stat.removals }),
-        payloadRef: payloadId,
-      })
-    }
-    const changedPaths = manifest.flatMap((entry) => [entry.path, ...(entry.oldPath ? [entry.oldPath] : [])])
-    const fidelity = decideFidelity({
-      runnerKind: input.admission.runnerKind,
-      isolatedWorktree: workspace.repoRoot !== undefined && workspace.worktreeRoot !== workspace.repoRoot,
-      headChanged: settlement.head !== baseline.head,
-      activeWorkspaceRuns: input.activeWorkspaceRuns || 1,
-      contaminationReasons: [...new Set(input.contaminationReasons || [])],
-      changedPaths,
-      trustedPaths: normalizedPathSet(input.trustedMutations, input.admission.runId),
-    })
-    return {
-      snapshotId: input.admission.snapshotId,
-      status: capturePartial || fidelity.fidelity === 'partial' ? 'partial' : 'ready',
-      attributionFidelity: capturePartial ? 'partial' : fidelity.fidelity,
-      settlement,
-      manifest,
-      payloads,
-      diagnostics: [...fidelity.diagnostics, ...captureDiagnostics, ...(capturePartial ? ['capture-incomplete'] : []), `settlement:${input.settlementKind || 'completed'}`],
-    }
+    return await captureGitReview(input, workspace.worktreeRoot, baseline, settlement)
   } catch (error) {
     return {
       snapshotId: input.admission.snapshotId,

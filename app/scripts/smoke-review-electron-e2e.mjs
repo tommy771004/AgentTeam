@@ -32,6 +32,9 @@ const env = {
   ...process.env,
   SUBAGENTS_PI_HOST_E2E_USER_DATA_DIR: userDataDir,
   SUBAGENTS_PI_HOST_STATE_PATH: path.join(userDataDir, 'pi-host-state.json'),
+  SUBAGENTS_PI_AGENT_DIR: path.join(userDataDir, 'pi-agent'),
+  SUBAGENTS_PI_NATIVE_AGENT_DIR: path.join(userDataDir, 'empty-native-agent'),
+  SUBAGENTS_PI_SYNC_CLI_OAUTH: 'true',
   SUBAGENTS_REVIEW_ARTIFACT_DB_PATH: path.join(userDataDir, 'review-artifacts.sqlite'),
   SUBAGENTS_REVIEW_STATE_DB_PATH: path.join(userDataDir, 'review-state.sqlite'),
   SUBAGENTS_REVIEW_VERIFICATION_DB_PATH: path.join(userDataDir, 'review-verification.sqlite'),
@@ -53,6 +56,27 @@ async function reviewCall(page, name, ...args) {
   }, { name, args })
 }
 
+async function reloadShippedPage(page) {
+  const reloadUrl = page.url()
+  const target = reloadUrl.startsWith('file:') ? fileURLToPath(reloadUrl) : undefined
+  let lastError
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (target && !fs.existsSync(target)) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      continue
+    }
+    try {
+      await page.reload()
+      return
+    } catch (error) {
+      lastError = error
+      if (!String(error).includes('ERR_FILE_NOT_FOUND')) throw error
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  }
+  throw new Error(`Electron reload target did not stabilize: ${reloadUrl}; ${String(lastError || 'file missing')}`)
+}
+
 let running
 try {
   running = await launch()
@@ -64,18 +88,33 @@ try {
       const result = await page.evaluate(async ({ projectRoot }) => {
         const session = await window.subagents.piHost.sessions.create('Review builtin qualification', 'thread_review_e2e')
         const current = await window.subagents.piHost.settings.get()
-        const turn = await window.subagents.piHost.turn.submit({
-          sessionId: session.sessionId,
-          runId: 'run_builtin_a',
-          cwd: projectRoot,
-          prompt: 'Use the write tool now. Create builtin-review-proof.txt in the current workspace with exactly this single line: builtin review qualification passed. Do not merely describe the action; verify the file exists before finishing.',
-          profile: { ...current.settings, approvalMode: 'full', unattended: true, activeTools: ['write'] },
-          pattern: 'Goal-based',
-          maxIterations: 4,
-          definitionOfDone: 'builtin-review-proof.txt exists in the current workspace and contains exactly one line: builtin review qualification passed',
-          timeoutMs: 120000,
+        const codex = current.config?.subscriptionCatalog?.find((provider) => provider.id === 'openai-codex' && provider.availability === 'available')
+        const model = codex?.models.find((candidate) => candidate.id === 'gpt-5.6-luna')?.id || codex?.models[0]?.id
+        if (!model) throw new Error('openai-codex subscription catalog has no available model')
+        const selected = await window.subagents.piHost.settings.update({ provider: 'openai-codex', model })
+        const stopApprovalListener = window.subagents.piHost.onEvent((event) => {
+          const payload = event.payload
+          if (event.event === 'host/approval-requested' && payload?.runId === 'run_builtin_a') {
+            void window.subagents.piHost.approvals.resolve({ runId: payload.runId, callId: payload.callId, decision: 'allow' })
+          }
         })
-        return { turn, provider: current.settings.provider, model: current.settings.model }
+        let turn
+        try {
+          turn = await window.subagents.piHost.turn.submit({
+            sessionId: session.sessionId,
+            runId: 'run_builtin_a',
+            cwd: projectRoot,
+            prompt: 'Use the write tool now. Create builtin-review-proof.txt in the current workspace with exactly this single line: builtin review qualification passed. Do not merely describe the action; verify the file exists before finishing.',
+            profile: { ...selected.settings, approvalMode: 'full', unattended: false, activeTools: ['write'] },
+            contextPolicy: { memoryEnabled: false, memoryWriteEnabled: false, referenceChatHistory: false, temporary: true, approvalTimeoutMs: 30000 },
+            pattern: 'Turn-based',
+            maxIterations: 1,
+            timeoutMs: 120000,
+          })
+        } finally {
+          stopApprovalListener()
+        }
+        return { turn, provider: selected.settings.provider, model: selected.settings.model }
       }, { projectRoot })
       const proof = fs.existsSync(path.join(projectRoot, 'builtin-review-proof.txt'))
       const passed = result.turn.settlement === 'answered' && proof
@@ -124,7 +163,7 @@ try {
     ]
     localStorage.setItem('agentstudio.workspace-panel-session.v1', JSON.stringify({ version: 1, tabs, activeTabId: tabs[0].id, dock: 'right', reviewWidth: 720, maximized: false }))
   }, { snapshotA, snapshotB })
-  await page.reload()
+  await reloadShippedPage(page)
   await page.waitForSelector('[aria-label="工作區面板"]', { timeout: 30_000 })
   await page.getByRole('tab', { name: /審查 A/ }).focus()
   await page.keyboard.press('ArrowRight')
@@ -139,7 +178,9 @@ try {
     window.setSize(390, 800)
   })
   await page.waitForFunction(() => window.innerWidth <= 390)
-  const panelBox = await page.locator('[aria-label="工作區面板"]').boundingBox()
+  const narrowPanel = page.locator('[aria-label="工作區面板"]')
+  await narrowPanel.waitFor({ state: 'visible', timeout: 10_000 })
+  const panelBox = await narrowPanel.boundingBox()
   assert.ok(panelBox && panelBox.x === 0 && panelBox.x + panelBox.width <= 390, 'narrow Review panel covers the visible viewport instead of hiding behind sidebars')
   assert.equal(await page.evaluate(() => {
     const panel = document.querySelector('[aria-label="工作區面板"]')

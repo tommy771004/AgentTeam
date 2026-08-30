@@ -498,7 +498,9 @@ async function finalizeRunReviewSnapshot(
   try {
     const finalize = typeof window === 'undefined' ? undefined : window.subagents?.piHost?.review?.finalize
     if (!finalize) throw new Error('Pi Host Run Review finalization bridge is unavailable')
-    return (await finalize({ ...(admission?.canonical && admission.snapshotId ? { snapshotId: admission.snapshotId } : { runId }), settlementKind })).reviewSnapshotRef
+    const { useAgentStore } = await import('../store/agentStore.ts')
+    const activeWorkspaceRuns = Math.max(1, useAgentStore.getState().activeRunIds.length)
+    return (await finalize({ ...(admission?.canonical && admission.snapshotId ? { snapshotId: admission.snapshotId } : { runId }), settlementKind, activeWorkspaceRuns })).reviewSnapshotRef
   } catch {
     // Review failure is visible but never rewrites task success/failure.
     return admission?.canonical && admission.snapshotId
@@ -603,6 +605,42 @@ export type FinalizeTaskRunInput = {
    * Skips thread process summary derived from agent state.
    */
   early?: { error: string; path?: 'builtin' | 'cli'; agent?: AgentState }
+}
+
+async function recordPermanentUsage(
+  input: Pick<FinalizeTaskRunInput, 'runId' | 'sourceKind' | 'projectRoot' | 'settings'>,
+  agent: AgentState,
+  status?: 'success' | 'failed' | 'halted' | 'warning',
+): Promise<void> {
+  try {
+    const [{ usageEntryFromAgent }, { upsertUsageEntry }] = await Promise.all([
+      import('./usageLedger.ts'),
+      import('./usageLedgerClient.ts'),
+    ])
+    const usageModel = agent.steps.at(-1)?.modelUsed
+    const entry = usageEntryFromAgent({
+      agent,
+      runId: input.runId,
+      sourceKind: input.sourceKind,
+      projectRoot: input.projectRoot,
+      status,
+      pricing: usageModel ? input.settings.modelProfiles?.[usageModel]?.pricing : undefined,
+    })
+    if (entry) await upsertUsageEntry(entry)
+  } catch {
+    /* analytics persistence must never block settlement */
+  }
+}
+
+async function persistTerminalRunRecords(input: FinalizeTaskRunInput, agent: AgentState, status: string): Promise<void> {
+  if (status !== 'success' && status !== 'failed' && status !== 'halted') return
+  try {
+    const { useAgentStore } = await import('../store/agentStore.ts')
+    await useAgentStore.getState().saveToArchive(agent, input.runId)
+  } catch {
+    /* archive must not block release/drain */
+  }
+  await recordPermanentUsage(input, agent, status)
 }
 
 /**
@@ -1012,8 +1050,9 @@ async function runFinalizationSequence(
       const agent = useAgentStore.getState()
       await agent.saveToArchive(failureAgent, runId)
     } catch {
-      /* archive optional on early fail */
+      /* archive is optional on early fail */
     }
+    if (failureAgent) await recordPermanentUsage(input, failureAgent, 'failed')
     try {
       const { useRunActivityStore } = await import('../store/runActivityStore.ts')
       useRunActivityStore.getState().end(runId, '失敗')
@@ -1193,14 +1232,8 @@ async function runFinalizationSequence(
     /* non-fatal */
   }
 
-  // 3) Archive (once; execution adapters never own this step)
-  try {
-    if (['success', 'failed', 'halted'].includes(String(finalResult.status))) {
-      await useAgentStore.getState().saveToArchive(finalAgent, runId)
-    }
-  } catch {
-    /* archive must not block release/drain */
-  }
+  // 3) Archive + permanent usage ledger (once; execution adapters never own this step)
+  await persistTerminalRunRecords(input, finalAgent, String(finalResult.status))
 
   // A parked run leaves a resume point. Replay safety is asserted only for an
   // interrupt, because that is the one stop that happens at a tool boundary

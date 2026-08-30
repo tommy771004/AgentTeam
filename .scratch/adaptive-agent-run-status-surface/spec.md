@@ -1,6 +1,6 @@
 # Adaptive Agent Run Status Surface
 
-Status: 可交給代理
+Status: resolved
 
 ## Problem Statement
 
@@ -96,4 +96,3 @@ Agent 執行中的側欄目前把三種不同層級的資訊混在一起：短�
 - “Working State” remains valid architecture vocabulary, but “任務進度” is the clearer default user-facing label when the capability truly exists.
 - The key privacy and clarity invariant is not merely redaction: instruction content is the wrong semantic source for execution status even when it contains no secret.
 - This spec extends the completed Verified Working Memory UI Projection effort. It changes presentation and variant selection while preserving its Host authority, monotonic projection and bounded evidence contracts.
-

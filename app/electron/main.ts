@@ -22,6 +22,12 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { googleSelectionSearchUrl, textContextMenuTemplate } from './textContextMenu'
 import {
+  emptyUsageLedger,
+  isUsageLedgerEntry,
+  normalizeUsageLedger,
+  type UsageLedger,
+} from '../src/agent/usageLedger'
+import {
   clearVaultSecret,
   getVaultSecret,
   hasSecretPlaceholder,
@@ -541,6 +547,27 @@ function settingsPath() {
   return path.join(getDataDir('config'), 'settings.json')
 }
 
+function usageLedgerPath() {
+  return path.join(getDataDir('usage'), 'ledger.v1.json')
+}
+
+function readUsageLedger(): UsageLedger {
+  const file = usageLedgerPath()
+  if (!fs.existsSync(file)) return emptyUsageLedger()
+  try {
+    return normalizeUsageLedger(JSON.parse(fs.readFileSync(file, 'utf-8')))
+  } catch {
+    return emptyUsageLedger()
+  }
+}
+
+function writeUsageLedger(ledger: UsageLedger): void {
+  const file = usageLedgerPath()
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`
+  fs.writeFileSync(temporary, JSON.stringify(normalizeUsageLedger(ledger), null, 2), 'utf-8')
+  fs.renameSync(temporary, file)
+}
+
 function settingsForDisk(value: unknown) {
   if (!value || typeof value !== 'object') return value
   const settings = { ...(value as Record<string, unknown>) }
@@ -986,6 +1013,35 @@ ipcMain.handle('archive:get', async (_evt, id: string) => {
 ipcMain.handle('archive:delete', async (_evt, id: string) => {
   const file = path.join(getDataDir(), `${id}.json`)
   if (fs.existsSync(file)) fs.unlinkSync(file)
+  return { ok: true }
+})
+
+// ── Permanent usage ledger ──────────────────────────────────────
+
+ipcMain.handle('usage:get', async () => readUsageLedger())
+
+ipcMain.handle('usage:upsert', async (_evt, entry: unknown) => {
+  if (!isUsageLedgerEntry(entry)) throw new Error('Invalid usage ledger entry')
+  const ledger = readUsageLedger()
+  writeUsageLedger({
+    ...ledger,
+    entries: [entry, ...ledger.entries.filter((row) => row.runId !== entry.runId)],
+  })
+  return { ok: true }
+})
+
+ipcMain.handle('usage:complete-backfill', async (_evt, completedAt: string) => {
+  const ledger = readUsageLedger()
+  const valid = typeof completedAt === 'string' && !Number.isNaN(Date.parse(completedAt))
+    ? completedAt
+    : new Date().toISOString()
+  writeUsageLedger({ ...ledger, backfillCompletedAt: valid })
+  return { ok: true }
+})
+
+ipcMain.handle('usage:clear', async () => {
+  const now = new Date().toISOString()
+  writeUsageLedger({ ...emptyUsageLedger(now), backfillCompletedAt: now })
   return { ok: true }
 })
 
@@ -2163,16 +2219,46 @@ ipcMain.handle('pi-host:review:admit', async (_evt, input: { runId?: string; thr
     runnerKind: input?.runnerKind === 'external' ? 'external' : 'builtin',
   }),
 }))
-ipcMain.handle('pi-host:review:finalize', async (_evt, input: { snapshotId?: string; runId?: string; settlementKind?: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash' }) => ({
+ipcMain.handle('pi-host:review:finalize', async (_evt, input: { snapshotId?: string; runId?: string; settlementKind?: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash'; activeWorkspaceRuns?: number }) => ({
   reviewSnapshotRef: await piHostSupervisor.finalizeReviewWorkspace({
     ...(typeof input?.snapshotId === 'string' && input.snapshotId ? { snapshotId: input.snapshotId } : {}),
     ...(typeof input?.runId === 'string' && input.runId ? { runId: input.runId } : {}),
     settlementKind: input?.settlementKind || 'failed',
+    activeWorkspaceRuns: Number.isSafeInteger(input?.activeWorkspaceRuns) && Number(input.activeWorkspaceRuns) > 0 ? Number(input.activeWorkspaceRuns) : 1,
   }),
 }))
 ipcMain.handle('pi-host:review:read', async (_evt, snapshotId: string) => ({
   reviewArtifact: await piHostSupervisor.readReviewArtifact(String(snapshotId || '')),
 }))
+function resolveReviewFilePath(
+  artifact: NonNullable<Awaited<ReturnType<typeof piHostSupervisor.readReviewArtifact>>>,
+  requestedPath: string,
+): string {
+  const entry = artifact.manifest.find((candidate) => candidate.path === requestedPath)
+  const projectRoot = artifact.workspaceRebind?.projectRoot || artifact.admission.workspace?.projectRoot
+  if (!entry || !projectRoot || !requestedPath || path.isAbsolute(requestedPath) || requestedPath.includes('\0')) throw new Error('Review file identity is invalid')
+  const canonicalRoot = fs.realpathSync(projectRoot)
+  const canonicalFile = fs.realpathSync(path.resolve(canonicalRoot, requestedPath))
+  const relation = path.relative(canonicalRoot, canonicalFile)
+  if (!relation || relation.startsWith('..') || path.isAbsolute(relation) || !fs.statSync(canonicalFile).isFile()) throw new Error('Review file is outside the bound workspace')
+  return canonicalFile
+}
+
+async function openReviewFile(input: { snapshotId?: string; path?: string }) {
+  try {
+    const snapshotId = String(input?.snapshotId || '')
+    const requestedPath = String(input?.path || '').replaceAll('\\', '/')
+    const artifact = await piHostSupervisor.readReviewArtifact(snapshotId)
+    if (!artifact) throw new Error('Review artifact is unavailable')
+    const canonicalFile = resolveReviewFilePath(artifact, requestedPath)
+    const shellError = await shell.openPath(canonicalFile)
+    if (shellError) throw new Error(shellError)
+    return { ok: true, path: canonicalFile }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+ipcMain.handle('pi-host:review:open-file', async (_evt, input: { snapshotId?: string; path?: string }) => openReviewFile(input))
 ipcMain.handle('pi-host:review:payload-page', async (_evt, input: { snapshotId?: string; payloadId?: string; offset?: number; maxBytes?: number }) => ({
   reviewPayloadPage: await piHostSupervisor.readReviewPayloadPage({
     snapshotId: String(input?.snapshotId || ''),

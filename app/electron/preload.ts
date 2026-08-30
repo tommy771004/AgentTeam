@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { PublishAdapterResult } from '../src/agent/contentPublishAdapters'
 import type { PiTurnSettlement } from '../src/agent/piHostRun'
 import type { TurnRecordPage } from '../src/agent/turnRecord'
+import type { UsageLedger, UsageLedgerEntry } from '../src/agent/usageLedger'
 import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
 import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from '../src/agent/subdesign/pluginExecution'
 import type { SubDesignMetadataKind } from '../src/agent/subdesign/metadataKinds'
@@ -97,7 +98,7 @@ const api = {
       review: {
         admit: (input: { runId: string; threadId: string; projectRoot: string; runnerKind: ReviewRunnerKind }) =>
           ipcRenderer.invoke('pi-host:review:admit', input) as Promise<{ reviewAdmission: ReviewAdmissionSnapshot }>,
-        finalize: (input: { snapshotId?: string; runId?: string; settlementKind: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash' }) =>
+        finalize: (input: { snapshotId?: string; runId?: string; settlementKind: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash'; activeWorkspaceRuns?: number }) =>
           ipcRenderer.invoke('pi-host:review:finalize', input) as Promise<{ reviewSnapshotRef: ReviewSnapshotRef }>,
         read: (snapshotId: string) =>
           ipcRenderer.invoke('pi-host:review:read', snapshotId) as Promise<{ reviewArtifact: ReviewArtifactProjection }>,
@@ -106,9 +107,10 @@ const api = {
         describe: (target: ReviewTarget) => ipcRenderer.invoke('pi-host:review:describe', target) as Promise<{ reviewTargetDescription: ReviewTargetDescription }>,
         listFiles: (input: { target: ReviewTarget; cursor?: string; limit?: number; query?: string }) => ipcRenderer.invoke('pi-host:review:files', input) as Promise<{ reviewFiles: ReviewPageEnvelope<ReviewFileManifestEntry> }>,
         readFileDiff: (input: { target: ReviewTarget; path: string; cursor?: string; maxBytes?: number }) => ipcRenderer.invoke('pi-host:review:file-diff', input) as Promise<{ reviewDiff: ReviewPageEnvelope<ReviewDiffHunk> }>,
+        openFile: (input: { snapshotId: string; path: string }) => ipcRenderer.invoke('pi-host:review:open-file', input) as Promise<{ ok: boolean; path?: string; error?: string }>,
         refresh: (target: ReviewTarget) => ipcRenderer.invoke('pi-host:review:refresh', target) as Promise<{ reviewTargetDescription: ReviewTargetDescription }>,
         listComments: (snapshotId: string) => ipcRenderer.invoke('pi-host:review:comments:list', snapshotId) as Promise<{ reviewComments: ReviewComment[] }>,
-        saveDraft: (input: { id?: string; snapshotId: string; path: string; side?: 'old' | 'new'; line?: number; body: string }) => ipcRenderer.invoke('pi-host:review:draft:save', input) as Promise<{ reviewComment: ReviewComment }>,
+        saveDraft: (input: { id?: string; snapshotId: string; path: string; hunkId?: string; side?: 'old' | 'new'; line?: number; body: string }) => ipcRenderer.invoke('pi-host:review:draft:save', input) as Promise<{ reviewComment: ReviewComment }>,
         deleteDraft: (id: string) => ipcRenderer.invoke('pi-host:review:draft:delete', id) as Promise<Record<string, never>>,
         transitionComment: (id: string, status: ReviewCommentStatus) => ipcRenderer.invoke('pi-host:review:comment:transition', id, status) as Promise<{ reviewComment: ReviewComment }>,
         listFileStates: (snapshotId: string) => ipcRenderer.invoke('pi-host:review:file-state:list', snapshotId) as Promise<{ reviewFileStates: ReviewFileState[] }>,
@@ -455,6 +457,14 @@ const api = {
     get: (id: string) => ipcRenderer.invoke('archive:get', id) as Promise<unknown | null>,
     delete: (id: string) =>
       ipcRenderer.invoke('archive:delete', id) as Promise<{ ok: boolean }>,
+  },
+  usage: {
+    get: () => ipcRenderer.invoke('usage:get') as Promise<UsageLedger>,
+    upsert: (entry: UsageLedgerEntry) =>
+      ipcRenderer.invoke('usage:upsert', entry) as Promise<{ ok: boolean }>,
+    completeBackfill: (completedAt: string) =>
+      ipcRenderer.invoke('usage:complete-backfill', completedAt) as Promise<{ ok: boolean }>,
+    clear: () => ipcRenderer.invoke('usage:clear') as Promise<{ ok: boolean }>,
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get') as Promise<unknown | null>,

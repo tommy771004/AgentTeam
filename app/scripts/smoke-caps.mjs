@@ -1492,7 +1492,10 @@ await test('Phase 2d: Next_State is consumed once with explicit webhook delivery
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
   assert.match(coordinator, /postState\?\.status === 'failed'/)
   assert.match(coordinator, /finalizeTaskRun/)
-  assert.match(coordinator, /saveToArchive\(finalAgent/)
+  assert.match(coordinator, /persistTerminalRunRecords\(input, finalAgent/,
+    'finalization calls the extracted Archive + usage persistence owner with the settled agent')
+  assert.match(coordinator, /persistTerminalRunRecords[\s\S]*saveToArchive\(agent, input\.runId\)/,
+    'the extracted owner still writes the canonical Archive record before release/drain')
   assert.match(dispatch, /nextState: snapshot\.overrides\.nextState/)
   assert.match(queue, /\| 'nextState'/)
   assert.match(settings, /webhookTarget: ''/)
@@ -1654,6 +1657,7 @@ await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal cont
   const localCli = fs.readFileSync(path.join(appRoot, 'src/agent/localCliRun.ts'), 'utf8')
   const agent = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
+  const statusSurface = fs.readFileSync(path.join(appRoot, 'src/agent/runStatusSurface.ts'), 'utf8')
   const continuation = fs.readFileSync(path.join(appRoot, 'src/components/RunContinuationActions.tsx'), 'utf8')
   const runX = readTaskRunRuntimeSource(fs)
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
@@ -1681,7 +1685,8 @@ await test('Phase 5: runner capability matrix, honest CLI DoD, continueGoal cont
 
   // continueGoal UI gated; contract documented but capability stays false
   assert.match(continuation, /canContinueGoal/)
-  assert.match(panel, /EXTERNAL_CLI_UI_LABEL/)
+  assert.match(statusSurface, /外部程序已結束；這不代表 Checker 已確認任務完成。/,
+    'the adaptive status owner preserves the honest external CLI completion boundary')
   assert.match(continuation, /不支援繼續 Goal/)
   assert.match(panel, /formatRunnerCapabilitiesSummary/)
   assert.match(runX, /capabilitiesForRunner/)
@@ -2233,10 +2238,10 @@ await test('drift guard: the Pi path\'s live timeline is the record projection, 
     'assistant narration reads as prose in the sequence, not as a competing labelled panel')
   assert.doesNotMatch(panel, /projectLiveTimeline|RunTimelineList|recordTimeline/,
     'the right-side task panel must not duplicate the center timeline')
-  assert.match(panel, /title="任務步驟"/,
-    'the right-side panel owns structured task progress instead')
-  assert.match(panel, /\) : !isPiHost && agent\.steps\.length > 0 \? \(/,
-    'the fixed Pi Core Host turn is never presented as if it were live progress')
+  assert.match(panel, /<RunStatusSurface projection=\{statusSurface\}/,
+    'the right-side panel delegates trusted progress/activity selection to the adaptive status owner')
+  assert.match(panel, /projectRunStatusSurface\(\{/,
+    'the panel supplies lifecycle, capabilities, activity, Working State and attention evidence to that owner')
   assert.doesNotMatch(panel, /\{agent\.progress\}%/,
     'a Pi Host run without a finite plan must not display a fake percentage')
   // The activity-event trace is the FALLBACK. It renders only where no record
@@ -2311,8 +2316,10 @@ await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and r
   assert.doesNotMatch(feed, /WorkingStateView/,
     'the full Working State document must not appear in the conversation feed')
   assert.match(runPanel, /useWorkingStateProjectionStore/)
-  assert.match(runPanel, /<WorkingStateView projection=\{projection\}/,
-    'the live run panel subscribes to the Host-owned Working State projection')
+  assert.match(runPanel, /workingState: workingStateProjection/,
+    'the live run panel supplies its Host-owned Working State projection to the adaptive status owner')
+  assert.match(runPanel, /<WorkingStateDiagnostics projection=\{workingStateProjection\}/,
+    'the complete Host projection remains available only in the diagnostic disclosure')
   assert.match(feed, /<ExecutionStepsProgress tasks=\{tasks\} \/>[\s\S]*data-run-timeline="record"/,
     'compact live step progress stays directly above the conversation timeline')
   assert.match(progress, /執行步驟：\{completed\}\/\{tasks\.length\}/)
@@ -2320,8 +2327,10 @@ await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and r
   assert.match(progress, /aria-expanded=\{open\}/)
   assert.match(progress, /task\.status === 'done'[\s\S]*check_circle/,
     'completed agent-returned steps render with a check mark')
-  assert.match(archivePage, /projectWorkingStateEntries\([\s\S]*?turnRecordEntries\(record\),\s*false,/,
+  assert.match(archivePage, /archiveWorkingState[\s\S]*projectWorkingStateEntries\(turnRecordEntries\(archive\.turnRecord\), false\)/,
     'a renderer archive stays unverified until it is matched to Host-owned identity')
+  assert.match(archivePage, /<ArchiveRunStatus archive=\{selected\} \/>/,
+    'archive terminal records use the same adaptive status projection owner as the live rail')
   assert.match(threadStore, /hydrateHostSessions\(\[\{ \.\.\.session, archived: true \}\]\)/,
     'a confirmed Host archive installs a tombstone from the verified pre-archive projection')
 })

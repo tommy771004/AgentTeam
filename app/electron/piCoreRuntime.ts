@@ -369,6 +369,30 @@ function desiredPiTools(restricted: boolean, settings: PiRuntimeSettings, mcpDyn
   ]
 }
 
+function restorePiSessionHistory(
+  sessionManager: ReturnType<typeof piCodingAgent.SessionManager.create>,
+  history: PiHostHistoryMessage[],
+): void {
+  if (sessionManager.getEntries().length !== 0) return
+  for (const message of history) {
+    const timestamp = Date.now()
+    if (message.role === 'user') {
+      sessionManager.appendMessage({ role: 'user', content: [{ type: 'text', text: message.content }], timestamp })
+      continue
+    }
+    sessionManager.appendMessage({
+      role: 'assistant',
+      content: [{ type: 'text', text: message.content }],
+      api: 'openai-completions',
+      provider: 'restored',
+      model: 'restored',
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: 'stop',
+      timestamp,
+    })
+  }
+}
+
 async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string, settings: PiRuntimeSettings = {}) {
   const existing = sessionRuntimes.get(sessionId)
   const agentDir = resolvePiAgentDir()
@@ -392,24 +416,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   const sessionManager = sessionFile
     ? piCodingAgent.SessionManager.open(sessionFile, sessionDir, cwd)
     : piCodingAgent.SessionManager.create(cwd, sessionDir, { id: sessionId })
-  if (sessionManager.getEntries().length === 0) {
-    for (const message of history) {
-      if (message.role === 'user') {
-        sessionManager.appendMessage({ role: 'user', content: [{ type: 'text', text: message.content }], timestamp: Date.now() })
-      } else {
-        sessionManager.appendMessage({
-          role: 'assistant',
-          content: [{ type: 'text', text: message.content }],
-          api: 'openai-completions',
-          provider: 'restored',
-          model: 'restored',
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-          stopReason: 'stop',
-          timestamp: Date.now(),
-        })
-      }
-    }
-  }
+  restorePiSessionHistory(sessionManager, history)
   const options: Record<string, unknown> = {
     cwd,
     sessionManager,

@@ -441,6 +441,8 @@ import { setPiPlanAnnouncer as installPlanAnnouncer } from './piExtensionPacks/i
 import { isPiMcpInputSchema, piMcpModelToolName, piMcpModelToolNames, setPiMcpExtensionsLookup } from './piExtensionPacks/mcpBridgePack.ts'
 import { setPiCapabilityBridge, setPiCodeModeExecutor } from './piExtensionPacks/framework.ts'
 import { PiToolContractStore, schemaDigest, type PiTurnToolContract } from './piToolContract.ts'
+import { handlePiHostRunDomain } from './piHostRunDomain.ts'
+import { handlePiHostSessionDomain } from './piHostSessionDomain.ts'
 import { validatePiToolArguments } from './piToolArguments.ts'
 import { writeToolOutputSpill } from './attachmentStore.ts'
 import { revokeBuiltinShellSandboxEvidence, verifyBuiltinShellSandbox, type BuiltinShellSandboxVerification } from './piBuiltinShellSandbox.ts'
@@ -3174,6 +3176,9 @@ async function finalizeReviewRequest(
   const settlementKind = ['completed', 'failed', 'cancelled', 'timeout', 'crash'].includes(String(params.settlementKind))
     ? params.settlementKind as 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash'
     : 'failed'
+  const activeWorkspaceRuns = Number.isSafeInteger(Number(params.activeWorkspaceRuns)) && Number(params.activeWorkspaceRuns) > 0
+    ? Number(params.activeWorkspaceRuns)
+    : 1
   if (!snapshotId && runId) snapshotId = (await state.reviewArtifactStore.findByRunId(runId))?.snapshotId || ''
   if (!snapshotId) return [errorResponse(id, 'not_found', 'Review snapshot identity is unavailable')]
   const current = await state.reviewArtifactStore.read(snapshotId)
@@ -3188,7 +3193,7 @@ async function finalizeReviewRequest(
       return [{ source: 'host' as const, runId: current.runId, callId: entry.callId, tool, paths: [entry.executionEvidence.resource.path], settlement: 'success' as const }]
     }),
   )
-  const captured = await captureRunReviewSnapshot({ admission: current.admission, threadId: current.threadId, trustedMutations, settlementKind })
+  const captured = await captureRunReviewSnapshot({ admission: current.admission, threadId: current.threadId, trustedMutations, settlementKind, activeWorkspaceRuns })
   const finalized = await state.reviewArtifactStore.finalizeRun(captured)
   return [{ id, result: { reviewSnapshotRef: { snapshotId, runId: finalized.runId, status: finalized.status, attributionFidelity: finalized.attributionFidelity, ...(finalized.manifestHash ? { manifestHash: finalized.manifestHash } : {}) } } }]
 }
@@ -3258,6 +3263,40 @@ function reviewHunkAnchor(snapshotId: string, path: string, hunk: ReviewDiffHunk
   return { snapshotId, path, side, line, hunkFingerprint: createHash('sha256').update(hunk.header).digest('hex'), contextHash: createHash('sha256').update(context).digest('hex'), originalContext: context }
 }
 
+function reviewHunkContainsLine(hunk: ReviewDiffHunk, side: 'old' | 'new', line: number): boolean {
+  const match = hunk.header.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/)
+  if (!match) return false
+  const start = Number(side === 'old' ? match[1] : match[3])
+  const count = Number((side === 'old' ? match[2] : match[4]) || 1)
+  return count > 0 && line >= start && line < start + count
+}
+
+async function resolveReviewCommentHunk(
+  state: HostState,
+  snapshotId: string,
+  path: string,
+  requestedHunkId?: string,
+): Promise<ReviewDiffHunk | undefined> {
+  let cursor: string | undefined
+  const candidates: ReviewDiffHunk[] = []
+  do {
+    const page = await state.reviewProjection.readFileDiff(
+      { kind: 'run-snapshot', snapshotId },
+      path,
+      { ...(cursor ? { cursor } : {}), maxBytes: 256 * 1024 },
+    )
+    const hunks = page.items.filter((item) => item.header.startsWith('@@'))
+    if (requestedHunkId) {
+      const selected = hunks.find((item) => item.id === requestedHunkId)
+      if (selected) return selected
+    } else {
+      candidates.push(...hunks)
+    }
+    cursor = page.nextCursor
+  } while (cursor)
+  return requestedHunkId ? undefined : candidates.length === 1 ? candidates[0] : undefined
+}
+
 async function saveReviewDraftRequest(state: HostState, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
   const snapshotId = typeof params.snapshotId === 'string' ? params.snapshotId : ''
   const path = typeof params.path === 'string' ? params.path : ''
@@ -3266,11 +3305,13 @@ async function saveReviewDraftRequest(state: HostState, params: Record<string, u
   let anchor = draftId ? (await state.reviewStateStore.listComments(snapshotId)).find((comment) => comment.id === draftId)?.anchor : undefined
   if (!anchor) {
     if (!snapshotId || !path) return [errorResponse(id, 'invalid_request', 'snapshotId and path are required')]
-    const page = await state.reviewProjection.readFileDiff({ kind: 'run-snapshot', snapshotId }, path, { maxBytes: 256 * 1024 })
-    const hunk = page.items.find((item) => item.header.startsWith('@@')) || page.items[0]
-    if (!hunk) return [errorResponse(id, 'not_found', 'No text hunk is available for this comment')]
+    const requestedHunkId = typeof params.hunkId === 'string' ? params.hunkId : undefined
+    const hunk = await resolveReviewCommentHunk(state, snapshotId, path, requestedHunkId)
+    if (!hunk) return [errorResponse(id, 'invalid_request', requestedHunkId ? 'Selected review hunk is unavailable' : 'A hunkId is required when a file has multiple hunks')]
     const requestedLine = Number.isSafeInteger(Number(params.line)) && Number(params.line) > 0 ? Number(params.line) : 1
-    anchor = reviewHunkAnchor(snapshotId, path, hunk, params.side === 'old' ? 'old' : 'new', requestedLine)
+    const side = params.side === 'old' ? 'old' : 'new'
+    if (!reviewHunkContainsLine(hunk, side, requestedLine)) return [errorResponse(id, 'invalid_request', 'Selected line does not belong to the selected hunk')]
+    anchor = reviewHunkAnchor(snapshotId, path, hunk, side, requestedLine)
   }
   return [{ id, result: { reviewComment: await state.reviewStateStore.saveDraft({ id: draftId, anchor, body }) } }]
 }
@@ -3825,6 +3866,17 @@ function isReviewRequestMethod(method: unknown): method is ReviewRequestMethod {
   return typeof method === 'string' && REVIEW_REQUEST_METHODS.has(method as ReviewRequestMethod)
 }
 
+function handleInstructionOrReviewRequest(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+): Promise<PiHostMessage[]> | undefined {
+  if (input.method?.startsWith('instructions/v1/')) return handleInstructionRequest(state, input as Partial<PiHostRequest>, id, emit) as Promise<PiHostMessage[]>
+  if (isReviewRequestMethod(input.method)) return handleReviewRequest(state, input as Partial<PiHostRequest>, id) as Promise<PiHostMessage[]>
+  return undefined
+}
+
 export function handlePiHostRequest(
   state: HostState,
   request: unknown,
@@ -4347,20 +4399,33 @@ export function handlePiHostRequest(
   if (input.method === 'state/snapshot') {
     return projectPiHostStateSnapshot(state, id)
   }
+  const runResponse = handlePiHostRunDomain({
+    method: input.method,
+    params: input.params,
+    id,
+    snapshot: state.snapshot,
+    commitQueue: (queue) => { state.snapshot.queue = queue; state.snapshot.cursor += 1 },
+    isSettlement: isPiTurnSettlement,
+    handleAttachment: () => handleAttachmentRequest(state, input, id, emit),
+  })
+  if (runResponse) return runResponse
+  const sessionResponse = handlePiHostSessionDomain({
+    method: input.method,
+    params: input.params,
+    id,
+    state: {
+      sessions: state.snapshot.sessions,
+      isActive: (sessionId) => activeSessionRuns.has(sessionId),
+      nextToolContractRevision: (sessionId) => state.toolContracts.nextRevision(sessionId),
+      clearToolContracts: (sessionId) => state.toolContracts.clear(sessionId),
+      clearCapabilities: (sessionId) => state.capabilities.clear(sessionId),
+      commit: (sessions) => { state.snapshot.sessions = sessions; state.snapshot.cursor += 1 },
+    },
+    compact: (session) => handleManualSessionCompaction({ state, session, request: input, id, checkpointWriter, emit }),
+  })
+  if (sessionResponse) return sessionResponse
   const boundedReadResponse = handleBoundedHostRead(state, input, id, emit)
   if (boundedReadResponse) return boundedReadResponse
-  // The list carries what a session IS, not everything it did: a long run's
-  // record is read a page at a time through `sessions/record`, so listing
-  // sessions cannot grow with the length of their history.
-  if (input.method === 'sessions/list') return [{ id, result: { sessions: state.snapshot.sessions.map(projectSessionSummary) } }]
-  if (input.method === 'sessions/record') {
-    const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
-    const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
-    if (!session) return [errorResponse(id, 'invalid_request', 'Unknown Pi session')]
-    const before = typeof input.params?.before === 'number' ? input.params.before : undefined
-    const limit = typeof input.params?.limit === 'number' ? input.params.limit : undefined
-    return [{ id, result: { sessionId, page: pageTurnRecord(session.record, { before, limit }) } }]
-  }
   const resourceResponse = handlePiHostResourceDomain({
     method: input.method,
     params: input.params,
@@ -5446,8 +5511,8 @@ export function handlePiHostRequest(
       if (activeSessionRuns.get(sessionId)?.runId === runId) activeSessionRuns.delete(sessionId)
     })
   }
-  if (input.method.startsWith('instructions/v1/')) return handleInstructionRequest(state, input as Partial<PiHostRequest>, id, emit) as Promise<PiHostMessage[]>
-  if (isReviewRequestMethod(input.method)) return handleReviewRequest(state, input as Partial<PiHostRequest>, id) as Promise<PiHostMessage[]>
+  const instructionOrReview = handleInstructionOrReviewRequest(state, input, id, emit)
+  if (instructionOrReview) return instructionOrReview
   if (input.method === 'settings/get') return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config, settingsRevision: state.snapshot.cursor } }]
   if (input.method === 'settings/update') {
     return (async () => {
@@ -5759,7 +5824,6 @@ function handleBoundedHostRead(
 ): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
   return handleMemoryControlMaintenance(state, input, id)
     || handleMemoryControlPackageRead(state, input as Partial<PiHostRequest>, id)
-    || handleAttachmentRequest(state, input as Partial<PiHostRequest>, id, emit)
 }
 
 export function createPiHostServer(

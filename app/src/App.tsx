@@ -10,6 +10,7 @@ import { KnowledgePage } from './pages/KnowledgePage'
 import { DashboardPage } from './pages/DashboardPage'
 import { OpsPage } from './pages/OpsPage'
 import { RecordsPage } from './pages/RecordsPage'
+import { UsagePage } from './pages/UsagePage'
 import { LearningPage } from './pages/LearningPage'
 import { SubDesignPage } from './pages/SubDesignPage'
 import { ContentPublishingPage } from './pages/ContentPublishingPage'
@@ -1288,6 +1289,7 @@ export default function App() {
             <Route path="content-publishing" element={<ContentPublishingPage />} />
             <Route path="docs" element={<DocsPage />} />
             <Route path="records" element={<RecordsPage />} />
+            <Route path="usage" element={<UsagePage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="workspace" element={<Navigate to="/" replace />} />
             <Route path="learning" element={<LearningPage />} />

@@ -131,8 +131,8 @@ try {
   const panel = await readFile(new URL('../src/components/ReviewDeliveryPanel.tsx', import.meta.url), 'utf8')
   assert.match(protocol, /review_delivery_\$\{preview\.kind\}[\s\S]*requestPiToolApproval|requestPiToolApproval[\s\S]*review delivery/i, 'each delivery step enters central Approval Decision')
   assert.match(panel, /Commit → Push → PR/)
-  assert.match(panel, /commitId: commit\.commitId/, 'Push UI requires the Host-issued commit receipt')
-  assert.match(panel, /pushId: push\.pushId/, 'PR UI requires the verified push receipt')
+  assert.match(panel, /commitId:\s*(?:props\.)?commit!?\.commitId!?/, 'Push UI requires the Host-issued commit receipt')
+  assert.match(panel, /pushId:\s*(?:props\.)?push!?\.pushId!?/, 'PR UI requires the verified push receipt')
   assert.doesNotMatch(panel, /force:\s*true/, 'UI does not offer force push')
   console.log('smoke-review-delivery-coordinator passed')
 } finally {

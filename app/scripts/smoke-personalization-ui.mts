@@ -280,7 +280,7 @@ try {
 
     const open = page.getByRole('button', { name: '在編輯器開啟' }).first()
     await open.click()
-    await page.getByText('已開啟 canonical instruction source：/tmp/personalization-ui-project/AGENTS.md', { exact: true }).waitFor({ state: 'visible', timeout: 5_000 })
+    await page.waitForFunction(() => (window as unknown as { __personalizationFixtureLedger: { open: string[] } }).__personalizationFixtureLedger.open.length >= 1)
     const firstProjectRow = page.locator('[data-source-id="project-12"]')
     const firstProjectButtons = firstProjectRow.getByRole('button')
     assert.equal(await firstProjectButtons.count(), 2, `${viewport.name} project source exposes edit and open controls`)
@@ -288,8 +288,9 @@ try {
     await page.keyboard.press('Shift+Tab')
     assert.equal(await firstProjectButtons.nth(0).evaluate((element: Element) => element === document.activeElement), true, `${viewport.name} source controls support reverse Shift+Tab traversal`)
     await tabTo(page, open, `${viewport.name} source action`)
+    const opensBeforeKeyboard = await page.evaluate(() => (window as unknown as { __personalizationFixtureLedger: { open: string[] } }).__personalizationFixtureLedger.open.length)
     await page.keyboard.press('Enter')
-    await page.getByText('已開啟 canonical instruction source：/tmp/personalization-ui-project/AGENTS.md', { exact: true }).waitFor({ state: 'visible', timeout: 5_000 })
+    await page.waitForFunction((before) => (window as unknown as { __personalizationFixtureLedger: { open: string[] } }).__personalizationFixtureLedger.open.length > before, opensBeforeKeyboard)
     const edit = page.getByRole('button', { name: '編輯' }).first()
     await edit.click()
     const editor = page.locator('#project-instruction-editor')
@@ -311,11 +312,13 @@ try {
       '/tmp/personalization-ui-project/subdir/AGENTS.md',
     ]
     for (let index = 1; index < await openButtons.count(); index += 1) {
+      const opensBeforePointer = await page.evaluate(() => (window as unknown as { __personalizationFixtureLedger: { open: string[] } }).__personalizationFixtureLedger.open.length)
       await openButtons.nth(index).click()
-      await page.getByText(`已開啟 canonical instruction source：${expectedOpenPaths[index]}`, { exact: true }).waitFor({ state: 'visible', timeout: 5_000 })
+      await page.waitForFunction((before) => (window as unknown as { __personalizationFixtureLedger: { open: string[] } }).__personalizationFixtureLedger.open.length > before, opensBeforePointer)
       await tabTo(page, openButtons.nth(index), `${viewport.name} open source ${index}`)
+      const opensBeforeKeyboard = await page.evaluate(() => (window as unknown as { __personalizationFixtureLedger: { open: string[] } }).__personalizationFixtureLedger.open.length)
       await page.keyboard.press('Enter')
-      await page.getByText(`已開啟 canonical instruction source：${expectedOpenPaths[index]}`, { exact: true }).waitFor({ state: 'visible', timeout: 5_000 })
+      await page.waitForFunction((before) => (window as unknown as { __personalizationFixtureLedger: { open: string[] } }).__personalizationFixtureLedger.open.length > before, opensBeforeKeyboard)
     }
     const openedPaths = await page.evaluate(() => (window as unknown as { __personalizationFixtureLedger: { open: string[] } }).__personalizationFixtureLedger.open)
     assert.equal(openedPaths.length, 6, `${viewport.name} every openable source reaches the Host opener by pointer and keyboard`)

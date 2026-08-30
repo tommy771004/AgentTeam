@@ -2,6 +2,44 @@ import { useState } from 'react'
 import type { ReviewTarget } from '../agent/reviewContract.ts'
 import type { ReviewDeliveryIntent, ReviewDeliveryPreview, ReviewDeliveryReceipt } from '../agent/reviewDeliveryContract.ts'
 
+function DeliveryPhase(props: {
+  target: Extract<ReviewTarget, { kind: 'staged' }>
+  busy: boolean
+  message: string
+  sign: boolean
+  remote: string
+  prTitle: string
+  prBody: string
+  draft: boolean
+  commit?: ReviewDeliveryReceipt
+  push?: ReviewDeliveryReceipt
+  receipt?: ReviewDeliveryReceipt
+  setMessage: (value: string) => void
+  setSign: (value: boolean) => void
+  setRemote: (value: string) => void
+  setPrTitle: (value: string) => void
+  setPrBody: (value: string) => void
+  setDraft: (value: boolean) => void
+  requestPreview: (intent: ReviewDeliveryIntent) => Promise<void>
+}) {
+  if (!props.commit?.commitOid) return <section>
+    <label className="block text-[9px] text-ink-3">Commit message<textarea value={props.message} onChange={(event) => props.setMessage(event.target.value)} rows={2} className="mt-1 block w-full resize-none border border-line bg-surface p-2 text-[10px] text-ink outline-none focus:border-accent" /></label>
+    <div className="mt-2 flex items-center justify-between"><label className="text-[9px] text-ink-3"><input type="checkbox" checked={props.sign} onChange={(event) => props.setSign(event.target.checked)} className="mr-1" />使用 Git signing</label><button type="button" disabled={props.busy || !props.message.trim()} onClick={() => void props.requestPreview({ kind: 'commit', workspaceId: props.target.workspaceId, expectedIndexRevision: props.target.revision, message: props.message, ...(props.sign ? { sign: true as const } : {}) })} className="border border-line-strong px-2 py-1 text-[10px] text-ink-2 disabled:opacity-40">預覽 Commit</button></div>
+  </section>
+  if (!props.push?.pushId) return <section className="grid grid-cols-2 gap-2">
+    <label className="text-[9px] text-ink-3">Remote<input value={props.remote} onChange={(event) => props.setRemote(event.target.value)} className="mt-1 block w-full border border-line bg-surface px-2 py-1 text-[10px] text-ink" /></label>
+    <p className="self-end text-[9px] text-ink-3">目前 checkout branch；Host 會保留既有 upstream。</p>
+    <p className="self-end truncate font-[family-name:var(--font-mono)] text-[9px] text-ink-3">commit {props.commit.commitOid.slice(0, 12)}</p>
+    <button type="button" disabled={props.busy || !props.commit.commitId || !props.remote.trim()} onClick={() => void props.requestPreview({ kind: 'push', workspaceId: props.target.workspaceId, commitId: props.commit!.commitId!, remote: props.remote, setUpstream: true, force: false })} className="border border-line-strong px-2 py-1 text-[10px] text-ink-2 disabled:opacity-40">預覽 Push</button>
+  </section>
+  if (!props.receipt?.prUrl) return <section className="space-y-2">
+    <input value={props.prTitle} onChange={(event) => props.setPrTitle(event.target.value)} placeholder="PR title" className="block w-full border border-line bg-surface px-2 py-1 text-[10px] text-ink" />
+    <textarea value={props.prBody} onChange={(event) => props.setPrBody(event.target.value)} rows={2} placeholder="PR description" className="block w-full resize-none border border-line bg-surface p-2 text-[10px] text-ink" />
+    <div className="flex items-center justify-between"><label className="text-[9px] text-ink-3"><input type="checkbox" checked={props.draft} onChange={(event) => props.setDraft(event.target.checked)} className="mr-1" />Draft PR</label><button type="button" disabled={props.busy || !props.prTitle.trim() || !props.prBody.trim()} onClick={() => void props.requestPreview({ kind: 'pr', workspaceId: props.target.workspaceId, pushId: props.push!.pushId!, title: props.prTitle, body: props.prBody, draft: props.draft })} className="border border-line-strong px-2 py-1 text-[10px] text-ink-2 disabled:opacity-40">預覽 PR</button></div>
+  </section>
+  return <a href={props.receipt.prUrl} className="text-[10px] text-accent-ink underline" target="_blank" rel="noreferrer">開啟 PR #{props.receipt.prNumber || ''}</a>
+}
+
 export function ReviewDeliveryPanel({ target, onOpenTarget }: {
   target: Extract<ReviewTarget, { kind: 'staged' }>
   onOpenTarget?: (target: ReviewTarget, title?: string) => void
@@ -46,19 +84,7 @@ export function ReviewDeliveryPanel({ target, onOpenTarget }: {
   return <details className="shrink-0 border-t border-line bg-surface-container-low">
     <summary className="cursor-pointer px-3 py-2 text-[10px] font-semibold text-ink-2">Git delivery · Commit → Push → PR</summary>
     <div className="space-y-3 border-t border-line p-3">
-      {!commit?.commitOid ? <section>
-        <label className="block text-[9px] text-ink-3">Commit message<textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} className="mt-1 block w-full resize-none border border-line bg-surface p-2 text-[10px] text-ink outline-none focus:border-accent" /></label>
-        <div className="mt-2 flex items-center justify-between"><label className="text-[9px] text-ink-3"><input type="checkbox" checked={sign} onChange={(event) => setSign(event.target.checked)} className="mr-1" />使用 Git signing</label><button type="button" disabled={busy || !message.trim()} onClick={() => void requestPreview({ kind: 'commit', workspaceId: target.workspaceId, expectedIndexRevision: target.revision, message, ...(sign ? { sign: true as const } : {}) })} className="border border-line-strong px-2 py-1 text-[10px] text-ink-2 disabled:opacity-40">預覽 Commit</button></div>
-      </section> : !push?.pushId ? <section className="grid grid-cols-2 gap-2">
-        <label className="text-[9px] text-ink-3">Remote<input value={remote} onChange={(event) => setRemote(event.target.value)} className="mt-1 block w-full border border-line bg-surface px-2 py-1 text-[10px] text-ink" /></label>
-        <p className="self-end text-[9px] text-ink-3">目前 checkout branch；Host 會保留既有 upstream。</p>
-        <p className="self-end truncate font-[family-name:var(--font-mono)] text-[9px] text-ink-3">commit {commit.commitOid.slice(0, 12)}</p>
-        <button type="button" disabled={busy || !commit.commitId || !remote.trim()} onClick={() => void requestPreview({ kind: 'push', workspaceId: target.workspaceId, commitId: commit.commitId!, remote, setUpstream: true, force: false })} className="border border-line-strong px-2 py-1 text-[10px] text-ink-2 disabled:opacity-40">預覽 Push</button>
-      </section> : !receipt?.prUrl ? <section className="space-y-2">
-        <input value={prTitle} onChange={(event) => setPrTitle(event.target.value)} placeholder="PR title" className="block w-full border border-line bg-surface px-2 py-1 text-[10px] text-ink" />
-        <textarea value={prBody} onChange={(event) => setPrBody(event.target.value)} rows={2} placeholder="PR description" className="block w-full resize-none border border-line bg-surface p-2 text-[10px] text-ink" />
-        <div className="flex items-center justify-between"><label className="text-[9px] text-ink-3"><input type="checkbox" checked={draft} onChange={(event) => setDraft(event.target.checked)} className="mr-1" />Draft PR</label><button type="button" disabled={busy || !prTitle.trim() || !prBody.trim()} onClick={() => void requestPreview({ kind: 'pr', workspaceId: target.workspaceId, pushId: push.pushId!, title: prTitle, body: prBody, draft })} className="border border-line-strong px-2 py-1 text-[10px] text-ink-2 disabled:opacity-40">預覽 PR</button></div>
-      </section> : <a href={receipt.prUrl} className="text-[10px] text-accent-ink underline" target="_blank" rel="noreferrer">開啟 PR #{receipt.prNumber || ''}</a>}
+      <DeliveryPhase target={target} busy={busy} message={message} sign={sign} remote={remote} prTitle={prTitle} prBody={prBody} draft={draft} commit={commit} push={push} receipt={receipt} setMessage={setMessage} setSign={setSign} setRemote={setRemote} setPrTitle={setPrTitle} setPrBody={setPrBody} setDraft={setDraft} requestPreview={requestPreview} />
 
       {preview ? <section className="border border-orange/40 bg-surface p-2"><p className="text-[10px] font-semibold text-ink">{preview.title}</p><pre className="mt-1 whitespace-pre-wrap text-[9px] text-ink-3">{preview.detail}</pre><div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setPreview(undefined)} className="text-[9px] text-ink-3">取消</button><button type="button" disabled={busy} onClick={() => void apply()} className="border border-orange px-2 py-1 text-[9px] text-orange disabled:opacity-40">送交核准</button></div></section> : null}
       {error ? <p role="alert" className="whitespace-pre-wrap text-[9px] text-red">{error}</p> : null}

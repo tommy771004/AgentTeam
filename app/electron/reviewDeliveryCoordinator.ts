@@ -18,6 +18,9 @@ const MAX_DIAGNOSTIC_BYTES = 8 * 1024
 
 type CommandResult = { exitCode: number; stdout: string; stderr: string }
 type StoredPreview = ReviewDeliveryPreview & { intent: ReviewDeliveryIntent; cwd: string }
+type GitWorkspace = ReviewWorkspaceBinding & { worktreeRoot: string }
+type PreviewProjection = Omit<ReviewDeliveryPreview, 'id' | 'expiresAt'>
+type PreparedPreview = { intent: ReviewDeliveryIntent; projection: PreviewProjection }
 type CommitIdentity = {
   id: string
   workspaceId: string
@@ -149,12 +152,12 @@ export class ReviewDeliveryCoordinator {
     this.pullRequests = options.pullRequests || defaultPullRequests()
   }
 
-  private workspace(workspaceId: string): ReviewWorkspaceBinding & { worktreeRoot: string } {
+  private workspace(workspaceId: string): GitWorkspace {
     const workspace = this.options.resolveWorkspace(workspaceId)
     if (!workspace || workspace.mode !== 'git' || !workspace.worktreeRoot) {
       throw new ReviewDeliveryError('invalid', 'Git delivery requires a bound worktree')
     }
-    return workspace as ReviewWorkspaceBinding & { worktreeRoot: string }
+    return workspace as GitWorkspace
   }
 
   private async baseline(workspace: ReviewWorkspaceBinding) {
@@ -191,60 +194,67 @@ export class ReviewDeliveryCoordinator {
     return { remote: value.slice(0, split), branch: value.slice(split + 1) }
   }
 
+  private async prepareCommitPreview(intent: Extract<ReviewDeliveryIntent, { kind: 'commit' }>, workspace: GitWorkspace): Promise<PreparedPreview> {
+    const message = cleanText(intent.message, 'Commit message')
+    const baseline = await this.baseline(workspace)
+    if (baseline.indexRevision !== intent.expectedIndexRevision) throw new ReviewDeliveryError('stale', 'Staged revision changed before commit preview')
+    const patch = await run(workspace.worktreeRoot, 'git', ['diff', '--cached', '--binary', '--no-ext-diff', '--'])
+    if (patch.exitCode !== 0 || !patch.stdout.trim()) throw new ReviewDeliveryError('empty_commit', 'Nothing is staged for commit')
+    const configured = (await run(workspace.worktreeRoot, 'git', ['config', '--bool', 'commit.gpgsign'])).stdout.trim() === 'true'
+    const normalized = { ...intent, message }
+    return { intent: normalized, projection: {
+      kind: 'commit', workspaceId: intent.workspaceId, title: 'Commit staged revision',
+      detail: `${message}\nindex ${intent.expectedIndexRevision.slice(0, 12)}\n${configured ? 'Repository signing configured' : intent.sign ? 'Signing requested' : 'Signing not configured'}`,
+      expectedIndexRevision: intent.expectedIndexRevision, stagedPatchHash: sha256(patch.stdout),
+      stagedBytes: Buffer.byteLength(patch.stdout), signing: configured ? 'configured' : intent.sign ? 'requested' : 'off',
+    } }
+  }
+
+  private async preparePushPreview(intent: Extract<ReviewDeliveryIntent, { kind: 'push' }>, workspace: GitWorkspace): Promise<PreparedPreview> {
+    if (intent.force) throw new ReviewDeliveryError('force_forbidden', 'Force push is forbidden by the review delivery workflow')
+    const commit = this.commits.get(intent.commitId)
+    if (!commit || commit.workspaceId !== intent.workspaceId) throw new ReviewDeliveryError('push_unverified', 'Push requires a Host-issued commit identity')
+    const head = (await run(workspace.worktreeRoot, 'git', ['rev-parse', 'HEAD'])).stdout.trim()
+    const branch = await this.branch(workspace.worktreeRoot)
+    if (head !== commit.commitOid || branch !== commit.branch) throw new ReviewDeliveryError('stale', 'HEAD or branch changed after commit')
+    const upstream = await this.upstream(workspace.worktreeRoot)
+    if (!upstream && !intent.setUpstream) throw new ReviewDeliveryError('upstream_missing', 'Branch has no upstream; explicitly select a remote and set upstream')
+    const remote = await this.configuredRemote(workspace.worktreeRoot, intent.remote || upstream?.remote || '')
+    if (upstream && (remote !== upstream.remote || upstream.branch !== branch)) throw new ReviewDeliveryError('invalid', `Push must preserve configured upstream ${upstream.remote}/${upstream.branch}`)
+    const normalized = { ...intent, remote, setUpstream: !upstream, force: false as const }
+    return { intent: normalized, projection: {
+      kind: 'push', workspaceId: intent.workspaceId, title: `Push ${branch} → ${remote}`,
+      detail: `${commit.commitOid}\n${upstream ? `upstream ${upstream.remote}/${upstream.branch}` : 'set upstream explicitly'}\nForce disabled`,
+      commitId: commit.id, commitOid: commit.commitOid, branch, remote,
+      ...(upstream ? { upstream: `${upstream.remote}/${upstream.branch}` } : {}),
+    } }
+  }
+
+  private async preparePullRequestPreview(intent: Extract<ReviewDeliveryIntent, { kind: 'pr' }>, workspace: GitWorkspace): Promise<PreparedPreview> {
+    const push = this.pushes.get(intent.pushId)
+    if (!push || push.workspaceId !== intent.workspaceId) throw new ReviewDeliveryError('push_unverified', 'PR requires a remotely verified push identity')
+    const title = cleanText(intent.title, 'PR title')
+    const body = cleanText(intent.body, 'PR body', true)
+    const base = intent.base ? cleanText(intent.base, 'PR base') : undefined
+    const key = `${push.remote}\0${push.branch}\0${push.commitOid}`
+    const existing = this.prs.get(key) || await this.pullRequests.find({ cwd: workspace.worktreeRoot, branch: push.branch, commitOid: push.commitOid })
+    if (existing) throw new ReviewDeliveryError('duplicate_pr', `Pull request already exists: ${existing.url}`)
+    const normalized = { ...intent, title, body, ...(base ? { base } : {}) }
+    return { intent: normalized, projection: {
+      kind: 'pr', workspaceId: intent.workspaceId, title: `Create${intent.draft ? ' draft' : ''} PR for ${push.branch}`,
+      detail: `${title}\n${base ? `base ${base}` : 'default base'}\npush ${push.pushId}`,
+      commitId: push.id, commitOid: push.commitOid, branch: push.branch, remote: push.remote, pushId: push.pushId,
+    } }
+  }
+
   async preview(rawIntent: ReviewDeliveryIntent): Promise<ReviewDeliveryPreview> {
     const workspace = this.workspace(rawIntent.workspaceId)
-    let intent = structuredClone(rawIntent)
-    let projection: Omit<ReviewDeliveryPreview, 'id' | 'expiresAt'>
-    if (intent.kind === 'commit') {
-      const message = cleanText(intent.message, 'Commit message')
-      const baseline = await this.baseline(workspace)
-      if (baseline.indexRevision !== intent.expectedIndexRevision) throw new ReviewDeliveryError('stale', 'Staged revision changed before commit preview')
-      const patch = await run(workspace.worktreeRoot, 'git', ['diff', '--cached', '--binary', '--no-ext-diff', '--'])
-      if (patch.exitCode !== 0 || !patch.stdout.trim()) throw new ReviewDeliveryError('empty_commit', 'Nothing is staged for commit')
-      const configured = (await run(workspace.worktreeRoot, 'git', ['config', '--bool', 'commit.gpgsign'])).stdout.trim() === 'true'
-      intent = { ...intent, message }
-      projection = {
-        kind: 'commit', workspaceId: intent.workspaceId, title: 'Commit staged revision',
-        detail: `${message}\nindex ${intent.expectedIndexRevision.slice(0, 12)}\n${configured ? 'Repository signing configured' : intent.sign ? 'Signing requested' : 'Signing not configured'}`,
-        expectedIndexRevision: intent.expectedIndexRevision, stagedPatchHash: sha256(patch.stdout),
-        stagedBytes: Buffer.byteLength(patch.stdout), signing: configured ? 'configured' : intent.sign ? 'requested' : 'off',
-      }
-    } else if (intent.kind === 'push') {
-      if (intent.force) throw new ReviewDeliveryError('force_forbidden', 'Force push is forbidden by the review delivery workflow')
-      const commit = this.commits.get(intent.commitId)
-      if (!commit || commit.workspaceId !== intent.workspaceId) throw new ReviewDeliveryError('push_unverified', 'Push requires a Host-issued commit identity')
-      const head = (await run(workspace.worktreeRoot, 'git', ['rev-parse', 'HEAD'])).stdout.trim()
-      const branch = await this.branch(workspace.worktreeRoot)
-      if (head !== commit.commitOid || branch !== commit.branch) throw new ReviewDeliveryError('stale', 'HEAD or branch changed after commit')
-      const upstream = await this.upstream(workspace.worktreeRoot)
-      if (!upstream && !intent.setUpstream) throw new ReviewDeliveryError('upstream_missing', 'Branch has no upstream; explicitly select a remote and set upstream')
-      const remote = await this.configuredRemote(workspace.worktreeRoot, intent.remote || upstream?.remote || '')
-      if (upstream && (remote !== upstream.remote || upstream.branch !== branch)) {
-        throw new ReviewDeliveryError('invalid', `Push must preserve configured upstream ${upstream.remote}/${upstream.branch}`)
-      }
-      intent = { ...intent, remote, setUpstream: !upstream, force: false }
-      projection = {
-        kind: 'push', workspaceId: intent.workspaceId, title: `Push ${branch} → ${remote}`,
-        detail: `${commit.commitOid}\n${upstream ? `upstream ${upstream.remote}/${upstream.branch}` : 'set upstream explicitly'}\nForce disabled`,
-        commitId: commit.id, commitOid: commit.commitOid, branch, remote,
-        ...(upstream ? { upstream: `${upstream.remote}/${upstream.branch}` } : {}),
-      }
-    } else {
-      const push = this.pushes.get(intent.pushId)
-      if (!push || push.workspaceId !== intent.workspaceId) throw new ReviewDeliveryError('push_unverified', 'PR requires a remotely verified push identity')
-      const title = cleanText(intent.title, 'PR title')
-      const body = cleanText(intent.body, 'PR body', true)
-      const base = intent.base ? cleanText(intent.base, 'PR base') : undefined
-      const key = `${push.remote}\0${push.branch}\0${push.commitOid}`
-      const existing = this.prs.get(key) || await this.pullRequests.find({ cwd: workspace.worktreeRoot, branch: push.branch, commitOid: push.commitOid })
-      if (existing) throw new ReviewDeliveryError('duplicate_pr', `Pull request already exists: ${existing.url}`)
-      intent = { ...intent, title, body, ...(base ? { base } : {}) }
-      projection = {
-        kind: 'pr', workspaceId: intent.workspaceId, title: `Create${intent.draft ? ' draft' : ''} PR for ${push.branch}`,
-        detail: `${title}\n${base ? `base ${base}` : 'default base'}\npush ${push.pushId}`,
-        commitId: push.id, commitOid: push.commitOid, branch: push.branch, remote: push.remote, pushId: push.pushId,
-      }
-    }
+    const prepared = rawIntent.kind === 'commit'
+      ? await this.prepareCommitPreview(structuredClone(rawIntent), workspace)
+      : rawIntent.kind === 'push'
+        ? await this.preparePushPreview(structuredClone(rawIntent), workspace)
+        : await this.preparePullRequestPreview(structuredClone(rawIntent), workspace)
+    const { intent, projection } = prepared
     const id = `review_delivery_${randomUUID().replaceAll('-', '')}`
     const stored = { ...projection, id, expiresAt: new Date(Date.now() + PREVIEW_TTL_MS).toISOString(), intent, cwd: workspace.worktreeRoot }
     this.previews.set(id, stored)

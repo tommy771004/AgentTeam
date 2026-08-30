@@ -290,6 +290,7 @@ export class PiHostSupervisor {
     snapshotId?: string
     runId?: string
     settlementKind: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'crash'
+    activeWorkspaceRuns?: number
   }): Promise<ReviewSnapshotRef> {
     const response = await this.request('review/v1/finalize', input)
     if (response.error || !response.result?.reviewSnapshotRef) {
@@ -335,7 +336,7 @@ export class PiHostSupervisor {
   }
 
   async listReviewComments(snapshotId: string) { const response = await this.request('review/v1/comments/list', { snapshotId }); if (response.error || !response.result?.reviewComments) throw new Error(response.error?.message || 'Review comments read failed'); return response.result.reviewComments }
-  async saveReviewDraft(input: { id?: string; snapshotId: string; path: string; side?: 'old' | 'new'; line?: number; body: string }) { const response = await this.request('review/v1/draft/save', input); if (response.error || !response.result?.reviewComment) throw new Error(response.error?.message || 'Review draft save failed'); return response.result.reviewComment }
+  async saveReviewDraft(input: { id?: string; snapshotId: string; path: string; hunkId?: string; side?: 'old' | 'new'; line?: number; body: string }) { const response = await this.request('review/v1/draft/save', input); if (response.error || !response.result?.reviewComment) throw new Error(response.error?.message || 'Review draft save failed'); return response.result.reviewComment }
   async deleteReviewDraft(id: string) { const response = await this.request('review/v1/draft/delete', { id }); if (response.error) throw new Error(response.error.message) }
   async transitionReviewComment(id: string, status: import('../src/agent/reviewStateContract.ts').ReviewCommentStatus) { const response = await this.request('review/v1/comment/transition', { id, status }); if (response.error || !response.result?.reviewComment) throw new Error(response.error?.message || 'Review comment transition failed'); return response.result.reviewComment }
   async listReviewFileStates(snapshotId: string) { const response = await this.request('review/v1/file-state/list', { snapshotId }); if (response.error || !response.result?.reviewFileStates) throw new Error(response.error?.message || 'Review file states read failed'); return response.result.reviewFileStates }

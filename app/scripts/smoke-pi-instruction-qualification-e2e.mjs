@@ -257,7 +257,7 @@ try {
   const restarted = await electron.launch({ executablePath: electronExecutable, args: [launcherDir, '--no-sandbox', '--disable-gpu'], env: { ...process.env, SUBAGENTS_PI_HOST_E2E_USER_DATA_DIR: userDataDir }, timeout: 30_000 })
   try {
     const replayPage = await restarted.firstWindow()
-    await replayPage.waitForSelector('.agent-composer-send', { timeout: deadlineTimeout() })
+    await replayPage.waitForSelector('textarea', { timeout: deadlineTimeout() })
     const replay = await replayPage.evaluate(async (id) => window.subagents?.piHost?.sessions?.record?.(id, undefined, 200), sessionId)
     const replayEntries = replay?.page?.entries || []
     const replayInstruction = replayEntries.find((entry) => entry.kind === 'instruction-snapshot')

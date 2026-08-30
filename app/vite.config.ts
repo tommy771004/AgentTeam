@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import electron from 'vite-plugin-electron/simple'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
+import { existsSync, readdirSync, rmSync } from 'node:fs'
 import { buildRendererCsp } from './electron/securityPolicy'
 
 const fileProtocolModulePlugin = {
@@ -41,12 +42,43 @@ const rendererCspPlugin = {
   },
 }
 
+function clearRendererBuildFiles(directory: string) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === '.DS_Store') continue
+    const target = path.join(directory, entry.name)
+    if (entry.isDirectory()) {
+      clearRendererBuildFiles(target)
+      continue
+    }
+    rmSync(target, { force: true, maxRetries: 10, retryDelay: 50 })
+  }
+}
+
+let rendererOutDirCleaned = false
+const robustRendererOutDirPlugin = {
+  name: 'robust-renderer-out-dir',
+  apply: 'build' as const,
+  configResolved(config: { build: { outDir: string; emptyOutDir?: boolean } }) {
+    if (path.basename(config.build.outDir) !== 'dist') return
+    config.build.emptyOutDir = false
+    if (rendererOutDirCleaned) return
+    rendererOutDirCleaned = true
+    // Keep the directory tree stable: Finder can recreate .DS_Store at any
+    // level between rimraf's final readdir and rmdir, yielding ENOTEMPTY even
+    // after retries. Remove build-owned files, but never rmdir the directories;
+    // Vite can safely reuse the empty skeleton and harmless Finder metadata.
+    if (!existsSync(config.build.outDir)) return
+    clearRendererBuildFiles(config.build.outDir)
+  },
+}
+
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
     fileProtocolModulePlugin,
     rendererCspPlugin,
+    robustRendererOutDirPlugin,
     electron({
       main: {
         entry: 'electron/main.ts',

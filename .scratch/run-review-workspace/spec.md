@@ -1,6 +1,6 @@
 # Run Review Workspace（執行審查工作區）
 
-> 狀態：`可交給代理`
+> 狀態：`resolved`
 
 ## Problem Statement
 

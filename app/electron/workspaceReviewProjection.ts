@@ -22,7 +22,7 @@ export type ReviewTargetDescription = {
   immutable: boolean
   refreshable: boolean
   mutationCapable: boolean
-  status: 'ready' | 'partial' | 'missing' | 'stale'
+  status: ReviewArtifactProjection['status'] | 'stale'
   fileCount: number
   diagnostics: string[]
 }
@@ -122,6 +122,20 @@ async function git(cwd: string, args: string[]): Promise<string> {
   }
 }
 
+async function resolveCommitRef(cwd: string, ref: string): Promise<string> {
+  if (!ref || ref.startsWith('-') || ref.includes('\0') || /[\r\n]/.test(ref)) {
+    throw new WorkspaceReviewProjectionError('invalid', 'Invalid Git revision')
+  }
+  try {
+    return (await exec('git', ['-C', cwd, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], {
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+    })).stdout.trim()
+  } catch {
+    throw new WorkspaceReviewProjectionError('invalid', `Git revision ${ref} does not resolve to a commit`)
+  }
+}
+
 function zeroFields(value: string): string[] {
   return value.split('\0').filter(Boolean)
 }
@@ -153,7 +167,10 @@ async function loadGitRange(
 ): Promise<LoadedTarget> {
   if (workspace.mode !== 'git' || !workspace.worktreeRoot) throw new WorkspaceReviewProjectionError('unavailable', 'Git review target has no worktree')
   const cwd = workspace.worktreeRoot
-  const scope = target.kind === 'staged' ? ['--cached'] : [target.baseRef, target.headRef]
+  const resolvedRange = target.kind === 'branch-range'
+    ? await Promise.all([resolveCommitRef(cwd, target.baseRef), resolveCommitRef(cwd, target.headRef)])
+    : undefined
+  const scope = target.kind === 'staged' ? ['--cached'] : resolvedRange!
   const changes = parseChanges(await git(cwd, ['diff', '--name-status', '-z', '--find-renames', '--find-copies', ...scope, '--']))
   const payloads = new Map<string, string>()
   const manifest: ReviewFileManifestEntry[] = []
@@ -166,7 +183,7 @@ async function loadGitRange(
   }
   const revision = target.kind === 'staged'
     ? target.revision
-    : digest(`${target.baseRef}\0${target.headRef}\0${await git(cwd, ['rev-parse', target.baseRef, target.headRef])}`)
+    : digest(`${resolvedRange![0]}\0${resolvedRange![1]}`)
   return {
     description: {
       target,
@@ -191,7 +208,7 @@ function snapshotDescription(target: ReviewTarget, snapshot: ReviewArtifactProje
     immutable: true,
     refreshable: false,
     mutationCapable: false,
-    status: snapshot.status === 'ready' ? 'ready' : snapshot.status === 'partial' ? 'partial' : 'missing',
+    status: snapshot.status,
     fileCount: snapshot.manifest.length,
     diagnostics: [...snapshot.diagnostics],
   }
@@ -223,9 +240,12 @@ export class WorkspaceReviewProjection {
     const admission = await captureReviewWorkspaceAdmission({ runId: `live:${target.workspaceId}`, projectRoot: workspace.projectRoot, runnerKind: 'builtin' })
     if (!admission.canonical || admission.status === 'failed' || !admission.baseline) throw new WorkspaceReviewProjectionError('unavailable', 'Live workspace capture failed')
     if (target.revision !== admission.baseline.workingRevision) throw new WorkspaceReviewProjectionError('stale', 'Live workspace revision changed; refresh required')
-    const captured = await captureRunReviewSnapshot({ admission, threadId: `live:${target.workspaceId}` })
+    if (!admission.baseline.head) throw new WorkspaceReviewProjectionError('unavailable', 'Live workspace requires a Git HEAD baseline')
+    const liveAdmission = structuredClone(admission)
+    liveAdmission.baseline = { ...admission.baseline, workingTree: admission.baseline.head }
+    const captured = await captureRunReviewSnapshot({ admission: liveAdmission, threadId: `live:${target.workspaceId}` })
     return {
-      description: { target, revision: target.revision, immutable: false, refreshable: true, mutationCapable: true, status: captured.status === 'failed' ? 'partial' : captured.status, fileCount: captured.manifest.length, diagnostics: captured.diagnostics },
+      description: { target, revision: target.revision, immutable: false, refreshable: true, mutationCapable: true, status: captured.status, fileCount: captured.manifest.length, diagnostics: captured.diagnostics },
       manifest: captured.manifest,
       payloads: new Map(captured.payloads.map((payload) => [payload.payloadId, typeof payload.content === 'string' ? payload.content : Buffer.from(payload.content).toString('utf8')])),
       payloadRefs: new Map(),
@@ -233,21 +253,53 @@ export class WorkspaceReviewProjection {
   }
 
   private async loadSnapshotRange(target: Extract<ReviewTarget, { kind: 'snapshot-range' }>): Promise<LoadedTarget> {
-    const before = await this.loadSnapshot({ kind: 'run-snapshot', snapshotId: target.beforeSnapshotId })
-    const after = await this.loadSnapshot({ kind: 'run-snapshot', snapshotId: target.afterSnapshotId })
-    const beforeByPath = new Map(before.manifest.map((entry) => [entry.path, entry]))
-    const afterByPath = new Map(after.manifest.map((entry) => [entry.path, entry]))
-    const paths = [...new Set([...beforeByPath.keys(), ...afterByPath.keys()])].sort()
-    const manifest = paths.filter((path) => JSON.stringify(beforeByPath.get(path)) !== JSON.stringify(afterByPath.get(path))).map((path) => {
-      const next = afterByPath.get(path)
-      const previous = beforeByPath.get(path)
-      return next || { ...previous!, status: 'deleted' as const }
-    })
+    const [beforeArtifact, afterArtifact] = await Promise.all([
+      this.options.store.read(target.beforeSnapshotId),
+      this.options.store.read(target.afterSnapshotId),
+    ])
+    const beforeTree = beforeArtifact.settlement?.workingTree
+    const afterBaselineTree = afterArtifact.admission.baseline?.workingTree
+    const afterTree = afterArtifact.settlement?.workingTree
+    if (!beforeTree || !afterBaselineTree || !afterTree) {
+      throw new WorkspaceReviewProjectionError('unavailable', 'Snapshot range requires immutable working-tree identities')
+    }
+    if (beforeTree === afterBaselineTree) {
+      const after = await this.loadSnapshot({ kind: 'run-snapshot', snapshotId: target.afterSnapshotId })
+      return {
+        ...after,
+        description: {
+          ...after.description,
+          target,
+          revision: digest(`${beforeTree}\0${afterTree}`),
+          diagnostics: [...after.description.diagnostics, 'snapshot-range:direct-lineage'],
+        },
+      }
+    }
+    const beforeWorkspace = beforeArtifact.admission.workspace
+    const afterWorkspace = afterArtifact.admission.workspace
+    if (!beforeWorkspace || !afterWorkspace || beforeWorkspace.workspaceId !== afterWorkspace.workspaceId) {
+      throw new WorkspaceReviewProjectionError('invalid', 'Snapshot range requires the same workspace identity')
+    }
+    const workspace = await this.options.resolveWorkspace(beforeWorkspace.workspaceId)
+    if (!workspace || workspace.mode !== 'git' || !workspace.worktreeRoot) {
+      throw new WorkspaceReviewProjectionError('unavailable', 'Snapshot range Git objects are unavailable in the bound workspace')
+    }
+    const scope = [beforeTree, afterTree]
+    const changes = parseChanges(await git(workspace.worktreeRoot, ['diff', '--name-status', '-z', '--find-renames', '--find-copies', ...scope, '--']))
+    const manifest: ReviewFileManifestEntry[] = []
+    const payloads = new Map<string, string>()
+    for (const change of changes) {
+      const paths = change.oldPath ? [change.oldPath, change.path] : [change.path]
+      const patch = await git(workspace.worktreeRoot, ['diff', '--binary', '--no-ext-diff', '--find-renames', '--find-copies', ...scope, '--', ...paths])
+      const payloadRef = `patch_${digest(`${beforeTree}\0${afterTree}\0${change.path}\0${patch}`).slice(0, 32)}`
+      payloads.set(payloadRef, patch)
+      manifest.push({ ...change, binary: /GIT binary patch|Binary files/.test(patch), payloadRef })
+    }
     return {
-      description: { target, revision: digest(`${before.description.revision}\0${after.description.revision}`), immutable: true, refreshable: false, mutationCapable: false, status: before.description.status === 'partial' || after.description.status === 'partial' ? 'partial' : 'ready', fileCount: manifest.length, diagnostics: [...before.description.diagnostics, ...after.description.diagnostics] },
+      description: { target, revision: digest(`${beforeTree}\0${afterTree}`), immutable: true, refreshable: false, mutationCapable: false, status: beforeArtifact.status === 'partial' || afterArtifact.status === 'partial' ? 'partial' : 'ready', fileCount: manifest.length, diagnostics: [...beforeArtifact.diagnostics, ...afterArtifact.diagnostics, 'snapshot-range:recomputed-from-trees'] },
       manifest,
-      payloads: new Map([...before.payloads, ...after.payloads]),
-      payloadRefs: new Map([...before.payloadRefs, ...after.payloadRefs]),
+      payloads,
+      payloadRefs: new Map(),
     }
   }
 

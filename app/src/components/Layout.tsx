@@ -42,6 +42,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: '紀錄',
     items: [
+      { to: '/usage', label: '用量統計', icon: 'monitoring' },
       { to: '/records', label: '封存與日誌', icon: 'history' },
     ],
   },

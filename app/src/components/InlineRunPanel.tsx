@@ -2,14 +2,9 @@ import { memo, useEffect, useState, type ReactNode } from 'react'
 import { ContextUsageChip } from './ContextUsageChip'
 import { Icon } from './Icon'
 import { LogViewer } from './LogViewer'
-import { ElapsedTime } from './primitives/ElapsedTime'
-import { AgentThinking } from './primitives/AgentThinking'
-import { ShimmerLabel } from './primitives/ShimmerLabel'
-import { RunTaskRow } from './RunTaskRow'
 import { emptyAgentLike } from '../agent/localCliRun'
 import { deriveRunLifecycle, lifecycleToneClass, orchestrationFromAgent } from '../agent/runLifecycle'
 import {
-  EXTERNAL_CLI_UI_LABEL,
   formatRunnerCapabilitiesSummary,
   projectRunnerCapabilitySnapshot,
 } from '../agent/runners'
@@ -25,12 +20,13 @@ import { formatTokensCompact } from '../agent/contextUsageView'
 import { useRunContextUsage } from '../hooks/useRunContextUsage'
 import { useRunUsageRefresher } from '../hooks/useRunUsageRefresher'
 import type { TurnRecordEntry } from '../agent/turnRecord'
-import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
+import { useThreadStore } from '../store/threadStore'
 import { useWorkingStateProjectionStore } from '../store/workingStateProjectionStore'
-import { loopTypeZh } from '../i18n/zh'
-import type { AgentState, ExecutionStep } from '../agent/types'
+import type { AgentState } from '../agent/types'
 import type { ReviewTarget } from '../agent/reviewContract.ts'
-import { WorkingStateView } from './WorkingStateView'
+import { WorkingStateDiagnostics } from './WorkingStateView'
+import { projectRunStatusSurface } from '../agent/runStatusSurface.ts'
+import { RunStatusSurface } from './RunStatusSurface.tsx'
 
 /**
  * CloudCLI-style embedded run progress — no page navigation.
@@ -44,8 +40,7 @@ const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 
 // selector fallback breaks Object.is identity every render and triggers
 // "Maximum update depth exceeded" (React getSnapshot-must-be-cached loop).
 const EMPTY_RECORD_ENTRIES: TurnRecordEntry[] = []
-const EMPTY_ACTIVITY = { active: false, tasks: [], statusLine: '', thought: '', startedAt: 0, phase: 'starting' as const, terminal: null, recordEntries: EMPTY_RECORD_ENTRIES, recordTotal: 0 } as const
-const EMPTY_RUN_PLAN: ThreadPlanItem[] = []
+const EMPTY_ACTIVITY = { active: false, tasks: [], events: [], fileChanges: [], statusLine: '', thought: '', startedAt: 0, updatedAt: 0, phase: 'starting' as const, terminal: null, interaction: null, stopping: false, recordEntries: EMPTY_RECORD_ENTRIES, recordTotal: 0 } as const
 
 // The trajectory section remembers being opened across remounts — repeated
 // walks through a long run should not re-collapse it every time.
@@ -56,12 +51,6 @@ const RUNNER_GUARANTEE_LABEL = {
   reduced: 'Reduced guarantee',
   unavailable: 'Unavailable / degraded',
 } as const
-
-function LiveWorkingStateView({ runId, enabled }: { runId: string; enabled: boolean }) {
-  const projection = useWorkingStateProjectionStore((state) => state.byRunId[runId])
-  if (!enabled || !projection) return null
-  return <WorkingStateView projection={projection} />
-}
 
 function inlineRunnerPresentation(agent: AgentState, recordEntries: TurnRecordEntry[]) {
   const liveRecord = recordEntries.length
@@ -75,7 +64,6 @@ function inlineRunnerPresentation(agent: AgentState, recordEntries: TurnRecordEn
   return {
     declaration,
     isExternal,
-    isPiHost: !isExternal && agent.loopConfig.trigger === 'pi-host',
     capabilities: snapshot.capabilities,
     guarantee: RUNNER_GUARANTEE_LABEL[snapshot.guarantee],
   }
@@ -117,38 +105,6 @@ function useTrajectoryBinding(threadId: string, recordEntryCount: number) {
   return { open, sessionId, toggle }
 }
 
-function honestProgress(
-  taskCount: number,
-  completedTasks: number,
-  isPiHost: boolean,
-  stepCount: number,
-  completedSteps: number,
-  agentProgress: number,
-) {
-  const summary = taskCount
-    ? `${completedTasks}/${taskCount}`
-    : !isPiHost && stepCount ? `${completedSteps}/${stepCount}` : undefined
-  const progress = taskCount
-    ? Math.round((completedTasks / taskCount) * 100)
-    : !isPiHost && stepCount
-      ? Math.min(100, Math.max(0, agentProgress))
-      : undefined
-  return { summary, progress }
-}
-
-const STEP_ROW_STATUS = { PENDING: 'pending', IN_PROGRESS: 'active', COMPLETED: 'done', FAILED: 'failed', SKIPPED: 'skipped' } as const
-
-function CompactStepList({ steps, live }: { steps: ExecutionStep[]; live: boolean }) {
-  return (
-    <ol className="space-y-2" aria-label="執行步驟">
-      {steps.map((step, index) => (
-        <RunTaskRow key={step.step} text={step.description} status={STEP_ROW_STATUS[step.status]} index={index} live={live}
-          detail={step.result} meta={step.durationMs != null ? `${(step.durationMs / 1000).toFixed(1)}s` : undefined} />
-      ))}
-    </ol>
-  )
-}
-
 /**
  * The 上下文 section body as a self-subscribing leaf: the projection is
  * computed here and only while the section is open, so a usage-only update
@@ -166,60 +122,6 @@ const RunContextBody = memo(function RunContextBody({
   const contextUsage = useRunContextUsage(runId)
   return <ContextUsagePanel usage={contextUsage} fallbackTokens={fallbackTokens} degraded={degraded} />
 })
-
-function RunOverview({
-  status,
-  objective,
-  progress,
-  runnerSummary,
-  progressSummary,
-  live,
-  startedAt,
-}: {
-  status: string
-  objective: string
-  progress?: number
-  runnerSummary: string
-  progressSummary?: string
-  live: boolean
-  startedAt: number
-}) {
-  const timed = live && startedAt > 0
-  return (
-    <section className="border-b border-line px-4 py-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold text-ink-3">目前狀態</p>
-          <p className={`mt-1 truncate text-[13px] font-medium ${live ? 'text-accent-ink' : 'text-ink'}`}>{status}</p>
-        </div>
-        {progress !== undefined ? (
-          <span className="shrink-0 font-[family-name:var(--font-mono)] text-[18px] font-semibold tabular-nums text-accent-ink">
-            {progress}%
-          </span>
-        ) : live ? <AgentThinking variant="spin" className="shrink-0 text-accent-ink" /> : null}
-      </div>
-      <p className="mt-3 line-clamp-3 text-[13px] leading-relaxed text-ink-2">{objective || '等待任務內容…'}</p>
-      <div className="mt-3">
-        {progress !== undefined ? (
-          <div className="h-1.5 overflow-hidden rounded-full bg-inset">
-            <div
-              className="h-full rounded-full bg-accent transition-[width] duration-500 motion-reduce:transition-none"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        ) : null}
-        <div className={`${progress !== undefined ? 'mt-2' : ''} flex items-center justify-between gap-2 text-[10px] text-ink-3`}>
-          <span className="truncate">{runnerSummary}</span>
-          <span className="shrink-0 font-[family-name:var(--font-mono)] tabular-nums">
-            {timed ? <ElapsedTime startedAt={startedAt} /> : null}
-            {timed ? ' · ' : ''}
-            {progressSummary || (live ? '即時更新中' : '無進度項目')}
-          </span>
-        </div>
-      </div>
-    </section>
-  )
-}
 
 function TrajectorySection({ binding }: { binding: ReturnType<typeof useTrajectoryBinding> }) {
   if (!binding.sessionId) return null
@@ -354,40 +256,26 @@ export function InlineRunPanel({
   onOpenReview?: (target: ReviewTarget) => void
   onOpenVerification?: (snapshotId: string) => void
 }) {
-  const [progressOpen, setProgressOpen] = useState(true)
   const [detailsOpen, setDetailsOpen] = useState(false)
-  const [stepsOpen, setStepsOpen] = useState(false)
-  const [subAgentsOpen, setSubAgentsOpen] = useState(false)
   const [thoughtOpen, setThoughtOpen] = useState(false)
-  // Open by default: this is where the token microcopy in the process feed
-  // sends the reader, so arriving on a collapsed section would answer nothing.
-  const [contextOpen, setContextOpen] = useState(true)
+  // Context remains available, but the default rail is status + one adaptive
+  // secondary surface. Opening diagnostics is an explicit user choice.
+  const [contextOpen, setContextOpen] = useState(false)
   // 執行軌跡 — collapsed until asked; the choice persists across remounts.
 
   const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
   const activity = useRunActivityStore((s) => s.presentations[runId]) || EMPTY_ACTIVITY
+  const workingStateProjection = useWorkingStateProjectionStore((state) => state.byRunId[runId])
   const approvalPending = usePermissionAskStore((s) =>
     Boolean(
       (s.current?.runId && s.current.runId === runId) ||
         s.queue.some((item) => item.runId === runId),
     ),
   )
-  const persistedPlan = useThreadStore(
-    (s) => s.threads.find((t) => t.id === threadId)?.runPlan || EMPTY_RUN_PLAN,
-  )
   const reviewSnapshotRef = useThreadStore((state) => state.threads
     .find((thread) => thread.id === threadId)?.bubbles
     .find((bubble) => bubble.role === 'run' && bubble.runSummary?.runId === runId)?.runSummary?.reviewSnapshotRef)
-  const tasks = activity.tasks.length
-    ? activity.tasks
-    : persistedPlan.map((item) => ({
-        id: item.id,
-        text: item.text,
-        status: item.status,
-        at: Date.parse(item.at) || Date.now(),
-      }))
-
   const runActive = isRunning || activity.active
 
   // 與 feed 共用同一道用量對時輪詢；in-flight 去重，兩個掛載面不會疊加 IPC。
@@ -407,21 +295,9 @@ export function InlineRunPanel({
   const live = lifecycle.live
 
   const runnerPresentation = inlineRunnerPresentation(agent, activity.recordEntries)
-  const { declaration: runnerDeclaration, isExternal, isPiHost } = runnerPresentation
+  const { declaration: runnerDeclaration, isExternal } = runnerPresentation
   const runnerCaps = runnerPresentation.capabilities
   const runnerGuarantee = runnerPresentation.guarantee
-  // Chronological activity stays in the center feed. This rail reports only
-  // structured task/runner steps, so the two surfaces answer different needs.
-  const completedTasks = tasks.filter((task) => task.status === 'done').length
-  const completedSteps = agent.steps.filter((step) => step.status === 'COMPLETED').length
-  const { summary: progressSummary, progress: measuredProgress } = honestProgress(
-    tasks.length,
-    completedTasks,
-    isPiHost,
-    agent.steps.length,
-    completedSteps,
-    agent.progress,
-  )
   const reasoningCount = activity.recordEntries.filter((entry) => entry.kind === 'reasoning').length
   const detailSummary = [
     reasoningCount ? `${reasoningCount} 段推理` : activity.thought ? '推理' : '',
@@ -430,7 +306,14 @@ export function InlineRunPanel({
   ]
     .filter(Boolean)
     .join(' · ')
-  const currentStatus = lifecycle.label
+  const statusSurface = projectRunStatusSurface({
+    lifecycle,
+    capabilities: runnerCaps,
+    isExternal,
+    activity,
+    workingState: workingStateProjection,
+    approvalPending,
+  })
 
   // 上下文 — the section head hosts a self-subscribing chip and the body is a
   // memo leaf with its own projection, so usage changes re-render neither the
@@ -450,10 +333,6 @@ export function InlineRunPanel({
   // retries as events arrive — a binding created moments later is found,
   // instead of one unlucky race hiding the entry for the mount's lifetime.
   const trajectory = useTrajectoryBinding(threadId, activity.recordEntries.length)
-  const runnerSummary = isExternal
-    ? `${EXTERNAL_CLI_UI_LABEL}${agent.externalRunnerKind ? ` · ${agent.externalRunnerKind}` : ''}`
-    : `${loopTypeZh(agent.loopConfig.loopType)} · 第 ${agent.currentIteration}/${agent.loopConfig.maxIterations} 回合`
-
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-line bg-surface text-ink">
       <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
@@ -467,7 +346,7 @@ export function InlineRunPanel({
             <div className="flex items-center gap-2">
               <span className="text-[13px] font-semibold text-ink">{live ? '任務狀態' : '結果摘要'}</span>
               <span className={`text-[11px] font-medium ${lifecycleToneClass(lifecycle.tone)}`}>
-                {lifecycle.label}
+                {statusSurface.label}
               </span>
             </div>
           </div>
@@ -481,101 +360,7 @@ export function InlineRunPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
-        <RunOverview
-          status={currentStatus}
-          objective={agent.objective}
-          progress={measuredProgress}
-          runnerSummary={runnerSummary}
-          progressSummary={progressSummary}
-          live={live}
-          startedAt={activity.startedAt}
-        />
-
-        <LiveWorkingStateView runId={runId} enabled={isPiHost} />
-
-        <PanelSection
-          id="run-progress"
-          title="任務步驟"
-          summary={tasks.length && progressSummary ? `${progressSummary} 完成` : progressSummary}
-          open={progressOpen}
-          onToggle={() => setProgressOpen((value) => !value)}
-        >
-          {tasks.length > 0 ? (
-            <ul className="space-y-2" aria-label="任務步驟">
-              {tasks.map((task, index) => (
-                <RunTaskRow key={`${runId}:${task.id}`} text={task.text} status={task.status} index={index} live={live} />
-              ))}
-            </ul>
-          ) : isPiHost && live ? (
-            <p className="flex items-center gap-2 text-[12px] text-ink-3" role="status">
-              <AgentThinking variant="spin" className="text-accent-ink" />
-              <ShimmerLabel active>{currentStatus}</ShimmerLabel>
-            </p>
-          ) : !isPiHost && agent.steps.length > 0 ? (
-            <CompactStepList key={runId} steps={agent.steps} live={live} />
-          ) : live && agent.loopConfig.trigger === 'local-cli' ? (
-            <p className="flex items-center gap-2 text-[12px] text-ink-3">
-              <AgentThinking variant="spin" className="text-accent-ink" />
-              <ShimmerLabel active>正在分析任務…</ShimmerLabel>
-            </p>
-          ) : (
-            <p className="text-[12px] text-ink-3">
-              {live ? '等待引擎建立任務步驟…' : '本次執行沒有結構化任務步驟。'}
-            </p>
-          )}
-
-          {tasks.length > 0 && !isPiHost && agent.steps.length > 0 ? (
-            <div className="mt-4 border-t border-line pt-3">
-              <button
-                type="button"
-                aria-expanded={stepsOpen}
-                onClick={() => setStepsOpen((value) => !value)}
-                className="flex w-full items-center gap-2 text-left text-[11px] text-ink-3 transition-colors hover:text-ink"
-              >
-                <span className="flex-1">引擎步驟</span>
-                <span className="font-[family-name:var(--font-mono)]">{agent.steps.length}</span>
-                <Icon name={stepsOpen ? 'expand_less' : 'expand_more'} size={15} />
-              </button>
-              {stepsOpen ? <div className="mt-3"><CompactStepList key={runId} steps={agent.steps} live={live} /></div> : null}
-            </div>
-          ) : null}
-
-          {agent.subAgents.length > 0 ? (
-            <div className="mt-4 border-t border-line pt-3">
-              <button
-                type="button"
-                aria-expanded={subAgentsOpen}
-                onClick={() => setSubAgentsOpen((value) => !value)}
-                className="flex w-full items-center gap-2 text-left text-[11px] text-ink-3 transition-colors hover:text-ink"
-              >
-                <span className="flex-1">子代理</span>
-                <span className="font-[family-name:var(--font-mono)]">
-                  {agent.subAgents.filter((item) => item.status === 'done').length}/{agent.subAgents.length}
-                </span>
-                <Icon name={subAgentsOpen ? 'expand_less' : 'expand_more'} size={15} />
-              </button>
-              {subAgentsOpen ? (
-                <div className="mt-3 space-y-2">
-                  {agent.subAgents.map((item) => (
-                    <div key={item.id} className="flex items-start gap-2 text-[11px]">
-                      <Icon
-                        name={item.status === 'done' ? 'check_circle' : item.status === 'error' ? 'cancel' : item.status === 'active' ? 'progress_activity' : 'radio_button_unchecked'}
-                        size={14}
-                        className={item.status === 'done' ? 'text-green' : item.status === 'error' ? 'text-red' : item.status === 'active' ? 'animate-spin text-accent-ink' : 'text-ink-3'}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="text-ink-2">{item.name}</span>
-                        <span className="ml-1 text-ink-3">· {item.role}</span>
-                        {item.model ? <span className="ml-1 font-mono text-[10px] text-ink-3">· {item.model}</span> : null}
-                        {item.lastMessage ? <span className="mt-0.5 block truncate text-[10px] text-ink-3">{item.lastMessage}</span> : null}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </PanelSection>
+        <RunStatusSurface projection={statusSurface} startedAt={activity.startedAt} />
 
         <PanelSection
           id="run-context"
@@ -589,15 +374,16 @@ export function InlineRunPanel({
 
         <TrajectorySection binding={trajectory} />
 
-        {detailSummary || isExternal || agent.loadedCapabilityIds.length > 0 ? (
+        {detailSummary || isExternal || agent.loadedCapabilityIds.length > 0 || workingStateProjection ? (
           <PanelSection
             id="run-details"
-            title="詳細紀錄"
+            title="執行資訊"
             summary={detailSummary || '執行資訊'}
             open={detailsOpen}
             onToggle={() => setDetailsOpen((value) => !value)}
           >
             <div className="space-y-4">
+              {workingStateProjection ? <WorkingStateDiagnostics projection={workingStateProjection} /> : null}
               {reasoningCount || activity.thought ? (
                 <div>
                   <button

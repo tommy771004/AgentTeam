@@ -8,12 +8,15 @@ import {
 } from '../components/settings/SettingsChrome'
 import { LogViewer } from '../components/LogViewer'
 import { ForkFromCheckpoint } from '../components/ForkFromCheckpoint'
-import { WorkingStateView } from '../components/WorkingStateView'
+import { WorkingStateDiagnostics } from '../components/WorkingStateView'
+import { RunStatusSurface } from '../components/RunStatusSurface.tsx'
 import { useAgentStore } from '../store/agentStore'
 import type { ArchiveRecord } from '../agent/types'
 import { recordRunnerDeclaration, turnRecordEntries } from '../agent/turnRecord'
 import { formatRunnerCapabilitiesSummary, projectRunnerCapabilitySnapshot } from '../agent/runners'
 import { projectWorkingStateEntries, unavailableWorkingStateProjection } from '../agent/workingStateProjection'
+import { deriveRunLifecycle } from '../agent/runLifecycle.ts'
+import { projectRunStatusSurface } from '../agent/runStatusSurface.ts'
 import { STATUS_ZH, loopTypeZh, statusZh } from '../i18n/zh'
 
 const SECTIONS = [
@@ -23,21 +26,50 @@ const SECTIONS = [
 
 const PAGE_SIZE = 8
 
-function ArchiveWorkingState({ record, fallbackId }: { record?: ArchiveRecord['turnRecord']; fallbackId: string }) {
-  const projection = useMemo(() => record
-    ? projectWorkingStateEntries(
-        turnRecordEntries(record),
-        false,
-      )
-    : unavailableWorkingStateProjection(fallbackId), [record, fallbackId])
-  return <WorkingStateView projection={projection} />
+function archiveWorkingState(archive: ArchiveRecord) {
+  return archive.turnRecord
+    ? projectWorkingStateEntries(turnRecordEntries(archive.turnRecord), false)
+    : unavailableWorkingStateProjection(archive.id)
 }
 
-function ArchiveRunnerGuarantee({ archive }: { archive: ArchiveRecord }) {
+function ArchiveRunStatus({ archive }: { archive: ArchiveRecord }) {
   const snapshot = useMemo(() => projectRunnerCapabilitySnapshot(
     recordRunnerDeclaration(archive.turnRecord),
     archive.runnerCapabilities,
   ), [archive.turnRecord, archive.runnerCapabilities])
+  const workingState = useMemo(() => archiveWorkingState(archive), [archive])
+  const lifecycle = deriveRunLifecycle({
+    status: archive.status === 'warning' ? 'success' : archive.status,
+    terminal: archive.status !== 'running',
+    active: archive.status === 'running',
+    orchestration: {
+      iterations: archive.iterations,
+      maxIterations: archive.maxIterations,
+      executionKind: archive.executionKind,
+    },
+  })
+  const projection = projectRunStatusSurface({
+    lifecycle,
+    capabilities: snapshot.capabilities,
+    isExternal: archive.executionKind === 'external',
+    activity: {
+      events: [],
+      fileChanges: [],
+      terminal: archive.status === 'running' ? null : true,
+      updatedAt: Date.parse(archive.timestamp) || 0,
+      interaction: null,
+    },
+    workingState,
+  })
+  return <RunStatusSurface projection={projection} startedAt={0} />
+}
+
+function ArchiveRunnerDiagnostics({ archive }: { archive: ArchiveRecord }) {
+  const snapshot = useMemo(() => projectRunnerCapabilitySnapshot(
+    recordRunnerDeclaration(archive.turnRecord),
+    archive.runnerCapabilities,
+  ), [archive.turnRecord, archive.runnerCapabilities])
+  const workingState = useMemo(() => archiveWorkingState(archive), [archive])
   const label = snapshot.guarantee === 'host-verified'
     ? 'Host verified'
     : snapshot.guarantee === 'reduced'
@@ -46,15 +78,16 @@ function ArchiveRunnerGuarantee({ archive }: { archive: ArchiveRecord }) {
         ? 'Run snapshot'
         : 'Unavailable / degraded'
   return (
-    <p className="text-xs leading-relaxed text-on-surface-variant">
-      Runner guarantee: {label}. {formatRunnerCapabilitiesSummary(snapshot.capabilities)}
-    </p>
+    <details className="border-b border-line pb-3">
+      <summary className="cursor-pointer text-xs font-semibold text-on-surface-variant">執行資訊</summary>
+      <div className="mt-3 space-y-3">
+        <p className="text-xs leading-relaxed text-on-surface-variant">
+          Runner guarantee: {label}. {formatRunnerCapabilitiesSummary(snapshot.capabilities)}
+        </p>
+        <WorkingStateDiagnostics projection={workingState} />
+      </div>
+    </details>
   )
-}
-
-function PlainBrowserWorkingStateNotice() {
-  if (typeof window.subagents?.piHost?.sessions?.list === 'function') return null
-  return <ArchiveWorkingState fallbackId="plain-browser" />
 }
 
 export function RecordsPage() {
@@ -132,8 +165,6 @@ function ArchiveSection() {
           />
         </div>
       </div>
-
-      <PlainBrowserWorkingStateNotice />
 
       <div className="app-panel overflow-hidden">
         <div className="overflow-x-auto">
@@ -242,8 +273,10 @@ function ArchiveSection() {
             </div>
             <div className="p-5 overflow-y-auto custom-scrollbar space-y-3">
               <p className="text-sm">{selected.objective}</p>
-              <ArchiveRunnerGuarantee archive={selected} />
-              <ArchiveWorkingState record={selected.turnRecord} fallbackId={selected.id} />
+              <div className="overflow-hidden rounded-control border border-line">
+                <ArchiveRunStatus archive={selected} />
+              </div>
+              <ArchiveRunnerDiagnostics archive={selected} />
               {selected.result && (
                 <pre className="bg-surface border border-white/10 rounded-lg p-3 text-[12px] font-[family-name:var(--font-mono)] text-on-surface-variant whitespace-pre-wrap">
                   {selected.result}

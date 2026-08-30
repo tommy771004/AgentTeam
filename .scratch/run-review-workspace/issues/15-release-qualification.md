@@ -1,6 +1,6 @@
 # 15 — Release qualification
 
-Status: 可交給代理
+Status: resolved
 Spec: `.scratch/run-review-workspace/spec.md`
 
 ## What to build
@@ -9,12 +9,14 @@ Spec: `.scratch/run-review-workspace/spec.md`
 
 ## Acceptance criteria
 
-- [ ] contract、SQLite、Git fixtures、settlement/recovery、comment/follow-up、verification、mutation focused smokes 全在 `npm run smoke` 主鏈並綠
-- [ ] 真 Electron builtin + external CLI：run → snapshot → reload/restart → review → feedback → new snapshot 全鏈通過
-- [ ] 歷史 A 在 workspace mutate/commit/B 完成後 byte/hash 不變；shared checkout 誠實降級
-- [ ] stage/revert stale CAS、deny、crash recovery；commit/push/PR error matrix 通過
-- [ ] rendered desktop/narrow UI、keyboard、focus、overflow、large diff、partial/missing/error states 實際檢查
-- [ ] `npm run build`、`npx oxlint src`、full `npm run smoke` 綠，tracker/DEV_STATE/spec/ADR/evidence 一 hop 對帳
+- [x] contract、SQLite、Git fixtures、settlement/recovery、comment/follow-up、verification、mutation focused smokes 全在 `npm run smoke` 主鏈並綠
+- [x] 真 Electron builtin + external CLI：run → snapshot → reload/restart → review → feedback → new snapshot 全鏈通過
+- [x] 歷史 A 在 workspace mutate/commit/B 完成後 byte/hash 不變；shared checkout 誠實降級
+- [x] stage/revert stale CAS、deny、crash recovery；commit/push/PR error matrix 通過
+- [x] rendered desktop/narrow UI、keyboard、focus、overflow、large diff、partial/missing/error states 實際檢查
+- [x] `npm run build`、`npx oxlint src`、full `npm run smoke` 綠，tracker/DEV_STATE/spec/ADR/evidence 一 hop 對帳
+
+Qualification: [`.scratch/run-review-workspace/qualification.md`](../qualification.md)
 
 ## Blocked by
 

@@ -2,6 +2,18 @@
 
 截至 2026-08-30。
 
+## 本日收口：Adaptive Agent Run Status Surface
+
+`.scratch/adaptive-agent-run-status-surface` 1/1 ticket resolved。Live run rail 現在固定以 bounded「執行狀態」回答目前 phase，第二區只依 frozen capability 與 Host/runtime evidence 顯示「任務進度」、「最近活動」、「需要你處理」或「執行摘要」；沒有實質內容時隱藏。Objective、assistant/instruction bodies、reference history、constraints、absolute paths、raw output、Host revision 與 runner guarantee 不再成為預設狀態文案，診斷資料留在預設收合且可鍵盤操作的「執行資訊」。External CLI process success 明確不冒充 Checker completion。
+
+真 `InlineRunPanel` rendered matrix 覆蓋 builtin、External CLI、approval/auth/input、terminal、simple-hide、hostile context、reload 與 accessibility；`npm run smoke:run-status-surface`、91 項 capability guards、`npm run build`、`npx oxlint src`（exit 0，三個既有 warning）及完整 `npm run smoke` 全綠。畫面證據與一 hop 對帳見 `.scratch/adaptive-agent-run-status-surface/qualification.md`。
+
+## 本日收口：Run Review Workspace
+
+`.scratch/run-review-workspace` 15/15 tickets resolved。Host-owned immutable Run Review Snapshot 已涵蓋 admission binding、settlement capture、restart/reload、export/import/retention、comments/follow-up、verification與 preview-first Git delivery；歷史 snapshot 不 fallback 至 live working tree，shared checkout 以 `shared`／`partial` 誠實降級，stage/revert/commit/push/PR 全受 revision CAS、approval 與 crash recovery 保護。
+
+Release qualification 已通過 `npm run build`、`npx oxlint src`（exit 0，三個既有 warning）、`npm run smoke:review-workspace-binding`、真 Electron builtin + Codex CLI 的 `npm run qualify:review-real-runners`，以及單一非重疊程序的完整 `npm run smoke`。真 renderer 另驗證 desktop、320px narrow、keyboard/focus/overflow、205-file large diff，以及 partial/binary/missing/error states。一 hop 證據見 `.scratch/run-review-workspace/qualification.md` 與 ADR-0054。
+
 ## 本日進展：Codex-aligned personalization 本機收口
 
 Codex-aligned personalization 的 Host-owned Instruction Repository、Pi resource discovery、immutable Task admission snapshot、Turn Record replay、atomic project-file CAS、Personalization UI 與 outbound authority gates 已完成。本輪 `npm run build`、`smoke:instructions`、`smoke:instruction-release`、完整 `npm run smoke` 與 real Pi Host strict-provenance E2E 全綠；anti-slop UI 複查另以 desktop、conflict 與 280px narrow 真 renderer 畫面驗證，修正 shared Settings button 的 40px hit target 與 `focus-visible`。
@@ -56,4 +68,4 @@ Ticket 15 完成 contract：Pi Host Protocol v5 移除 whole-bundle `memory/*` �
 
 ## 下一步
 
-依 `.scratch/INDEX.md` Active frontier 排工：codex-aligned personalization 只剩 #11 外部 native-discovery qualification；其餘工作優先完成 subdesign-architecture-deepening #05 的 protocol domain extraction，external-cli-durable-harness #07 的未安裝 provider 真機證據仍需外部環境。
+依 `.scratch/INDEX.md` Active frontier 排工：codex-aligned personalization 只剩 #11 外部 native-discovery qualification；可直接實作項目優先完成 subdesign-architecture-deepening #05 的 protocol domain extraction；external-cli-durable-harness #07 的未安裝 provider 真機證據仍需外部環境。

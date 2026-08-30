@@ -24,6 +24,8 @@ try {
   await git(repo, ['config', 'user.email', 'fixture@example.com'])
   await git(repo, ['config', 'user.name', 'Fixture'])
   await writeFile(join(repo, 'a.ts'), 'before\n')
+  const multiBaseline = Array.from({ length: 90 }, (_, index) => `line ${index}`).join('\n') + '\n'
+  await writeFile(join(repo, 'multi.ts'), multiBaseline)
   await git(repo, ['add', '.'])
   await git(repo, ['commit', '-m', 'baseline'])
 
@@ -35,6 +37,7 @@ try {
   const snapshotId = admitted.result?.reviewAdmission?.snapshotId
   assert.ok(snapshotId)
   await writeFile(join(repo, 'a.ts'), 'after\n')
+  await writeFile(join(repo, 'multi.ts'), multiBaseline.replace('line 2', 'line two').replace('line 70', 'line seventy'))
   const finalized = await request(host, messages, 3, 'review/v1/finalize', { snapshotId, settlementKind: 'completed' })
   assert.equal(finalized.result?.reviewSnapshotRef?.status, 'ready', JSON.stringify(finalized))
   const artifact = await store.read(snapshotId!)
@@ -47,6 +50,15 @@ try {
   assert.equal(files.result?.reviewFiles?.items[0]?.path, 'a.ts')
   const diff = await request(host, messages, 33, 'review/v1/file-diff', { target, path: 'a.ts', maxBytes: 64 * 1024 })
   assert.match(diff.result?.reviewDiff?.items.map((hunk) => hunk.content).join('') || '', /after/)
+  const multiDiff = await request(host, messages, 331, 'review/v1/file-diff', { target, path: 'multi.ts', maxBytes: 64 * 1024 })
+  const multiHunks = multiDiff.result?.reviewDiff?.items.filter((hunk) => hunk.header.startsWith('@@')) || []
+  assert.equal(multiHunks.length, 2)
+  const secondNewLine = Number(multiHunks[1]!.header.match(/^@@ -\d+(?:,\d+)? \+(\d+)/)?.[1])
+  const anchored = await request(host, messages, 332, 'review/v1/draft/save', { snapshotId, path: 'multi.ts', hunkId: multiHunks[1]!.id, side: 'new', line: secondNewLine, body: 'Anchor the second hunk' })
+  assert.equal(anchored.result?.reviewComment?.anchor.line, secondNewLine)
+  const wrongHunk = await request(host, messages, 333, 'review/v1/draft/save', { snapshotId, path: 'multi.ts', hunkId: multiHunks[0]!.id, side: 'new', line: secondNewLine, body: 'Must fail closed' })
+  assert.equal(wrongHunk.error?.code, 'invalid_request')
+  await request(host, messages, 334, 'review/v1/draft/delete', { id: anchored.result?.reviewComment?.id })
   const draft = await request(host, messages, 34, 'review/v1/draft/save', { snapshotId, path: 'a.ts', side: 'new', line: 1, body: 'Please keep this behavior' })
   assert.equal(draft.result?.reviewComment?.status, 'draft', JSON.stringify(draft))
   const commentId = draft.result?.reviewComment?.id

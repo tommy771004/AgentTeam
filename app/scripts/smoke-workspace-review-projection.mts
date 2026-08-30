@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
@@ -29,6 +29,8 @@ try {
   const admissionA = await captureReviewWorkspaceAdmission({ runId: 'run_a', projectRoot: repo, runnerKind: 'builtin' })
   if (!admissionA.canonical || admissionA.status !== 'pending' || !admissionA.workspace) throw new Error('canonical admission A required')
   await store.beginRun({ admission: admissionA, threadId: 'thread' })
+  const pendingProjection = new WorkspaceReviewProjection({ store, resolveWorkspace: () => admissionA.workspace })
+  assert.equal((await pendingProjection.describeTarget({ kind: 'run-snapshot', snapshotId: admissionA.snapshotId })).status, 'pending')
   const changedLines = lines.replace('line 2', 'line two').replace('line 70', 'line seventy')
   await writeFile(join(repo, 'large file.ts'), changedLines)
   await writeFile(join(repo, '路徑.ts'), 'snapshot A\n')
@@ -102,10 +104,20 @@ try {
   const branchProjection = new WorkspaceReviewProjection({ store, resolveWorkspace: () => branchAdmission.workspace })
   const branchTarget = { kind: 'branch-range' as const, workspaceId: branchAdmission.workspace.workspaceId, baseRef: base, headRef: head }
   assert.deepEqual((await branchProjection.listFiles(branchTarget)).items.map((entry) => entry.path), ['a.ts'])
+  const injectedOutput = join(root, 'injected.patch')
+  await assert.rejects(
+    () => branchProjection.describeTarget({ ...branchTarget, baseRef: `--output=${injectedOutput}` }),
+    (error: unknown) => error instanceof WorkspaceReviewProjectionError && error.code === 'invalid',
+  )
+  await assert.rejects(() => access(injectedOutput))
 
   const rangeTarget = { kind: 'snapshot-range' as const, beforeSnapshotId: admissionA.snapshotId, afterSnapshotId: admissionB.snapshotId }
   assert.equal((await projection.describeTarget(rangeTarget)).immutable, true)
   assert.deepEqual((await projection.listFiles(rangeTarget, { query: '路徑' })).items.map((entry) => entry.path), ['路徑.ts'])
+  const rangePatch = (await projection.readFileDiff(rangeTarget, '路徑.ts')).items.map((item) => item.content).join('')
+  assert.match(rangePatch, /-snapshot A/)
+  assert.match(rangePatch, /\+snapshot B/)
+  assert.doesNotMatch(rangePatch, /-base/)
 
   const controller = new AbortController()
   controller.abort()

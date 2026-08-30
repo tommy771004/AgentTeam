@@ -1447,6 +1447,37 @@ export function SettingsPage() {
                 }
               />
               <SettingsRow
+                title="永久用量統計"
+                description="不隨封存保留期清除；可在此手動重設"
+                control={
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className={settingsBtnCls}
+                      onClick={() => { window.location.hash = '#/usage' }}
+                    >
+                      開啟
+                    </button>
+                    <button
+                      type="button"
+                      className={settingsBtnCls + ' text-error border-error/30'}
+                      onClick={async () => {
+                        if (!confirm('清除永久用量統計？這不會刪除封存，但統計無法復原。')) return
+                        try {
+                          const { clearUsageLedger } = await import('../agent/usageLedgerClient')
+                          await clearUsageLedger()
+                          setDataMsg('永久用量統計已清除')
+                        } catch (e) {
+                          setDataMsg(e instanceof Error ? e.message : String(e))
+                        }
+                      }}
+                    >
+                      清除
+                    </button>
+                  </div>
+                }
+              />
+              <SettingsRow
                 title="刪除全部對話"
                 description="不可復原"
                 control={
