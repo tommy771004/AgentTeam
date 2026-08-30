@@ -50,6 +50,7 @@ const RUNNER_GUARANTEE_LABEL = {
   'run-snapshot': 'Run snapshot',
   reduced: 'Reduced guarantee',
   unavailable: 'Unavailable / degraded',
+  'legacy-unrecorded': 'Legacy record · guarantee not recorded',
 } as const
 
 function inlineRunnerPresentation(agent: AgentState, recordEntries: TurnRecordEntry[]) {

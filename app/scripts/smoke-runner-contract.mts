@@ -80,6 +80,14 @@ test('presentation uses only a declared or run-frozen capability snapshot', () =
   assert.equal(Object.isFrozen(external.capabilities), true)
 })
 
+test('legacy archive absence is historical missing evidence, not current Host degradation', () => {
+  const legacy = projectRunnerCapabilitySnapshot(undefined, undefined, {
+    missingEvidence: 'legacy-unrecorded',
+  })
+  assert.equal(legacy.guarantee, 'legacy-unrecorded')
+  assert.equal(legacy.capabilities.checkers, false)
+})
+
 // ── continueGoal contract: one builder, no per-runner prompt invention ──
 test('builtin/external continueGoal derive one contract from the same override', () => {
   // The Goal resume state a builtin run restored from. The external CLI path
@@ -151,6 +159,7 @@ test('runDispatch drives the CLI prompt through the shared contract builder', ()
 
 test('plain-browser and historical UI never infer Host guarantees from current settings', () => {
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
+  const agentStore = fs.readFileSync(path.join(appRoot, 'src/store/agentStore.ts'), 'utf8')
   const panel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
   const continuation = fs.readFileSync(path.join(appRoot, 'src/components/RunContinuationActions.tsx'), 'utf8')
   const records = fs.readFileSync(path.join(appRoot, 'src/pages/RecordsPage.tsx'), 'utf8')
@@ -159,6 +168,10 @@ test('plain-browser and historical UI never infer Host guarantees from current s
   assert.doesNotMatch(panel, /capabilitiesForRunner/)
   assert.doesNotMatch(continuation, /capabilitiesForRunner/)
   assert.match(records, /projectRunnerCapabilitySnapshot/)
+  assert.match(agentStore, /failedPiHostRunSnapshot/,
+    'a failed Pi RPC must preserve the Host record already observed before settlement')
+  assert.match(agentStore, /runnerCapabilities: previous\?\.runnerCapabilities \|\| \{ \.\.\.BUILTIN_RUNNER_CAPABILITIES \}/,
+    'a failed builtin RPC keeps its frozen runner contract instead of presenting Unavailable / degraded')
 })
 
 // ── Trigger admission: fail-closed, now at the coordinator's policy seam ──

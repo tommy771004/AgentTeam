@@ -296,6 +296,28 @@ function publishRun(set: (partial: Partial<AgentStore>) => void, get: () => Agen
   })
 }
 
+async function failedPiHostRunSnapshot(
+  runId: string,
+  previous: AgentState | null,
+): Promise<Partial<AgentState>> {
+  let turnRecord = previous?.turnRecord
+  try {
+    const { useRunActivityStore } = await import('./runActivityStore.ts')
+    const observed = useRunActivityStore.getState().getPresentation(runId)?.recordEntries || []
+    if (observed.length > (turnRecord?.entries.length || 0)) {
+      turnRecord = { version: 1, entries: [...observed] }
+    }
+  } catch {
+    // The frozen builtin capability snapshot below remains available even
+    // when the disposable live timeline cannot be read.
+  }
+  return {
+    ...(previous || {}),
+    ...(turnRecord ? { turnRecord } : {}),
+    runnerCapabilities: previous?.runnerCapabilities || { ...BUILTIN_RUNNER_CAPABILITIES },
+  }
+}
+
 async function executePiHostTurn(
   set: (partial: Partial<AgentStore>) => void,
   get: () => AgentStore,
@@ -445,7 +467,10 @@ async function executePiHostTurn(
     get().applyPostState(runId, postState)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    const previous = get().getRunState(runId)
+    const failureSnapshot = await failedPiHostRunSnapshot(runId, previous)
     publishRun(set, get, runId, emptyAgentLike({
+      ...failureSnapshot,
       id: runId,
       objective: text,
       status: 'failed',

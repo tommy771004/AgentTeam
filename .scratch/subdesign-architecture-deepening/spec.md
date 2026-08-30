@@ -1,6 +1,6 @@
 # Deepen the OpenDesign → SubDesign architecture
 
-Status: 可交給代理
+Status: resolved
 
 Source: 2026-08-22 architecture review of the recent OpenDesign → SubDesign execution and UI Projection hot spot.
 

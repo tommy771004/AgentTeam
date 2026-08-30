@@ -1,12 +1,25 @@
 # 05 — Deepen Pi Host Protocol dispatch
 
-Status: 可交給代理
+Status: resolved
 
 ## Comments
 
+- 2026-08-30 resolved：`sessions/*`、`runs/*`、`tools/*` 與 `approvals/*` 已由各自 deletion-test domain module 單一路由；catalog／contract／approval policy 移入 tool domain，queue 與 session mutations 移入 owning domains。Protocol router 保留版本與 capability validation、domain selection、normalized response，以及唯一 cursor-based commit；source guard 明確禁止主 dispatcher 重新長回這四組 method branches。`npm run build`、touched-file oxlint、完整 `smoke:pi-host` 與完整 `npm run smoke` 均 exit 0。
 - 2026-08-28 staged safely, not yet resolved: capability、resources、extensions 已各自移入 deletion-test domain module；server persistence 改由 cursor-based `PiHostDispatchOutcome.commit` 決定並刪除 method-prefix heuristic。Sessions/runs/tools 尚未完成 domain extraction，因此本票保持 open。
 
-Blocked by: 02, 03
+## Implementation Progress
+
+- [x] Canonical persistence uses the explicit cursor-based dispatch commit outcome.
+- [x] Capability activation owns a deletion-test domain module.
+- [x] Resource discovery and reload own a deletion-test domain module.
+- [x] Extension lifecycle owns a deletion-test domain module.
+- [x] Session create/fork/reset/compact/list/record behavior owns one session domain.
+- [x] Run queue and attachment routing own one run domain.
+- [x] Tool catalog/contract/execution routing and approvals own one tool domain.
+- [x] The production-owner guard rejects duplicate session/run/tool/approval branches in the main dispatcher.
+- [x] Build, touched-file lint, full Pi Host smoke and full repository smoke pass.
+
+Dependencies satisfied: 02, 03
 
 ## Parent
 

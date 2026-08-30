@@ -35,7 +35,7 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = (relative: string) => fs.readFileSync(path.join(appRoot, relative), 'utf8')
 
 const { JsonCompactionCheckpointStore } = await import('../electron/compactionCheckpointStore.ts')
-const { armTurnDeadline, clampTurnTimeout, MIN_TURN_TIMEOUT_MS, MAX_TURN_TIMEOUT_MS } =
+const { armTurnDeadline, clampTurnTimeout, toolExecutionDeadlineLeaseMs, MIN_TURN_TIMEOUT_MS, MAX_TURN_TIMEOUT_MS } =
   await import('../electron/piTurnDeadline.ts')
 const { runPiOrchestration } = await import('../electron/piOrchestrationExtension.ts')
 const { shouldParkTurn } = await import('../electron/piCoreRuntime.ts')
@@ -208,6 +208,8 @@ const { isSafeLearningExportPath } = await import('../src/agent/hermes/learningE
   )
   assert.equal(clampTurnTimeout(1), MIN_TURN_TIMEOUT_MS, 'an absurdly small budget is clamped, not honoured')
   assert.equal(clampTurnTimeout(Number.MAX_SAFE_INTEGER), MAX_TURN_TIMEOUT_MS)
+  assert.equal(toolExecutionDeadlineLeaseMs('bash', { timeout: 1_800 }), 1_830_000)
+  assert.equal(toolExecutionDeadlineLeaseMs('bash', {}), undefined)
   assert.equal(clampTurnTimeout(0), undefined)
 
   // Fake clock: no real waiting anywhere in this file.
@@ -254,6 +256,21 @@ const { isSafeLearningExportPath } = await import('../src/agent/hermes/learningE
   assert.equal(extendedExpiry, 0, 'a turn still emitting work must not be killed')
   advance(10_000)
   assert.equal(extendedExpiry, 1, 'but silence past the budget still parks it')
+
+  // A bounded tool may legitimately run longer than the ordinary idle
+  // budget without output. Its own timeout becomes a temporary lease; once
+  // the tool settles, ordinary progress restores the base idle budget.
+  currentTime = 0
+  let leasedExpiry = 0
+  const leased = armTurnDeadline(60_000, () => { leasedExpiry += 1 }, clock)
+  leased.extendFor(180_000)
+  advance(120_000)
+  assert.equal(leasedExpiry, 0, 'an in-flight bounded tool outlives the ordinary idle budget')
+  leased.extend()
+  advance(59_999)
+  assert.equal(leasedExpiry, 0, 'tool settlement restores the ordinary idle budget')
+  advance(1)
+  assert.equal(leasedExpiry, 1)
 
   currentTime = 0
   let cancelledExpiry = 0
@@ -509,6 +526,12 @@ const checkpointRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'subagents-checkpoi
   const protocol = read('electron/piHostProtocol.ts')
   assert.match(protocol, /'turn\/interrupt'/, 'interrupt is a protocol method, not a renderer-side guess')
   assert.match(protocol, /armTurnDeadline\(timeoutMs/, 'the timeout is armed Host-side')
+  assert.match(protocol, /piTurnEventDeadlineLeaseMs\(event\)/,
+    'the real Pi event stream derives a bounded lease from tool execution arguments')
+  assert.match(protocol, /idleLeaseMs: executionIdleLeaseMs/,
+    'the Host publishes the same lease to Electron supervision')
+  assert.match(protocol, /deadline\?\.extendFor\(executionIdleLeaseMs\)/,
+    'Host-side and Electron deadlines cannot diverge during a bounded long tool')
   assert.match(protocol, /interruptPiTurn\(runId, 'timeout'\)/, 'and expiry walks the same safe-park path')
 
   const store = read('src/store/agentStore.ts')

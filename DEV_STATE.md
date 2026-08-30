@@ -2,6 +2,12 @@
 
 截至 2026-08-30。
 
+## 本日收口：SubDesign architecture deepening
+
+`.scratch/subdesign-architecture-deepening` 5/5 tickets resolved。既有 workspace controller、provider registry、streaming UI Projection 與 atomic OpenDesign pack application 之外，Pi Host public dispatcher 現在將 `sessions/*`、`runs/*`、`tools/*`／`approvals/*` 交由完整 owning domains；tool catalog、frozen contract 與 approval resolution 不再塞在主 router。Protocol 仍是唯一 Electron／Host 外部介面，cursor-based explicit commit 仍是 canonical persistence 決策，沒有新增 renderer authority。
+
+`check-pi-contract.mts` 新增 deletion-test guard，要求 session/run/tool domains 實際接入並禁止主 dispatcher 重建同組 branches；workspace text-search source guard 已重指新的 catalog owner。`npm run build`、touched-source oxlint、完整 `npm run smoke:pi-host` 與單一非重疊程序的完整 `npm run smoke` 全綠。一 hop 證據見 `.scratch/subdesign-architecture-deepening/qualification.md`。
+
 ## 本日收口：Adaptive Agent Run Status Surface
 
 `.scratch/adaptive-agent-run-status-surface` 1/1 ticket resolved。Live run rail 現在固定以 bounded「執行狀態」回答目前 phase，第二區只依 frozen capability 與 Host/runtime evidence 顯示「任務進度」、「最近活動」、「需要你處理」或「執行摘要」；沒有實質內容時隱藏。Objective、assistant/instruction bodies、reference history、constraints、absolute paths、raw output、Host revision 與 runner guarantee 不再成為預設狀態文案，診斷資料留在預設收合且可鍵盤操作的「執行資訊」。External CLI process success 明確不冒充 Checker completion。
@@ -20,9 +26,9 @@ Codex-aligned personalization 的 Host-owned Instruction Repository、Pi resourc
 
 一 hop 證據見 `.scratch/codex-aligned-personalization-instructions/qualification.md`。effort 仍維持 needs-info，不宣稱 resolved：外部 CLI ticket #11 尚缺 native-discovery 真機證據，Codex 為 `native_discovery_unproven`，Claude 為 `auth_unavailable`，兩者皆是 explicit blocked／unqualified。
 
-## 本日進展：SubDesign deep modules 與 tracker 修正
+## 本日收口前歷程：SubDesign deep modules 與 tracker 修正
 
-SubDesign architecture deepening #01–#04 已收口：既有 `workspace.ts` 公開 controller 經驗證為單一 renderer workflow seam；Host provider 改為 registry + normalized adapter result；`streamingProjection.ts` 由 Host snapshot + typed events 同時推導 preview/activity、terminal 與 static fallback；`applyOpenDesignPack` 將 Electron copy、canonical metadata、local projection 與 audit 串成 fail-closed transition。#05 已移出 capability/resources/extensions domains，並以 canonical cursor 產生 explicit commit outcome、刪除 method-prefix persistence heuristic；sessions/runs/tools 尚未通過 deletion test，故維持 open。
+SubDesign architecture deepening #01–#04 先行收口：既有 `workspace.ts` 公開 controller 經驗證為單一 renderer workflow seam；Host provider 改為 registry + normalized adapter result；`streamingProjection.ts` 由 Host snapshot + typed events 同時推導 preview/activity、terminal 與 static fallback；`applyOpenDesignPack` 將 Electron copy、canonical metadata、local projection 與 audit 串成 fail-closed transition。#05 的 capability/resources/extensions 與 explicit cursor commit 是後續 sessions/runs/tools/approvals 完整 extraction 的前置階段，最終結果見本檔頂端收口紀錄。
 
 `smoke-pi-git-preferences.mts` 現在明確清除 `SUBAGENTS_PI_NATIVE_AGENT_DIR`，不再讀取使用者 `~/.pi/agent`。harness-gap closure #02–#05、#08、#12–#14、#16–#17 依既有 gate evidence 翻 resolved；SubDesign pinned audit #06 補齊 canonical project-relative 記錄與 UI 回查後翻 resolved。vendored Pi TODO/FIXME 保留給 upstream sync，本輪未改 vendor。
 
@@ -68,4 +74,4 @@ Ticket 15 完成 contract：Pi Host Protocol v5 移除 whole-bundle `memory/*` �
 
 ## 下一步
 
-依 `.scratch/INDEX.md` Active frontier 排工：codex-aligned personalization 只剩 #11 外部 native-discovery qualification；可直接實作項目優先完成 subdesign-architecture-deepening #05 的 protocol domain extraction；external-cli-durable-harness #07 的未安裝 provider 真機證據仍需外部環境。
+依 `.scratch/INDEX.md` Active frontier 排工：codex-aligned personalization 只剩 #11 外部 native-discovery qualification；context-usage-panel #08 可繼續 acceptance／UI replay 對帳；external-cli-durable-harness #07 的未安裝 provider 真機證據仍需外部環境。

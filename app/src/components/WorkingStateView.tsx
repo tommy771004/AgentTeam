@@ -28,6 +28,17 @@ export function WorkingStateView({ projection }: { projection: WorkingStateProje
 }
 
 export function WorkingStateDiagnostics({ projection }: { projection: WorkingStateProjection }) {
+  const status = projection.verification === 'verified'
+    ? 'Host 已驗證'
+    : projection.verification === 'unverified'
+      ? 'Archive snapshot · 未重新驗證'
+      : projection.tombstoned
+        ? 'Host 已封存'
+        : projection.unavailabilityReason === 'legacy-unrecorded'
+          ? '舊版紀錄未保存 Working State'
+          : projection.unavailabilityReason === 'not-recorded'
+            ? '此 run 未記錄 Checker-backed Working State'
+            : 'Host Working State 目前不可用'
   return (
     <section
       className="working-state-diagnostics text-ink-2"
@@ -37,7 +48,7 @@ export function WorkingStateDiagnostics({ projection }: { projection: WorkingSta
     >
       <p className="text-[11px] font-medium text-ink-2">Working State</p>
       <p className="mt-1 text-[10px] leading-relaxed text-ink-3">
-        {projection.verification === 'verified' ? 'Host 已驗證' : projection.tombstoned ? 'Host 已封存' : '不可用或未驗證'}
+        {status}
         {projection.revision !== undefined ? ` · rev ${projection.revision}` : ''}
         {` · ${projection.goals.length} 個目標`}
       </p>

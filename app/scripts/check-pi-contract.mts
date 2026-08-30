@@ -228,6 +228,28 @@ const hostStateSource = read('electron/piHostState.ts')
 assert.doesNotMatch(hostStateSource, /^\s*memories\??:\s*PiMemory\[\]/m, 'production PiHostSnapshot cannot contain live memory bodies')
 assert.doesNotMatch(read('electron/piHostProtocol.ts'), /result:\s*\{[^\n]*memories\b/, 'Pi Host responses cannot masquerade as the retired memory collection protocol')
 
+// ── Guard 7b: protocol domains pass the deletion test ──
+// Sessions, run management and tools used to be implemented as branches in
+// the already-wide request dispatcher. Their domain modules are now the only
+// public route: deleting one removes the capability instead of revealing a
+// second fallback branch in handlePiHostRequest.
+const piHostProtocol = read('electron/piHostProtocol.ts')
+const requestDispatcher = piHostProtocol.slice(
+  piHostProtocol.indexOf('export function handlePiHostRequest('),
+  piHostProtocol.indexOf('export type PiHostDispatchOutcome'),
+)
+const protocolDomains = [
+  ['Session', 'electron/piHostSessionDomain.ts', 'handlePiHostSessionDomain', 'sessions/'],
+  ['Run', 'electron/piHostRunDomain.ts', 'handlePiHostRunDomain', 'runs/'],
+  ['Tool', 'electron/piHostToolDomain.ts', 'handlePiHostToolDomain', 'tools/'],
+] as const
+for (const [label, file, owner, prefix] of protocolDomains) {
+  assert.match(piHostProtocol, new RegExp(`from './${file.slice('electron/'.length, -3)}\\.ts'`), `${label} domain must be imported by the protocol router`)
+  assert.match(requestDispatcher, new RegExp(`\\b${owner}\\(`), `${label} domain must own its protocol route`)
+  assert.match(read(file), new RegExp(prefix.replace('/', '\\/')), `${label} domain must name the capability it deletes`)
+}
+assert.doesNotMatch(requestDispatcher, /if \(input\.method === '(?:sessions|runs|tools|approvals)\//, 'session/run/tool method branches must not return to the main dispatcher')
+
 
 // ── Guard 8: a test file must be reachable from a gate ──
 // A test nobody runs is not a test. `smoke-pi-parity-removal` — the parity

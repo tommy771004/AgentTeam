@@ -1,4 +1,5 @@
 import { PI_HOST_PROTOCOL_VERSION, type PiHostEvent, type PiHostMessage, type PiHostRequest, type PiHostResponse } from './piHostProtocol.ts'
+import { clampTurnTimeout } from './piTurnDeadline.ts'
 import type { PiHostFinalizationClaimResult, PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
 import type { ProjectInstructionWriteFailureCode } from './projectInstructionWriter.ts'
@@ -44,6 +45,7 @@ type PendingRequest = {
   reject: (error: Error) => void
   method: PiHostRequest['method']
   runId?: string
+  baseTimeoutMs: number
   timeoutMs: number
   timer?: ReturnType<typeof setTimeout>
 }
@@ -116,7 +118,14 @@ export class PiHostSupervisor {
         const runId = typeof message.payload === 'object' && message.payload && 'runId' in message.payload
           ? String((message.payload as { runId?: unknown }).runId || '')
           : ''
-        if (runId) this.refreshTurnDeadline(runId)
+        if (runId) {
+          const payload = message.payload as { idleLeaseMs?: unknown }
+          this.refreshTurnDeadline(
+            runId,
+            message.event === 'host/tool-start' ? payload.idleLeaseMs : undefined,
+            message.event === 'host/tool-result',
+          )
+        }
         this.eventListeners.forEach((listener) => listener(message as unknown as PiHostEvent))
         return
       }
@@ -753,6 +762,7 @@ export class PiHostSupervisor {
         reject,
         method,
         runId: typeof params.runId === 'string' ? params.runId : undefined,
+        baseTimeoutMs: timeoutMs,
         timeoutMs,
       }
       this.pending.set(id, waiter)
@@ -777,9 +787,15 @@ export class PiHostSupervisor {
     }, waiter.timeoutMs)
   }
 
-  private refreshTurnDeadline(runId: string): void {
+  private refreshTurnDeadline(runId: string, idleLeaseMs?: unknown, restoreBase = false): void {
     for (const [id, waiter] of this.pending) {
-      if (waiter.method === 'turn/submit' && waiter.runId === runId) this.armDeadline(id, waiter)
+      if (waiter.method !== 'turn/submit' || waiter.runId !== runId) continue
+      if (restoreBase) waiter.timeoutMs = waiter.baseTimeoutMs
+      else {
+        const lease = clampTurnTimeout(idleLeaseMs)
+        if (lease) waiter.timeoutMs = Math.max(waiter.baseTimeoutMs, lease)
+      }
+      this.armDeadline(id, waiter)
     }
   }
 }

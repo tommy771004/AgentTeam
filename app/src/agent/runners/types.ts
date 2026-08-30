@@ -109,7 +109,7 @@ export const UNAVAILABLE_RUNNER_CAPABILITIES: Readonly<RunnerCapabilities> = Obj
 
 export type RunnerCapabilitySnapshot = Readonly<{
   runner?: string
-  guarantee: 'host-verified' | 'run-snapshot' | 'reduced' | 'unavailable'
+  guarantee: 'host-verified' | 'run-snapshot' | 'reduced' | 'unavailable' | 'legacy-unrecorded'
   capabilities: Readonly<RunnerCapabilities>
 }>
 
@@ -120,10 +120,16 @@ export type RunnerCapabilitySnapshot = Readonly<{
 export function projectRunnerCapabilitySnapshot(
   declaration?: { runner: string; capabilities?: RunnerCapabilities },
   frozenRunCapabilities?: RunnerCapabilities,
+  options?: { missingEvidence?: 'runtime-unavailable' | 'legacy-unrecorded' },
 ): RunnerCapabilitySnapshot {
   const capabilities = declaration?.capabilities || frozenRunCapabilities
   if (!capabilities) {
-    return Object.freeze({ guarantee: 'unavailable' as const, capabilities: UNAVAILABLE_RUNNER_CAPABILITIES })
+    return Object.freeze({
+      guarantee: options?.missingEvidence === 'legacy-unrecorded'
+        ? 'legacy-unrecorded' as const
+        : 'unavailable' as const,
+      capabilities: UNAVAILABLE_RUNNER_CAPABILITIES,
+    })
   }
   const runner = declaration?.runner
   const guarantee = runner

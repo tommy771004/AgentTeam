@@ -257,7 +257,7 @@ export type PiHostEvent =
     }
   | {
       event: 'host/tool-start' | 'host/tool-decision' | 'host/tool-result'
-      payload: { runId: string; tool: string; callId?: string; parentRunId?: string; decision?: 'allow' | 'ask' | 'deny'; settlement?: 'success' | 'failed' | 'cancelled' | 'denied' | 'not-executed'; reason?: string; item?: unknown; executionEvidence?: WorkingExecutionEvidence; contractRevision?: number; contractDigest?: string; schemaDigest?: string; toolSource?: 'builtin' | 'extension-pack' | 'mcp'; toolPack?: string; invocationOrigin?: PiInvocationOrigin }
+      payload: { runId: string; tool: string; callId?: string; parentRunId?: string; decision?: 'allow' | 'ask' | 'deny'; settlement?: 'success' | 'failed' | 'cancelled' | 'denied' | 'not-executed'; reason?: string; item?: unknown; idleLeaseMs?: number; executionEvidence?: WorkingExecutionEvidence; contractRevision?: number; contractDigest?: string; schemaDigest?: string; toolSource?: 'builtin' | 'extension-pack' | 'mcp'; toolPack?: string; invocationOrigin?: PiInvocationOrigin }
     }
   | {
       event: 'host/orchestration'
@@ -326,12 +326,12 @@ export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
 import type { StreamingUpdate } from '../src/agent/subdesign/streamingEnvelope.ts'
-import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, forkPiSession, getPiSessionFile, interruptPiTurn, persistPiLegacyCredential, persistPiLegacyModelConfig, piCoreRuntimeStatus, piCoreRuntimeToolCatalog, piProviderDefaultBaseUrl, readPiLegacyProviderBaseUrl, runPiTurn, steerPiTurn, type PiBuiltinToolName, type PiTurnInterruptReason } from './piCoreRuntime.ts'
+import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, getPiSessionFile, interruptPiTurn, persistPiLegacyCredential, persistPiLegacyModelConfig, piCoreRuntimeStatus, piCoreRuntimeToolCatalog, piProviderDefaultBaseUrl, readPiLegacyProviderBaseUrl, runPiTurn, steerPiTurn, type PiBuiltinToolName, type PiTurnInterruptReason } from './piCoreRuntime.ts'
 import { cancelPiCodeMode, runPiCodeMode } from './piCodeMode.ts'
-import { armTurnDeadline, clampTurnTimeout, systemTurnDeadlineClock, type TurnDeadlineClock } from './piTurnDeadline.ts'
+import { armTurnDeadline, clampTurnTimeout, systemTurnDeadlineClock, toolExecutionDeadlineLeaseMs, type TurnDeadlineClock } from './piTurnDeadline.ts'
 import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
 import type { PiResource } from './piResourceRegistry.ts'
-import { createPiChildSession, type PiContextPacket } from './piDelegationExtension.ts'
+import type { PiContextPacket } from './piDelegationExtension.ts'
 import { createPiDurableMemoryBridge, piMemoryProjection, type PiMemoryChange } from './piDurableMemory.ts'
 import { compileMemoryControlRuntime, type MemoryControlRuntime } from './memoryControlRuntime.ts'
 import type { PiMemoryWriteReceipt } from './piPackBridges.ts'
@@ -368,7 +368,7 @@ import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
 import { PiExtensionRegistry, type PiExtension } from './piExtensionRegistry.ts'
 import { callPiMcpTool, listPiMcpTools, piMcpGenerationKey } from './piMcpClient.ts'
 import { isCompletedModelCall, isPiHostDefinitionOfDoneMet, isPiTurnSettlement, piTurnFinalAnswer, piTurnResultText, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
-import { appendTurnRecord, asTurnRecordMemoryWrite, derivePiHistory, nextTurnRecordSeq, pageTurnRecord, workingStateFromTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordEntry, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
+import { appendTurnRecord, asTurnRecordMemoryWrite, derivePiHistory, nextTurnRecordSeq, workingStateFromTurnRecord, type PiRecordedMessage, type TurnRecord, type TurnRecordAppend, type TurnRecordDraft, type TurnRecordEntry, type TurnRecordToolContractIdentity } from '../src/agent/turnRecord.ts'
 import {
   checkDelegatedGoalObservation,
   checkWorkingStateProposal,
@@ -399,8 +399,6 @@ import {
   settlePiModelBuiltinInvocation,
   executePiPackTool,
   findPiPackTool,
-  piPackCatalogEntries,
-  resolvePiApproval,
   setPiApprovalBridge,
   unbindPiSessionRun,
   bindPiSessionRun,
@@ -438,11 +436,12 @@ import {
 } from './piPackBridges.ts'
 import { continuationSignature, normalizeContinuationItems, selectContinuationItem, type ContinuationItem } from '../src/agent/continuation.ts'
 import { setPiPlanAnnouncer as installPlanAnnouncer } from './piExtensionPacks/interactionPlanning.ts'
-import { isPiMcpInputSchema, piMcpModelToolName, piMcpModelToolNames, setPiMcpExtensionsLookup } from './piExtensionPacks/mcpBridgePack.ts'
+import { isPiMcpInputSchema, piMcpModelToolName, setPiMcpExtensionsLookup } from './piExtensionPacks/mcpBridgePack.ts'
 import { setPiCapabilityBridge, setPiCodeModeExecutor } from './piExtensionPacks/framework.ts'
 import { PiToolContractStore, schemaDigest, type PiTurnToolContract } from './piToolContract.ts'
 import { handlePiHostRunDomain } from './piHostRunDomain.ts'
 import { handlePiHostSessionDomain } from './piHostSessionDomain.ts'
+import { handlePiHostToolDomain } from './piHostToolDomain.ts'
 import { validatePiToolArguments } from './piToolArguments.ts'
 import { writeToolOutputSpill } from './attachmentStore.ts'
 import { revokeBuiltinShellSandboxEvidence, verifyBuiltinShellSandbox, type BuiltinShellSandboxVerification } from './piBuiltinShellSandbox.ts'
@@ -520,18 +519,6 @@ type PreparedPiCompaction = {
 }
 
 export type SessionRecord = { id: string; title: string; threadId?: string; parentSessionId?: string; role?: string; profile?: Record<string, unknown>; context?: PiContextPacket; depth?: number; messages: PiRecordedMessage[]; toolAudit?: PiToolAuditRecord[]; archived?: boolean; piSessionFile?: string; record?: TurnRecord; toolContracts?: PiTurnToolContract[]; toolContractRevisionFloor?: number; preparedCompaction?: PreparedPiCompaction }
-
-function projectSessionSummary(session: SessionRecord) {
-  const { record, toolContracts: _toolContracts, toolContractRevisionFloor: _toolContractRevisionFloor, ...summary } = session
-  const workingState = workingStateFromTurnRecord(record)
-  return {
-    ...summary,
-    messages: [...session.messages],
-    ...(session.toolAudit ? { toolAudit: [...session.toolAudit] } : {}),
-    ...(record ? { recordSummary: { version: record.version, entries: record.entries.length, latestSeq: record.entries.at(-1)?.seq ?? 0 } } : {}),
-    ...(workingState ? { workingState } : {}),
-  }
-}
 
 function projectPiHostStateSnapshot(state: HostState, id: string | number): PiHostMessage[] {
   if (state.negotiatedProtocolVersion < 5) {
@@ -2566,6 +2553,18 @@ export function setPiTurnDeadlineClock(clock: TurnDeadlineClock = systemTurnDead
   turnDeadlineClock = clock
 }
 
+function piTurnEventDeadlineLeaseMs(event: {
+  type?: unknown
+  toolName?: unknown
+  args?: unknown
+}): number | undefined {
+  if (event.type !== 'tool_execution_start') return undefined
+  return toolExecutionDeadlineLeaseMs(
+    typeof event.toolName === 'string' ? event.toolName : 'tool',
+    event.args,
+  )
+}
+
 function attachmentProtocolError(id: string | number, message: string): PiHostMessage[] {
   return [errorResponse(id, 'protocol_mismatch', message)]
 }
@@ -3877,6 +3876,452 @@ function handleInstructionOrReviewRequest(
   return undefined
 }
 
+type PiHostToolExecutionInput = {
+  state: HostState
+  input: Partial<InternalPiHostRequest>
+  id: string | number
+  invocationOrigin: 'direct-protocol' | 'code-mode'
+  emit?: (message: PiHostMessage) => void
+}
+
+function executePiHostToolRequest(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  invocationOrigin: 'direct-protocol' | 'code-mode',
+  emit?: (message: PiHostMessage) => void,
+): PiHostMessage[] | Promise<PiHostMessage[]> {
+  const execution = { state, input, id, invocationOrigin, emit }
+  if (input.method === 'tools/pack') return executePiHostPackRequest(execution)
+  if (input.method === 'tools/mcp') return executePiHostMcpRequest(execution)
+  if (input.method === 'tools/code') return executePiHostCodeRequest(execution)
+  if (['tools/read', 'tools/grep', 'tools/find', 'tools/ls', 'tools/write', 'tools/edit', 'tools/bash'].includes(input.method || '')) {
+    return executePiHostBuiltinRequest(execution)
+  }
+  return [errorResponse(id, 'unknown_method', `Unknown Pi Host tool method: ${input.method}`)]
+}
+
+function executePiHostPackRequest(execution: PiHostToolExecutionInput): PiHostMessage[] | Promise<PiHostMessage[]> {
+  const { state, input, id, invocationOrigin, emit } = execution
+  const params = input.params || {}
+  const name = typeof params.name === 'string' ? params.name : ''
+  const definition = findPiPackTool(name)
+  if (!definition) return [errorResponse(id, 'invalid_request', `Unknown Pi extension tool: ${name}`)]
+  const workspaceError = piHostPackWorkspaceError(state, name, params, id)
+  if (workspaceError) return workspaceError
+  const coordinates = piHostPackCoordinates(params, id)
+  const validation = validatePiHostPackInvocation({ state, params, id, invocationOrigin, emit, name, definition, ...coordinates })
+  if (!validation.ok) return validation.response
+  const updates: PiHostEvent[] = []
+  const publish = (event: PiHostEvent) => {
+    recordToolAudit(state, params.sessionId, event)
+    if (emit) emit(event); else updates.push(event)
+  }
+  return executeAuthorizedPiPackRequest({
+    state, params, id, invocationOrigin, name, definition, ...coordinates, args: validation.args, updates, publish,
+  })
+}
+
+type PiHostPackCoordinates = { sessionId: string; runId: string; callId: string; cwd: string }
+
+function piHostPackCoordinates(params: Record<string, unknown>, id: string | number): PiHostPackCoordinates {
+  const sessionId = typeof params.sessionId === 'string' ? params.sessionId : 'direct'
+  const runId = typeof params.runId === 'string' ? params.runId : String(id)
+  return {
+    sessionId,
+    runId,
+    callId: typeof params.callId === 'string' ? params.callId : runId,
+    cwd: typeof params.cwd === 'string' ? params.cwd : process.cwd(),
+  }
+}
+
+function piHostPackWorkspaceError(
+  state: HostState,
+  name: string,
+  params: Record<string, unknown>,
+  id: string | number,
+): PiHostMessage[] | undefined {
+  if (!isWorkspaceTextSearchTool(name)) return undefined
+  const workspaceRoot = typeof params.cwd === 'string' && params.cwd.trim() ? params.cwd : undefined
+  if (!workspaceRoot) return [errorResponse(id, 'invalid_request', '工作區文字檢索需要明確的 workspace cwd；不允許使用 process.cwd() fallback。')]
+  const gate = workspaceTextSearchAvailability({
+    sessionId: typeof params.sessionId === 'string' ? params.sessionId : undefined,
+    enabled: state.snapshot.settings.workspaceTextSearch === true,
+    workspaceRoot,
+  })
+  return gate.available ? undefined : [errorResponse(id, 'invalid_request', gate.reason || 'Workspace text search is unavailable')]
+}
+
+function piHostPackArguments(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function validatePiHostPackInvocation(input: {
+  state: HostState
+  params: Record<string, unknown>
+  id: string | number
+  invocationOrigin: 'direct-protocol' | 'code-mode'
+  emit?: (message: PiHostMessage) => void
+  name: string
+  definition: NonNullable<ReturnType<typeof findPiPackTool>>
+} & PiHostPackCoordinates): { ok: true; args: Record<string, unknown> } | { ok: false; response: PiHostMessage[] } {
+  const { state, params, id, invocationOrigin, emit, name, definition, sessionId, runId, callId, cwd } = input
+  const hasCurrentContract = typeof params.sessionId === 'string' && Boolean(state.toolContracts.latest(params.sessionId))
+  const envelope = {
+    cwd,
+    ...(typeof params.sessionId === 'string' ? { sessionId: params.sessionId } : {}),
+    runId,
+    callId,
+    ...(typeof params.contractRevision === 'number' ? { contractRevision: params.contractRevision } : {}),
+    ...(typeof params.schemaDigest === 'string' ? { schemaDigest: params.schemaDigest } : {}),
+  }
+  const rawArgs = piHostPackArguments(params.arguments)
+  const validation = hasCurrentContract || params.contractRevision !== undefined || params.schemaDigest !== undefined
+    ? validateDirectToolCall(state, name, envelope, rawArgs)
+    : validatePiToolArguments(definition.tool.parameters, rawArgs)
+  if (validation.ok) return { ok: true, args: validation.arguments }
+  const reason = `${name} parameters are invalid: ${validation.message}`
+  return { ok: false, response: contractValidationFailure({
+    state,
+    sessionId: typeof params.sessionId === 'string' ? sessionId : undefined,
+    runId,
+    callId,
+    parentRunId: typeof params.parentRunId === 'string' ? params.parentRunId : undefined,
+    tool: name,
+    origin: invocationOrigin,
+    reason,
+    id,
+    emit,
+  }) }
+}
+
+type AuthorizedPiPackInput = {
+  state: HostState
+  params: Record<string, unknown>
+  id: string | number
+  invocationOrigin: 'direct-protocol' | 'code-mode'
+  name: string
+  definition: NonNullable<ReturnType<typeof findPiPackTool>>
+  sessionId: string
+  runId: string
+  callId: string
+  cwd: string
+  args: Record<string, unknown>
+  updates: PiHostEvent[]
+  publish: (event: PiHostEvent) => void
+}
+
+async function executeAuthorizedPiPackRequest(input: AuthorizedPiPackInput): Promise<PiHostMessage[]> {
+  const { state, params, id, invocationOrigin, name, sessionId, runId, callId, cwd, args, publish } = input
+  const policy = piPackAuthorizationPolicy(input)
+  const authorized = await authorizeContractInvocation({
+    state, sessionId, runId, callId, parentRunId: policy.parentRunId, cwd, tool: name, args,
+    origin: invocationOrigin,
+    approval: params.approval,
+    requirements: policy.requirements,
+    identity: policy.identity,
+  })
+  if ('contractError' in authorized) return [errorResponse(id, 'invalid_request', authorized.contractError)]
+  const authorization: InvocationAuthorization = authorized
+  const identityPayload = authorization.identity ? { ...authorization.identity, invocationOrigin } : {}
+  publish({ event: 'host/tool-start', payload: { runId, tool: name, callId, parentRunId: policy.parentRunId, ...identityPayload } })
+  if (!authorization.ok) return piPackAuthorizationFailure(input, authorization, identityPayload, policy.parentRunId)
+  publish({ event: 'host/tool-decision', payload: {
+    runId, tool: name, callId, parentRunId: policy.parentRunId, decision: 'allow', reason: authorization.reason, ...identityPayload,
+  } })
+  const outcome = await executePiPackTool(name, authorization.args, { sessionId, cwd, runId }, { callId })
+  return settlePiPackExecution(input, authorization, outcome, identityPayload, policy.parentRunId)
+}
+
+function piPackAuthorizationPolicy(input: AuthorizedPiPackInput): {
+  parentRunId?: string
+  requirements: PiToolPolicyRequirements
+  identity: PiInvocationContractIdentity
+} {
+  const { state, params, name, definition, sessionId, runId, args } = input
+  const parentRunId = typeof params.parentRunId === 'string' ? params.parentRunId : undefined
+  const foundIdentity = typeof params.sessionId === 'string' ? contractIdentityForCurrentTool(state, sessionId, name) : undefined
+  const approvalPlan = definition.tool.approval?.(args, { sessionId, cwd: input.cwd, runId })
+  const requirements: PiToolPolicyRequirements = {
+    ...(definition.tool.policyMigration || {}),
+    ...(approvalPlan?.need && !definition.tool.policyMigration?.capabilityApproval && !definition.tool.policyMigration?.approvalRequired
+      ? { approvalRequired: approvalPlan.reason, sideEffect: true }
+      : {}),
+  }
+  const detachedIdentity: PiInvocationContractIdentity = {
+    contractRevision: 1,
+    contractDigest: schemaDigest({ compatibility: 'direct-pack', tool: name, schema: definition.tool.parameters }),
+    schemaDigest: schemaDigest(definition.tool.parameters),
+    toolSource: 'extension-pack',
+    toolPack: definition.pack.id,
+  }
+  return { parentRunId, requirements, identity: foundIdentity?.identity || detachedIdentity }
+}
+
+function piPackAuthorizationFailure(
+  input: AuthorizedPiPackInput,
+  authorization: InvocationAuthorization,
+  identityPayload: Record<string, unknown>,
+  parentRunId?: string,
+): PiHostMessage[] {
+  const { id, runId, name, callId, updates, publish } = input
+  publish({ event: 'host/tool-decision', payload: {
+    runId, tool: name, callId, parentRunId, decision: authorization.decision,
+    ...(authorization.settlement ? { settlement: authorization.settlement } : {}),
+    reason: authorization.reason,
+    ...identityPayload,
+  } })
+  if (authorization.settlement) publish({ event: 'host/tool-result', payload: {
+    runId, tool: name, callId, parentRunId, settlement: authorization.settlement,
+    reason: authorization.reason,
+    ...identityPayload,
+  } })
+  const reason = authorization.decision === 'ask' ? `Approval required: ${authorization.reason}` : authorization.reason
+  return [...updates, errorResponse(id, 'invalid_request', reason)]
+}
+
+function settlePiPackExecution(
+  input: AuthorizedPiPackInput,
+  authorization: InvocationAuthorization,
+  outcome: Awaited<ReturnType<typeof executePiPackTool>>,
+  identityPayload: Record<string, unknown>,
+  parentRunId?: string,
+): PiHostMessage[] {
+  const { id, runId, name, callId, updates, publish } = input
+  const structuredFailure = Boolean(outcome.data && typeof outcome.data === 'object' && (outcome.data as { ok?: unknown }).ok === false)
+  const resultOk = outcome.ok && !structuredFailure
+  authorization.evidence.update(resultOk ? 'Extension Pack execution completed' : outcome.text)
+  authorization.evidence.result(resultOk, resultOk ? 'structured result returned' : outcome.text)
+  authorization.evidence.settle(outcome.denied ? 'denied' : resultOk ? 'success' : 'failed', resultOk ? undefined : outcome.text)
+  publish({ event: 'host/tool-result', payload: {
+    runId, tool: name, callId, parentRunId,
+    settlement: outcome.denied ? 'denied' as const : resultOk ? 'success' as const : 'failed' as const,
+    item: outcome.data ?? { text: outcome.text },
+    ...(outcome.ok ? {} : { reason: outcome.text }),
+    ...identityPayload,
+  } })
+  if (!outcome.ok && !outcome.denied) return [...updates, errorResponse(id, 'invalid_request', outcome.text)]
+  return [...updates, { id, result: { tool: name, content: [{ type: 'text', text: outcome.text }], ...(outcome.data !== undefined ? { item: outcome.data } : {}) } }]
+}
+
+function executePiHostMcpRequest(execution: PiHostToolExecutionInput): PiHostMessage[] | Promise<PiHostMessage[]> {
+  const { state, input, id, emit } = execution
+  const extensionId = typeof input.params?.extensionId === 'string' ? input.params.extensionId : ''
+  const toolName = typeof input.params?.toolName === 'string' ? input.params.toolName : ''
+  const args = input.params?.arguments
+  const extension = state.extensions.list().find((candidate) => candidate.id === extensionId && candidate.kind === 'mcp' && candidate.enabled)
+  if (!extension?.mcp || !toolName || !args || typeof args !== 'object' || Array.isArray(args)) return [errorResponse(id, 'invalid_request', 'enabled MCP extensionId, toolName, and arguments are required')]
+  const mcpConfig = extension.mcp
+  const runId = typeof input.params?.runId === 'string' ? input.params.runId : String(id)
+  const callId = typeof input.params?.callId === 'string' ? input.params.callId : runId
+  return (async () => {
+    const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : 'direct'
+    const cwd = typeof input.params?.cwd === 'string' ? input.params.cwd : process.cwd()
+    const discovered = await listPiMcpTools(extension.id, mcpConfig)
+    const upstream = discovered.find((candidate) => candidate.name === toolName)
+    if (!upstream || !isPiMcpInputSchema(upstream.inputSchema)) return [errorResponse(id, 'invalid_request', `Unknown or schema-invalid MCP tool: ${toolName}`)]
+    const tool = piMcpModelToolName(extension.id, toolName)
+    const current = contractIdentityForCurrentTool(state, sessionId, tool)?.identity
+    const inputDigest = schemaDigest(upstream.inputSchema)
+    const identity: PiInvocationContractIdentity = current || {
+      contractRevision: 1,
+      contractDigest: schemaDigest({ compatibility: 'tools/mcp', extensionId: extension.id, toolName, inputDigest }),
+      schemaDigest: inputDigest,
+      toolSource: 'mcp',
+      toolPack: `mcp-${extension.id}`,
+    }
+    const validation = validatePiToolArguments(upstream.inputSchema, args as Record<string, unknown>)
+    if (!validation.ok) return [errorResponse(id, 'invalid_request', `${tool} parameters are invalid: ${validation.message}`)]
+    const authorization = await authorizeContractInvocation({
+      state, sessionId, runId, callId, cwd, tool,
+      args: validation.arguments,
+      origin: 'direct-protocol',
+      approval: input.params?.approval,
+      requirements: { outbound: true, sideEffect: true, approvalRequired: `MCP ${extension.id}/${toolName} requires approval` },
+      identity,
+    })
+    if ('contractError' in authorization) return [errorResponse(id, 'invalid_request', authorization.contractError)]
+    const updates: PiHostEvent[] = []
+    const publish = (event: PiHostEvent) => {
+      recordToolAudit(state, typeof input.params?.sessionId === 'string' ? sessionId : undefined, event)
+      if (emit) emit(event); else updates.push(event)
+    }
+    const identityPayload = { ...identity, invocationOrigin: 'direct-protocol' as const }
+    publish({ event: 'host/tool-start', payload: { runId, tool, callId, ...identityPayload } })
+    if (!authorization.ok) {
+      publish({ event: 'host/tool-decision', payload: { runId, tool, callId, decision: authorization.decision, ...(authorization.settlement ? { settlement: authorization.settlement } : {}), reason: authorization.reason, ...identityPayload } })
+      if (authorization.settlement) publish({ event: 'host/tool-result', payload: { runId, tool, callId, settlement: authorization.settlement, reason: authorization.reason, ...identityPayload } })
+      return [...updates, errorResponse(id, 'invalid_request', authorization.decision === 'ask' ? `Approval required: ${authorization.reason}` : authorization.reason)]
+    }
+    publish({ event: 'host/tool-decision', payload: { runId, tool, callId, decision: 'allow', reason: authorization.reason, ...identityPayload } })
+    try {
+      const content = await callPiMcpTool(extension.id, mcpConfig, toolName, authorization.args)
+      authorization.evidence.update('MCP execution completed')
+      authorization.evidence.result(true, 'result returned')
+      authorization.evidence.settle('success')
+      publish({ event: 'host/tool-result', payload: { runId, tool, callId, settlement: 'success', item: { content }, ...identityPayload } })
+      return [...updates, { id, result: { tool, content: [{ type: 'text', text: content }] } }]
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'MCP tool failed'
+      authorization.evidence.result(false, reason)
+      authorization.evidence.settle('failed', reason)
+      publish({ event: 'host/tool-result', payload: { runId, tool, callId, settlement: 'failed', reason, ...identityPayload } })
+      return [...updates, errorResponse(id, 'invalid_request', reason)]
+    }
+  })()
+}
+
+function executePiHostCodeRequest(execution: PiHostToolExecutionInput): PiHostMessage[] | Promise<PiHostMessage[]> {
+  const { state, input, id, emit } = execution
+  const params = input.params || {}
+  if (typeof params.cwd !== 'string' || typeof params.code !== 'string') return [errorResponse(id, 'invalid_request', 'cwd and code are required')]
+  const codeCwd = params.cwd
+  const runId = typeof params.runId === 'string' ? params.runId : String(id)
+  const codeSessionId = typeof params.sessionId === 'string' ? params.sessionId : 'direct'
+  const contract = state.toolContracts.latest(codeSessionId)
+  if (!contract) return [errorResponse(id, 'tool_contract_not_found', `No current tool contract exists for session: ${codeSessionId}`)]
+  const claimedRevision = typeof params.contractRevision === 'number' ? params.contractRevision : contract.revision
+  if (claimedRevision !== contract.revision) return [errorResponse(id, 'tool_contract_stale', `Tool contract revision ${claimedRevision} is not current; current is ${contract.revision}`)]
+  const runCodeContract = state.toolContracts.lookup(codeSessionId, contract.revision, 'run_code')
+  if (!runCodeContract.ok) return [errorResponse(id, runCodeContract.code, runCodeContract.message)]
+  if (typeof params.schemaDigest === 'string' && params.schemaDigest !== runCodeContract.tool.schemaDigest) {
+    return [errorResponse(id, 'invalid_request', 'Tool schema digest mismatch for run_code')]
+  }
+  const codeValidation = validatePiToolArguments(runCodeContract.tool.parameters, {
+    code: params.code,
+    ...(typeof params.maxToolCalls === 'number' ? { maxToolCalls: params.maxToolCalls } : {}),
+    ...(typeof params.timeoutMs === 'number' ? { timeoutMs: params.timeoutMs } : {}),
+  })
+  if (!codeValidation.ok) return [errorResponse(id, 'invalid_request', `run_code parameters are invalid: ${codeValidation.message}`)]
+  return (async () => {
+    const outerCallId = typeof params.callId === 'string' ? params.callId : `${runId}:code`
+    let outerAuthorization: InvocationAuthorization | undefined
+    if (!input[INTERNAL_OUTER_CODE_APPROVED]) {
+    const authorized = await authorizeContractInvocation({
+      state,
+      sessionId: codeSessionId,
+      runId,
+      callId: outerCallId,
+      cwd: codeCwd,
+      tool: 'run_code',
+      args: codeValidation.arguments,
+      origin: 'direct-protocol',
+      approval: params.approval,
+      requirements: { sideEffect: true, approvalRequired: 'run_code requires approval before execution' },
+    })
+    if ('contractError' in authorized) return [errorResponse(id, 'invalid_request', authorized.contractError)]
+    if (!authorized.ok) return [errorResponse(id, 'invalid_request', authorized.decision === 'ask' ? `Approval required: ${authorized.reason}` : authorized.reason)]
+    outerAuthorization = authorized
+    }
+    // Snapshot the surrounding contract once. Capability changes cannot add a
+  // new callable name to a script that already started.
+  const activeTools = contract.tools.filter((tool) => tool.active).map((tool) => tool.name)
+  let nestedSequence = 0
+    return runPiCodeMode({
+    runId,
+    code: String(codeValidation.arguments.code),
+    activeTools,
+    maxToolCalls: typeof codeValidation.arguments.maxToolCalls === 'number' ? codeValidation.arguments.maxToolCalls : undefined,
+    timeoutMs: typeof codeValidation.arguments.timeoutMs === 'number' ? codeValidation.arguments.timeoutMs : undefined,
+    callTool: async (toolName, args) => {
+      const nestedId = `${String(id)}:code:${nestedSequence++}`
+      const nestedContract = contract.tools.find((tool) => tool.name === toolName && tool.active)
+      if (!nestedContract) throw new Error(`Tool «${toolName}» is not active in this Pi turn contract.`)
+      let nestedRequest: InternalPiHostRequest
+      if (findPiPackTool(toolName)) {
+        nestedRequest = {
+          id: nestedId,
+          method: 'tools/pack',
+          params: {
+            name: toolName,
+            arguments: args,
+            cwd: codeCwd,
+            sessionId: codeSessionId,
+            runId,
+            callId: nestedId,
+            parentRunId: runId,
+            contractRevision: contract.revision,
+            schemaDigest: nestedContract.schemaDigest,
+          },
+        }
+      } else {
+        if (!piCoreRuntimeStatus().builtinTools.includes(toolName)) throw new Error(`Unknown Pi tool: ${toolName}`)
+        nestedRequest = {
+          id: nestedId,
+          method: `tools/${toolName}` as PiHostRequest['method'],
+          params: {
+            ...args,
+            cwd: codeCwd,
+            sessionId: codeSessionId,
+            runId,
+            callId: nestedId,
+            parentRunId: runId,
+            contractRevision: contract.revision,
+            schemaDigest: nestedContract.schemaDigest,
+          },
+        }
+      }
+      nestedRequest[INTERNAL_INVOCATION_ORIGIN] = 'code-mode'
+      // Deliberately no approval field: the outer run_code decision never
+      // authorizes a nested effectful invocation.
+      const nested = await handlePiHostRequest(state, nestedRequest, emit)
+      const response = nested.find((message) => !('event' in message) && message.id === nestedId) as PiHostResponse | undefined
+      if (!response || response.error) throw new Error(response?.error?.message || `Pi nested tool failed: ${toolName}`)
+      return JSON.stringify(response.result?.content ?? response.result ?? null)
+    },
+  }).then((result) => {
+    if (outerAuthorization) {
+      const succeeded = result.settlement === 'success'
+      outerAuthorization.evidence.update(`Code Mode ${result.settlement}`)
+      outerAuthorization.evidence.result(succeeded, result.content)
+      outerAuthorization.evidence.settle(result.settlement === 'cancelled' ? 'cancelled' : succeeded ? 'success' : 'failed', result.content)
+    }
+    return [{ id, result: { tool: 'code', runId, settlement: result.settlement, content: [{ type: 'text', text: result.content }], code: result.content, items: [{ toolCallCount: result.toolCallCount, logs: result.logs }] } }]
+    })
+  })()
+}
+
+function executePiHostBuiltinRequest(execution: PiHostToolExecutionInput): PiHostMessage[] | Promise<PiHostMessage[]> {
+  const { state, input, id, invocationOrigin, emit } = execution
+  const params = input.params || {}
+  const split = splitDirectToolRequest(id, params)
+  if (!split.ok) return [errorResponse(id, 'invalid_request', split.message)]
+  const toolName = input.method!.slice('tools/'.length) as PiBuiltinToolName
+  if (state.snapshot.settings.activeTools.length > 0 && !state.snapshot.settings.activeTools.includes(toolName)) return [errorResponse(id, 'invalid_request', `${toolName} is disabled by Pi active tools settings`)]
+  const validation = validateDirectToolCall(state, toolName, split.envelope, split.arguments)
+  if (!validation.ok) return contractValidationFailure({
+    state,
+    sessionId: split.envelope.sessionId,
+    runId: split.envelope.runId,
+    callId: split.envelope.callId,
+    parentRunId: split.envelope.parentRunId,
+    tool: toolName,
+    origin: invocationOrigin,
+    reason: validation.message,
+    id,
+    emit,
+  })
+  const args = validation.arguments
+  const { envelope } = split
+  const sideEffect = toolName === 'write' || toolName === 'edit' || toolName === 'bash'
+  const bashDecision = toolName === 'bash'
+    ? decideBashAction(String(args.command || ''), () => 'allow', state.snapshot.settings.bashRequireAsk ? 'ask' : 'allow')
+    : undefined
+  return dispatchDirectBuiltinTool({
+    state,
+    id,
+    envelope,
+    toolName,
+    args,
+    invocationOrigin,
+    emit,
+    sideEffect,
+    bashDecision,
+    hasRunId: typeof params.runId === 'string',
+  })
+}
+
+
 export function handlePiHostRequest(
   state: HostState,
   request: unknown,
@@ -3901,501 +4346,14 @@ export function handlePiHostRequest(
     return handlePiHostLifecycleRequest(state, standardInput.method!, id)
   }
   if (input.method === 'runtime/status') return [{ id, result: piCoreRuntimeStatus() }]
-  if (input.method === 'tools/list') {
-    if (input.params?.requireContract === true && !state.toolContractNegotiated) {
-      return [errorResponse(id, 'invalid_request', 'Pi Host tool catalog requires tool-contract-v1 negotiation')]
-    }
-    ensurePiPacksRegistered()
-    const mcpExtensions = state.extensions.list().filter((extension) => extension.kind === 'mcp' && extension.mcp)
-    const activeTools = state.snapshot.settings.activeTools
-    const requestedSessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : undefined
-    const workspaceTextSearch = workspaceTextSearchAvailability({
-      sessionId: requestedSessionId,
-      enabled: state.snapshot.settings.workspaceTextSearch === true,
-      workspaceRoot: typeof input.params?.cwd === 'string' ? input.params.cwd : undefined,
-    })
-    const unlocked = state.capabilities.activeTools(requestedSessionId)
-      .filter((tool) => workspaceTextSearch.available || !isWorkspaceTextSearchTool(tool))
-    const mcpCapabilityActive = state.capabilities.catalog(requestedSessionId)
-      .find((capability) => capability.id === 'mcp-bridge')?.deferred === false
-    const packEntries = piPackCatalogEntries({ activeTools, unlockedTools: [...unlocked] })
-      .filter((entry) => workspaceTextSearch.available || !isWorkspaceTextSearchTool(entry.name))
-    const builtinEntries: PiCatalogEntry[] = piCoreRuntimeToolCatalog().map((definition) => ({
-      name: definition.name,
-      description: definition.description,
-      pack: 'builtin',
-      source: 'discovered' as const,
-      // Empty settings.activeTools means "everything on" (the historical
-      // contract); a non-empty list is the user's explicit set.
-      active: activeTools.length === 0 || activeTools.includes(definition.name),
-      available: true,
-      schemaDigest: schemaDigest(definition.parameters),
-      ...(!(activeTools.length === 0 || activeTools.includes(definition.name)) ? { reason: `${definition.name} is disabled by Pi active tools settings` } : {}),
-    }))
-    const latestContract = (() => {
-      const sessions = requestedSessionId
-        ? state.snapshot.sessions.filter((session) => session.id === requestedSessionId)
-        : state.snapshot.sessions
-      return sessions.flatMap((session) => state.toolContracts.list(session.id)).sort((left, right) => right.revision - left.revision)[0]
-    })()
-    const applyContractFacts = (entries: PiCatalogEntry[]): PiCatalogEntry[] => {
-      if (!latestContract) return entries
-      const facts = new Map(latestContract.tools.map((tool) => [tool.name, tool]))
-      return entries.map((entry) => {
-        const fact = facts.get(entry.name)
-        if (!fact) return entry
-        if (entry.pack === 'mcp' && entry.available && entry.schemaDigest !== fact.schemaDigest) {
-          return {
-            ...entry,
-            active: false,
-            available: false,
-            contractRevision: latestContract.revision,
-            contractDigest: latestContract.contractDigest,
-            reason: 'MCP tool stale: upstream schema changed after the frozen turn contract; reload applies on the next turn',
-          }
-        }
-        if (!entry.available) return entry
-        return {
-          ...entry,
-          active: fact.active,
-          schemaDigest: fact.schemaDigest,
-          contractRevision: latestContract.revision,
-          contractDigest: latestContract.contractDigest,
-          ...(fact.active ? { reason: undefined } : { reason: entry.reason || 'Inactive in the selected Pi turn contract' }),
-        }
-      })
-    }
-    return Promise.all(mcpExtensions.map(async (extension): Promise<PiCatalogEntry[]> => {
-      const unavailable = (toolName: string, category: 'disabled' | 'missing' | 'schema-invalid' | 'transport-failed', detail: string): PiCatalogEntry => ({
-        name: piMcpModelToolName(extension.id, toolName),
-        description: 'Tool provided by an installed MCP extension',
-        pack: 'mcp',
-        source: 'installed',
-        active: false,
-        available: false,
-        schemaDigest: schemaDigest({ unavailable: true, category, extensionId: extension.id, tool: toolName }),
-        reason: `MCP ${category}: ${detail}`,
-        extensionId: extension.id,
-        upstreamToolName: toolName,
-      })
-      if (!extension.enabled) {
-        return extension.tools.map((toolName) => unavailable(toolName, 'disabled', `extension ${extension.id} is disabled`))
-      }
-      try {
-        const tools = await listPiMcpTools(extension.id, extension.mcp!)
-        const entries = new Map<string, PiCatalogEntry>()
-        const present = new Set<string>()
-        for (const tool of tools) {
-          if (typeof tool.name !== 'string' || !tool.name.trim()) continue
-          present.add(tool.name)
-          if (!isPiMcpInputSchema(tool.inputSchema)) {
-            entries.set(tool.name, unavailable(tool.name, 'schema-invalid', `tool ${tool.name} did not provide a valid object input schema`))
-            continue
-          }
-          entries.set(tool.name, {
-            name: piMcpModelToolName(extension.id, tool.name),
-            description: typeof tool.description === 'string' ? tool.description : 'Tool provided by an installed MCP extension',
-            pack: 'mcp',
-            source: 'installed',
-            active: false,
-            available: true,
-            schemaDigest: schemaDigest(tool.inputSchema),
-            extensionId: extension.id,
-            upstreamToolName: tool.name,
-          })
-        }
-        for (const toolName of extension.tools) {
-          if (!present.has(toolName)) entries.set(toolName, unavailable(toolName, 'missing', `declared tool ${toolName} was not returned by the server`))
-        }
-        return [...entries.values()]
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : 'MCP server did not provide a trusted schema'
-        return extension.tools.map((toolName) => unavailable(toolName, 'transport-failed', reason))
-      }
-    })).then((discovered) => {
-      const flattened = discovered.flat()
-      const assigned = piMcpModelToolNames(flattened.flatMap((entry) => entry.extensionId && entry.upstreamToolName
-        ? [{ extensionId: entry.extensionId, upstreamToolName: entry.upstreamToolName }]
-        : []))
-      const mcpEntries = flattened.map((entry): PiCatalogEntry => {
-        if (!entry.extensionId || !entry.upstreamToolName) return entry
-        const name = assigned.get(`${entry.extensionId}\u0000${entry.upstreamToolName}`) || entry.name
-        const active = entry.available && (mcpCapabilityActive || activeTools.includes(name))
-        return {
-          ...entry,
-          name,
-          active,
-          ...(entry.available && !active ? { reason: 'Inactive this turn: load the mcp-bridge capability' } : {}),
-        }
-      })
-      // One list, three sources beside each other with their own facts
-      // carried per entry (issue 03). Sorted by name so the union reads
-      // stably regardless of which source answered first.
-      const catalog = applyContractFacts([...builtinEntries, ...packEntries, ...mcpEntries]).sort((left, right) => left.name.localeCompare(right.name))
-      // Remember what was described, so a later call to a tool the frozen
-      // contract does not carry can still be identified and refused by name.
-      state.catalogProjection = new Map(catalog.map((entry) => [entry.name, entry]))
-      return [{ id, result: {
-        builtinTools: catalog.filter((entry) => entry.available && entry.active).map((entry) => entry.name),
-        catalog,
-        ...(latestContract ? { catalogContractRevision: latestContract.revision, catalogContractDigest: latestContract.contractDigest } : {}),
-      } }]
-    })
-  }
-  if (input.method === 'tools/contract') {
-    if (!state.toolContractNegotiated) return [errorResponse(id, 'invalid_request', 'Client did not negotiate tool-contract-v1')]
-    const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
-    const revision = typeof input.params?.revision === 'number' ? input.params.revision : Number(input.params?.revision)
-    const toolName = typeof input.params?.toolName === 'string' ? input.params.toolName : ''
-    const lookup = state.toolContracts.lookup(sessionId, revision, toolName)
-    if (!lookup.ok) return [errorResponse(id, lookup.code, lookup.message)]
-    return [{ id, result: { contract: lookup.contract, contractTool: lookup.tool, revisionStatus: lookup.status } }]
-  }
-  if (input.method === 'tools/pack') {
-    const params = input.params || {}
-    const name = typeof params.name === 'string' ? params.name : ''
-    const definition = findPiPackTool(name)
-    if (!definition) return [errorResponse(id, 'invalid_request', `Unknown Pi extension tool: ${name}`)]
-    if (isWorkspaceTextSearchTool(name)) {
-      const explicitWorkspaceRoot = typeof params.cwd === 'string' && params.cwd.trim() ? params.cwd : undefined
-      if (!explicitWorkspaceRoot) {
-        return [errorResponse(id, 'invalid_request', '工作區文字檢索需要明確的 workspace cwd；不允許使用 process.cwd() fallback。')]
-      }
-      const gate = workspaceTextSearchAvailability({
-        sessionId: typeof params.sessionId === 'string' ? params.sessionId : undefined,
-        enabled: state.snapshot.settings.workspaceTextSearch === true,
-        workspaceRoot: explicitWorkspaceRoot,
-      })
-      if (!gate.available) {
-        return [errorResponse(id, 'invalid_request', gate.reason || 'Workspace text search is unavailable')]
-      }
-    }
-    const rawArgs = (params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments) ? params.arguments : {}) as Record<string, unknown>
-    const sessionId = typeof params.sessionId === 'string' ? params.sessionId : 'direct'
-    const runId = typeof params.runId === 'string' ? params.runId : String(id)
-    const callId = typeof params.callId === 'string' ? params.callId : runId
-    const cwd = typeof params.cwd === 'string' ? params.cwd : process.cwd()
-    const hasCurrentContract = typeof params.sessionId === 'string' && Boolean(state.toolContracts.latest(params.sessionId))
-    const validation = hasCurrentContract || params.contractRevision !== undefined || params.schemaDigest !== undefined
-      ? validateDirectToolCall(state, name, {
-          cwd,
-          ...(typeof params.sessionId === 'string' ? { sessionId: params.sessionId } : {}),
-          runId,
-          callId,
-          ...(typeof params.contractRevision === 'number' ? { contractRevision: params.contractRevision } : {}),
-          ...(typeof params.schemaDigest === 'string' ? { schemaDigest: params.schemaDigest } : {}),
-        }, rawArgs)
-      : validatePiToolArguments(definition.tool.parameters, rawArgs)
-    if (!validation.ok) {
-      const reason = `${name} parameters are invalid: ${validation.message}`
-      return contractValidationFailure({
-        state,
-        sessionId: typeof params.sessionId === 'string' ? params.sessionId : undefined,
-        runId,
-        callId,
-        parentRunId: typeof params.parentRunId === 'string' ? params.parentRunId : undefined,
-        tool: name,
-        origin: invocationOrigin,
-        reason,
-        id,
-        emit,
-      })
-    }
-    const args = validation.arguments
-    const updates: PiHostEvent[] = []
-    const publish = (event: PiHostEvent) => {
-      recordToolAudit(state, params.sessionId, event)
-      if (emit) emit(event); else updates.push(event)
-    }
-    return (async () => {
-      const parentRunId = typeof params.parentRunId === 'string' ? params.parentRunId : undefined
-      const foundIdentity = typeof params.sessionId === 'string'
-        ? contractIdentityForCurrentTool(state, sessionId, name)
-        : undefined
-      const ctx = { sessionId, cwd, runId }
-      const approvalPlan = definition.tool.approval?.(args, ctx)
-      const requirements: PiToolPolicyRequirements = {
-        ...(definition.tool.policyMigration || {}),
-        ...(approvalPlan?.need && !definition.tool.policyMigration?.capabilityApproval
-          && !definition.tool.policyMigration?.approvalRequired
-          ? { approvalRequired: approvalPlan.reason, sideEffect: true }
-          : {}),
-      }
-      const detachedIdentity: PiInvocationContractIdentity = {
-        contractRevision: 1,
-        contractDigest: schemaDigest({ compatibility: 'direct-pack', tool: name, schema: definition.tool.parameters }),
-        schemaDigest: schemaDigest(definition.tool.parameters),
-        toolSource: 'extension-pack',
-        toolPack: definition.pack.id,
-      }
-      const authorized = await authorizeContractInvocation({
-        state, sessionId, runId, callId, parentRunId, cwd, tool: name, args,
-        origin: invocationOrigin,
-        approval: params.approval,
-        requirements,
-        identity: foundIdentity?.identity || detachedIdentity,
-      })
-      if ('contractError' in authorized) return [errorResponse(id, 'invalid_request', authorized.contractError)]
-      const authorization: InvocationAuthorization = authorized
-      const executionArgs = authorized.args
-      const identity = authorization.identity
-      const identityPayload = identity ? { ...identity, invocationOrigin } : {}
-      publish({ event: 'host/tool-start', payload: { runId, tool: name, callId, parentRunId, ...identityPayload } })
-      if (!authorization.ok) {
-        publish({ event: 'host/tool-decision', payload: {
-          runId, tool: name, callId, parentRunId, decision: authorization.decision,
-          ...(authorization.settlement ? { settlement: authorization.settlement } : {}),
-          reason: authorization.reason,
-          ...identityPayload,
-        } })
-        if (authorization.settlement) publish({ event: 'host/tool-result', payload: {
-          runId, tool: name, callId, parentRunId, settlement: authorization.settlement,
-          reason: authorization.reason,
-          ...identityPayload,
-        } })
-        return [...updates, errorResponse(id, 'invalid_request', authorization.decision === 'ask'
-          ? `Approval required: ${authorization.reason}`
-          : authorization.reason)]
-      }
-      publish({ event: 'host/tool-decision', payload: {
-        runId, tool: name, callId, parentRunId, decision: 'allow', reason: authorization.reason, ...identityPayload,
-      } })
-      const outcome = await executePiPackTool(name, executionArgs, { sessionId, cwd, runId }, {
-        callId,
-      })
-      const structuredFailure = Boolean(outcome.data && typeof outcome.data === 'object'
-        && (outcome.data as { ok?: unknown }).ok === false)
-      const resultOk = outcome.ok && !structuredFailure
-      authorization.evidence.update(resultOk ? 'Extension Pack execution completed' : outcome.text)
-      authorization.evidence.result(resultOk, resultOk ? 'structured result returned' : outcome.text)
-      authorization.evidence.settle(outcome.denied ? 'denied' : resultOk ? 'success' : 'failed', resultOk ? undefined : outcome.text)
-      publish({ event: 'host/tool-result', payload: {
-        runId, tool: name, callId, parentRunId,
-        settlement: outcome.denied ? 'denied' as const : resultOk ? 'success' as const : 'failed' as const,
-        item: outcome.data ?? { text: outcome.text },
-        ...(outcome.ok ? {} : { reason: outcome.text }),
-        ...identityPayload,
-      } })
-      if (!outcome.ok && !outcome.denied) return [...updates, errorResponse(id, 'invalid_request', outcome.text)]
-      return [...updates, { id, result: { tool: name, content: [{ type: 'text', text: outcome.text }], ...(outcome.data !== undefined ? { item: outcome.data } : {}) } }]
-    })()
-  }
-  if (input.method === 'approvals/resolve') {
-    const resolved = resolvePiApproval(input.params || {})
-    if (!resolved) return [errorResponse(id, 'invalid_request', 'No pending Pi approval matches runId and callId')]
-    return [{ id, result: { resolved: true } }]
-  }
-  if (input.method === 'tools/mcp') {
-    const extensionId = typeof input.params?.extensionId === 'string' ? input.params.extensionId : ''
-    const toolName = typeof input.params?.toolName === 'string' ? input.params.toolName : ''
-    const args = input.params?.arguments
-    const extension = state.extensions.list().find((candidate) => candidate.id === extensionId && candidate.kind === 'mcp' && candidate.enabled)
-    if (!extension?.mcp || !toolName || !args || typeof args !== 'object' || Array.isArray(args)) return [errorResponse(id, 'invalid_request', 'enabled MCP extensionId, toolName, and arguments are required')]
-    const mcpConfig = extension.mcp
-    const runId = typeof input.params?.runId === 'string' ? input.params.runId : String(id)
-    const callId = typeof input.params?.callId === 'string' ? input.params.callId : runId
-    return (async () => {
-      const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : 'direct'
-      const cwd = typeof input.params?.cwd === 'string' ? input.params.cwd : process.cwd()
-      const discovered = await listPiMcpTools(extension.id, mcpConfig)
-      const upstream = discovered.find((candidate) => candidate.name === toolName)
-      if (!upstream || !isPiMcpInputSchema(upstream.inputSchema)) return [errorResponse(id, 'invalid_request', `Unknown or schema-invalid MCP tool: ${toolName}`)]
-      const tool = piMcpModelToolName(extension.id, toolName)
-      const current = contractIdentityForCurrentTool(state, sessionId, tool)?.identity
-      const inputDigest = schemaDigest(upstream.inputSchema)
-      const identity: PiInvocationContractIdentity = current || {
-        contractRevision: 1,
-        contractDigest: schemaDigest({ compatibility: 'tools/mcp', extensionId: extension.id, toolName, inputDigest }),
-        schemaDigest: inputDigest,
-        toolSource: 'mcp',
-        toolPack: `mcp-${extension.id}`,
-      }
-      const validation = validatePiToolArguments(upstream.inputSchema, args as Record<string, unknown>)
-      if (!validation.ok) return [errorResponse(id, 'invalid_request', `${tool} parameters are invalid: ${validation.message}`)]
-      const authorization = await authorizeContractInvocation({
-        state, sessionId, runId, callId, cwd, tool,
-        args: validation.arguments,
-        origin: 'direct-protocol',
-        approval: input.params?.approval,
-        requirements: { outbound: true, sideEffect: true, approvalRequired: `MCP ${extension.id}/${toolName} requires approval` },
-        identity,
-      })
-      if ('contractError' in authorization) return [errorResponse(id, 'invalid_request', authorization.contractError)]
-      const updates: PiHostEvent[] = []
-      const publish = (event: PiHostEvent) => {
-        recordToolAudit(state, typeof input.params?.sessionId === 'string' ? sessionId : undefined, event)
-        if (emit) emit(event); else updates.push(event)
-      }
-      const identityPayload = { ...identity, invocationOrigin: 'direct-protocol' as const }
-      publish({ event: 'host/tool-start', payload: { runId, tool, callId, ...identityPayload } })
-      if (!authorization.ok) {
-        publish({ event: 'host/tool-decision', payload: { runId, tool, callId, decision: authorization.decision, ...(authorization.settlement ? { settlement: authorization.settlement } : {}), reason: authorization.reason, ...identityPayload } })
-        if (authorization.settlement) publish({ event: 'host/tool-result', payload: { runId, tool, callId, settlement: authorization.settlement, reason: authorization.reason, ...identityPayload } })
-        return [...updates, errorResponse(id, 'invalid_request', authorization.decision === 'ask' ? `Approval required: ${authorization.reason}` : authorization.reason)]
-      }
-      publish({ event: 'host/tool-decision', payload: { runId, tool, callId, decision: 'allow', reason: authorization.reason, ...identityPayload } })
-      try {
-        const content = await callPiMcpTool(extension.id, mcpConfig, toolName, authorization.args)
-        authorization.evidence.update('MCP execution completed')
-        authorization.evidence.result(true, 'result returned')
-        authorization.evidence.settle('success')
-        publish({ event: 'host/tool-result', payload: { runId, tool, callId, settlement: 'success', item: { content }, ...identityPayload } })
-        return [...updates, { id, result: { tool, content: [{ type: 'text', text: content }] } }]
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : 'MCP tool failed'
-        authorization.evidence.result(false, reason)
-        authorization.evidence.settle('failed', reason)
-        publish({ event: 'host/tool-result', payload: { runId, tool, callId, settlement: 'failed', reason, ...identityPayload } })
-        return [...updates, errorResponse(id, 'invalid_request', reason)]
-      }
-    })()
-  }
-  if (input.method === 'tools/code') {
-    const params = input.params || {}
-    if (typeof params.cwd !== 'string' || typeof params.code !== 'string') return [errorResponse(id, 'invalid_request', 'cwd and code are required')]
-    const codeCwd = params.cwd
-    const runId = typeof params.runId === 'string' ? params.runId : String(id)
-    const codeSessionId = typeof params.sessionId === 'string' ? params.sessionId : 'direct'
-    const contract = state.toolContracts.latest(codeSessionId)
-    if (!contract) return [errorResponse(id, 'tool_contract_not_found', `No current tool contract exists for session: ${codeSessionId}`)]
-    const claimedRevision = typeof params.contractRevision === 'number' ? params.contractRevision : contract.revision
-    if (claimedRevision !== contract.revision) return [errorResponse(id, 'tool_contract_stale', `Tool contract revision ${claimedRevision} is not current; current is ${contract.revision}`)]
-    const runCodeContract = state.toolContracts.lookup(codeSessionId, contract.revision, 'run_code')
-    if (!runCodeContract.ok) return [errorResponse(id, runCodeContract.code, runCodeContract.message)]
-    if (typeof params.schemaDigest === 'string' && params.schemaDigest !== runCodeContract.tool.schemaDigest) {
-      return [errorResponse(id, 'invalid_request', 'Tool schema digest mismatch for run_code')]
-    }
-    const codeValidation = validatePiToolArguments(runCodeContract.tool.parameters, {
-      code: params.code,
-      ...(typeof params.maxToolCalls === 'number' ? { maxToolCalls: params.maxToolCalls } : {}),
-      ...(typeof params.timeoutMs === 'number' ? { timeoutMs: params.timeoutMs } : {}),
-    })
-    if (!codeValidation.ok) return [errorResponse(id, 'invalid_request', `run_code parameters are invalid: ${codeValidation.message}`)]
-    return (async () => {
-      const outerCallId = typeof params.callId === 'string' ? params.callId : `${runId}:code`
-      let outerAuthorization: InvocationAuthorization | undefined
-      if (!input[INTERNAL_OUTER_CODE_APPROVED]) {
-      const authorized = await authorizeContractInvocation({
-        state,
-        sessionId: codeSessionId,
-        runId,
-        callId: outerCallId,
-        cwd: codeCwd,
-        tool: 'run_code',
-        args: codeValidation.arguments,
-        origin: 'direct-protocol',
-        approval: params.approval,
-        requirements: { sideEffect: true, approvalRequired: 'run_code requires approval before execution' },
-      })
-      if ('contractError' in authorized) return [errorResponse(id, 'invalid_request', authorized.contractError)]
-      if (!authorized.ok) return [errorResponse(id, 'invalid_request', authorized.decision === 'ask' ? `Approval required: ${authorized.reason}` : authorized.reason)]
-      outerAuthorization = authorized
-      }
-      // Snapshot the surrounding contract once. Capability changes cannot add a
-    // new callable name to a script that already started.
-    const activeTools = contract.tools.filter((tool) => tool.active).map((tool) => tool.name)
-    let nestedSequence = 0
-      return runPiCodeMode({
-      runId,
-      code: String(codeValidation.arguments.code),
-      activeTools,
-      maxToolCalls: typeof codeValidation.arguments.maxToolCalls === 'number' ? codeValidation.arguments.maxToolCalls : undefined,
-      timeoutMs: typeof codeValidation.arguments.timeoutMs === 'number' ? codeValidation.arguments.timeoutMs : undefined,
-      callTool: async (toolName, args) => {
-        const nestedId = `${String(id)}:code:${nestedSequence++}`
-        const nestedContract = contract.tools.find((tool) => tool.name === toolName && tool.active)
-        if (!nestedContract) throw new Error(`Tool «${toolName}» is not active in this Pi turn contract.`)
-        let nestedRequest: InternalPiHostRequest
-        if (findPiPackTool(toolName)) {
-          nestedRequest = {
-            id: nestedId,
-            method: 'tools/pack',
-            params: {
-              name: toolName,
-              arguments: args,
-              cwd: codeCwd,
-              sessionId: codeSessionId,
-              runId,
-              callId: nestedId,
-              parentRunId: runId,
-              contractRevision: contract.revision,
-              schemaDigest: nestedContract.schemaDigest,
-            },
-          }
-        } else {
-          if (!piCoreRuntimeStatus().builtinTools.includes(toolName)) throw new Error(`Unknown Pi tool: ${toolName}`)
-          nestedRequest = {
-            id: nestedId,
-            method: `tools/${toolName}` as PiHostRequest['method'],
-            params: {
-              ...args,
-              cwd: codeCwd,
-              sessionId: codeSessionId,
-              runId,
-              callId: nestedId,
-              parentRunId: runId,
-              contractRevision: contract.revision,
-              schemaDigest: nestedContract.schemaDigest,
-            },
-          }
-        }
-        nestedRequest[INTERNAL_INVOCATION_ORIGIN] = 'code-mode'
-        // Deliberately no approval field: the outer run_code decision never
-        // authorizes a nested effectful invocation.
-        const nested = await handlePiHostRequest(state, nestedRequest, emit)
-        const response = nested.find((message) => !('event' in message) && message.id === nestedId) as PiHostResponse | undefined
-        if (!response || response.error) throw new Error(response?.error?.message || `Pi nested tool failed: ${toolName}`)
-        return JSON.stringify(response.result?.content ?? response.result ?? null)
-      },
-    }).then((result) => {
-      if (outerAuthorization) {
-        const succeeded = result.settlement === 'success'
-        outerAuthorization.evidence.update(`Code Mode ${result.settlement}`)
-        outerAuthorization.evidence.result(succeeded, result.content)
-        outerAuthorization.evidence.settle(result.settlement === 'cancelled' ? 'cancelled' : succeeded ? 'success' : 'failed', result.content)
-      }
-      return [{ id, result: { tool: 'code', runId, settlement: result.settlement, content: [{ type: 'text', text: result.content }], code: result.content, items: [{ toolCallCount: result.toolCallCount, logs: result.logs }] } }]
-      })
-    })()
-  }
-  if (input.method === 'tools/read' || input.method === 'tools/grep' || input.method === 'tools/find' || input.method === 'tools/ls' || input.method === 'tools/write' || input.method === 'tools/edit' || input.method === 'tools/bash') {
-    const params = input.params || {}
-    const split = splitDirectToolRequest(id, params)
-    if (!split.ok) return [errorResponse(id, 'invalid_request', split.message)]
-    const toolName = input.method.slice('tools/'.length) as PiBuiltinToolName
-    if (state.snapshot.settings.activeTools.length > 0 && !state.snapshot.settings.activeTools.includes(toolName)) return [errorResponse(id, 'invalid_request', `${toolName} is disabled by Pi active tools settings`)]
-    const validation = validateDirectToolCall(state, toolName, split.envelope, split.arguments)
-    if (!validation.ok) return contractValidationFailure({
-      state,
-      sessionId: split.envelope.sessionId,
-      runId: split.envelope.runId,
-      callId: split.envelope.callId,
-      parentRunId: split.envelope.parentRunId,
-      tool: toolName,
-      origin: invocationOrigin,
-      reason: validation.message,
-      id,
-      emit,
-    })
-    const args = validation.arguments
-    const { envelope } = split
-    const sideEffect = toolName === 'write' || toolName === 'edit' || toolName === 'bash'
-    const bashDecision = toolName === 'bash'
-      ? decideBashAction(String(args.command || ''), () => 'allow', state.snapshot.settings.bashRequireAsk ? 'ask' : 'allow')
-      : undefined
-    return dispatchDirectBuiltinTool({
-      state,
-      id,
-      envelope,
-      toolName,
-      args,
-      invocationOrigin,
-      emit,
-      sideEffect,
-      bashDecision,
-      hasRunId: typeof params.runId === 'string',
-    })
-  }
+  const toolDomainResponse = handlePiHostToolDomain({
+    method: input.method,
+    params: input.params,
+    id,
+    state,
+    execute: () => executePiHostToolRequest(state, input, id, invocationOrigin, emit),
+  })
+  if (toolDomainResponse) return toolDomainResponse
   if (input.method === 'state/snapshot') {
     return projectPiHostStateSnapshot(state, id)
   }
@@ -4424,7 +4382,7 @@ export function handlePiHostRequest(
     compact: (session) => handleManualSessionCompaction({ state, session, request: input, id, checkpointWriter, emit }),
   })
   if (sessionResponse) return sessionResponse
-  const boundedReadResponse = handleBoundedHostRead(state, input, id, emit)
+  const boundedReadResponse = handleBoundedHostRead(state, input, id)
   if (boundedReadResponse) return boundedReadResponse
   const resourceResponse = handlePiHostResourceDomain({
     method: input.method,
@@ -4446,137 +4404,6 @@ export function handlePiHostRequest(
     commit: (extensions) => { state.snapshot.extensions = extensions; state.snapshot.cursor += 1 },
   })
   if (extensionResponse) return extensionResponse
-    if (input.method === 'runs/list') return [{ id, result: { queue: state.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })) } }]
-  if (input.method === 'runs/claim') {
-    const runId = typeof input.params?.runId === 'string' ? input.params.runId : undefined
-    const queue = new PiRunQueue(24, state.snapshot.queue)
-    const run = queue.claim(runId)
-    if (!run) return [errorResponse(id, 'invalid_request', runId ? 'Unknown queued Pi run' : 'No queued Pi run available')]
-    state.snapshot.queue = queue.snapshot(); state.snapshot.cursor += 1
-    return [{ id, result: { run, queue: state.snapshot.queue } }]
-  }
-  if (input.method === 'runs/settle') {
-    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
-    const settlement = input.params?.settlement
-    if (!runId || !isPiTurnSettlement(settlement)) return [errorResponse(id, 'invalid_request', 'runId and settlement are required')]
-    const queue = new PiRunQueue(24, state.snapshot.queue)
-    const run = queue.settle(runId)
-    if (!run) return [errorResponse(id, 'invalid_request', 'Unknown active Pi run')]
-    state.snapshot.queue = queue.snapshot(); state.snapshot.cursor += 1
-    return [{ id, result: { run, queue: state.snapshot.queue, settlement } }]
-  }
-  if (input.method === 'runs/enqueue') {
-    const params = input.params || {}
-    if (typeof params.runId !== 'string' || typeof params.sessionId !== 'string' || typeof params.prompt !== 'string' || !['interactive', 'time', 'proactive'].includes(String(params.trigger)) || !params.profile || typeof params.profile !== 'object') {
-      return [errorResponse(id, 'invalid_request', 'runId, sessionId, prompt, trigger, and profile are required')]
-    }
-    const queue = new PiRunQueue(24, state.snapshot.queue)
-    const outcome = queue.enqueue({
-      runId: params.runId,
-      sessionId: params.sessionId,
-      prompt: params.prompt,
-      trigger: params.trigger as PiQueuedRun['trigger'],
-      evidence: typeof params.evidence === 'string' ? params.evidence : undefined,
-      profile: { ...(params.profile as Record<string, unknown>) },
-      status: 'queued',
-    })
-    if (!outcome.ok) return [errorResponse(id, 'invalid_request', `Pi run queue ${outcome.code}`)]
-    state.snapshot.queue = queue.snapshot(); state.snapshot.cursor += 1
-    return [{ id, result: { queue: state.snapshot.queue } }]
-  }
-  if (input.method === 'runs/cancel') {
-    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
-    if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
-    const queue = new PiRunQueue(24, state.snapshot.queue)
-    if (!queue.snapshot().some((item) => item.runId === runId)) return [errorResponse(id, 'invalid_request', 'Unknown queued Pi run')]
-    queue.markInterrupted(runId); state.snapshot.queue = queue.snapshot(); state.snapshot.cursor += 1
-    return [{ id, result: { queue: state.snapshot.queue } }]
-  }
-  if (input.method === 'sessions/create') {
-    const params = input.params || {}
-    const parentSessionId = typeof params.parentSessionId === 'string' ? params.parentSessionId : undefined
-    let sessionId = `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    let childMetadata: Pick<SessionRecord, 'parentSessionId' | 'role' | 'profile' | 'context' | 'depth'> = {}
-    if (parentSessionId) {
-      if (!state.snapshot.sessions.some((candidate) => candidate.id === parentSessionId)) return [errorResponse(id, 'invalid_request', 'parentSessionId is unknown')]
-      if (typeof params.role !== 'string' || !params.profile || typeof params.profile !== 'object' || !params.context || typeof params.context !== 'object' || typeof params.depth !== 'number') {
-        return [errorResponse(id, 'invalid_request', 'Child Pi session requires role, profile, context, and depth')]
-      }
-      try {
-        const child = createPiChildSession({
-          role: params.role,
-          profile: params.profile as Record<string, unknown>,
-          context: params.context as PiContextPacket,
-          depth: params.depth,
-        })
-        sessionId = child.id
-        childMetadata = { parentSessionId, role: child.role, profile: child.profile, context: child.context, depth: child.depth }
-      } catch (error) {
-        return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid child Pi session')]
-      }
-    }
-    const session: SessionRecord = {
-      id: sessionId,
-      title: typeof params.title === 'string' ? params.title : 'New Pi session',
-      threadId: typeof params.threadId === 'string' ? params.threadId : undefined,
-      ...childMetadata,
-      messages: [],
-    }
-    state.snapshot.sessions = [...state.snapshot.sessions, session]
-    state.snapshot.cursor += 1
-    return [{ id, result: { sessionId: session.id, sessions: [session] } }]
-  }
-  if (input.method === 'sessions/fork') {
-    const sourceId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
-    const source = state.snapshot.sessions.find((candidate) => candidate.id === sourceId)
-    if (!source) return [errorResponse(id, 'invalid_request', 'sessionId is required')]
-    const fork: SessionRecord = {
-      id: `pi-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      title: `${source.title} (fork)`,
-      parentSessionId: source.id,
-      role: source.role,
-      profile: source.profile ? { ...source.profile } : undefined,
-      context: source.context ? { objective: source.context.objective, facts: [...source.context.facts], constraints: [...source.context.constraints] } : undefined,
-      depth: source.depth,
-      messages: source.messages.map((message) => ({ ...message })),
-      piSessionFile: forkPiSession(sourceId),
-    }
-    state.snapshot.sessions = [...state.snapshot.sessions, fork]; state.snapshot.cursor += 1
-    return [{ id, result: { sessionId: fork.id, sessions: [fork] } }]
-  }
-  if (input.method === 'sessions/reset') {
-    const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
-    const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
-    if (!session) return [errorResponse(id, 'invalid_request', 'sessionId is required')]
-    if (activeSessionRuns.has(sessionId)) return [errorResponse(id, 'invalid_request', 'Cannot reset an active Pi session')]
-    return disposePiSession(sessionId).then(() => {
-      session.messages = []
-      session.profile = undefined
-      session.context = undefined
-      session.piSessionFile = undefined
-      session.toolAudit = []
-      session.toolContractRevisionFloor = state.toolContracts.nextRevision(sessionId)
-      session.toolContracts = []
-      state.toolContracts.clear(sessionId)
-      state.capabilities.clear(sessionId)
-      session.archived = false
-      state.snapshot.cursor += 1
-      return [{ id, result: { sessionId, sessions: [session] } }]
-    })
-  }
-  if (input.method === 'sessions/archive' || input.method === 'sessions/compact') {
-    const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
-    const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
-    if (!session) return [errorResponse(id, 'invalid_request', 'sessionId is required')]
-    if (input.method === 'sessions/archive') {
-      return disposePiSession(sessionId).then(() => {
-        session.archived = true
-        state.snapshot.cursor += 1
-        return [{ id, result: { sessionId, sessions: [session] } }]
-      })
-    }
-    return handleManualSessionCompaction({ state, session, request: input, id, checkpointWriter, emit })
-  }
   if (input.method === 'turn/interrupt') {
     const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
     if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
@@ -5153,6 +4980,7 @@ export function handlePiHostRequest(
         recordTurnEntry(sessionId, { kind: 'user-text', source: 'user', content: providerUserText })
         recordTurnEntry(sessionId, { kind: 'provider-prompt', source: 'host', content: providerPrompt })
         const turn = await runPiTurn(sessionId, cwd, providerPrompt, providerHistory, (event) => {
+          const executionIdleLeaseMs = piTurnEventDeadlineLeaseMs(event)
           // A tool call is the model asking; the audit records what the Host
           // then decided and did (ADR-0048).
           // Each assistant message is recorded where it happened, so the
@@ -5219,7 +5047,7 @@ export function handlePiHostRequest(
             // allowed call left the UI holding a decision that never resolved.
             publishInTurnToolEvent(state, sessionId, emit, {
               event: 'host/tool-start',
-              payload: { runId, tool: toolName, callId, ...(identity || {}) },
+              payload: { runId, tool: toolName, callId, idleLeaseMs: executionIdleLeaseMs, ...(identity || {}) },
             })
           }
           if (event.type === 'tool_execution_end') {
@@ -5267,7 +5095,7 @@ export function handlePiHostRequest(
           /* Events are collected below so the response remains ordered after them. */
           // Real progress resets the budget: a turn still emitting work is
           // working, not stuck, and long tasks are the point of this feature.
-          deadline?.extend()
+          deadline?.extendFor(executionIdleLeaseMs)
           const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event, iteration } }
           if (emit) emit(turnEvent)
           else turnEvents.push(turnEvent)
@@ -5820,7 +5648,6 @@ function handleBoundedHostRead(
   state: HostState,
   input: Partial<InternalPiHostRequest>,
   id: string | number,
-  emit?: (message: PiHostMessage) => void,
 ): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
   return handleMemoryControlMaintenance(state, input, id)
     || handleMemoryControlPackageRead(state, input as Partial<PiHostRequest>, id)

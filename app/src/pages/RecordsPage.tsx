@@ -29,13 +29,14 @@ const PAGE_SIZE = 8
 function archiveWorkingState(archive: ArchiveRecord) {
   return archive.turnRecord
     ? projectWorkingStateEntries(turnRecordEntries(archive.turnRecord), false)
-    : unavailableWorkingStateProjection(archive.id)
+    : unavailableWorkingStateProjection(archive.id, false, 'legacy-unrecorded')
 }
 
 function ArchiveRunStatus({ archive }: { archive: ArchiveRecord }) {
   const snapshot = useMemo(() => projectRunnerCapabilitySnapshot(
     recordRunnerDeclaration(archive.turnRecord),
     archive.runnerCapabilities,
+    { missingEvidence: 'legacy-unrecorded' },
   ), [archive.turnRecord, archive.runnerCapabilities])
   const workingState = useMemo(() => archiveWorkingState(archive), [archive])
   const lifecycle = deriveRunLifecycle({
@@ -68,6 +69,7 @@ function ArchiveRunnerDiagnostics({ archive }: { archive: ArchiveRecord }) {
   const snapshot = useMemo(() => projectRunnerCapabilitySnapshot(
     recordRunnerDeclaration(archive.turnRecord),
     archive.runnerCapabilities,
+    { missingEvidence: 'legacy-unrecorded' },
   ), [archive.turnRecord, archive.runnerCapabilities])
   const workingState = useMemo(() => archiveWorkingState(archive), [archive])
   const label = snapshot.guarantee === 'host-verified'
@@ -76,7 +78,9 @@ function ArchiveRunnerDiagnostics({ archive }: { archive: ArchiveRecord }) {
       ? 'Reduced guarantee'
       : snapshot.guarantee === 'run-snapshot'
         ? 'Run snapshot'
-        : 'Unavailable / degraded'
+        : snapshot.guarantee === 'legacy-unrecorded'
+          ? 'Legacy record · guarantee not recorded'
+          : 'Unavailable / degraded'
   return (
     <details className="border-b border-line pb-3">
       <summary className="cursor-pointer text-xs font-semibold text-on-surface-variant">執行資訊</summary>

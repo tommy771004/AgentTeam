@@ -26,6 +26,7 @@ export type WorkingStateProjection = {
   runId: string
   revision?: number
   verification: WorkingStateVerification
+  unavailabilityReason?: 'host-unavailable' | 'not-recorded' | 'legacy-unrecorded' | 'invalid'
   objective?: string
   constraints: string[]
   goals: WorkingStateGoalView[]
@@ -80,17 +81,19 @@ export function projectWorkingStateEntries(
     if (entry.kind !== 'working-state' || entry.source !== 'host' || !isWorkingState(entry.state)) continue
     if (!latest || entry.state.revision >= latest.revision) latest = entry.state
   }
-  if (!latest) return unavailableWorkingStateProjection('working-state-unavailable')
+  if (!latest) return unavailableWorkingStateProjection('working-state-unavailable', false, 'not-recorded')
   return projectWorkingState(latest, hostAvailable ? 'verified' : 'unverified')
 }
 
 export function unavailableWorkingStateProjection(
   runId: string,
   tombstoned = false,
+  unavailabilityReason: WorkingStateProjection['unavailabilityReason'] = 'host-unavailable',
 ): WorkingStateProjection {
   return {
     runId,
     verification: 'unavailable',
+    unavailabilityReason,
     constraints: [],
     goals: [],
     tombstoned,

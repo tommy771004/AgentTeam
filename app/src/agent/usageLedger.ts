@@ -109,15 +109,22 @@ function knownString(value: unknown, max = 1000): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= max
 }
 
-export function isUsageLedgerEntry(value: unknown): value is UsageLedgerEntry {
-  if (!value || typeof value !== 'object') return false
-  const row = value as Record<string, unknown>
-  const tokens = row.tokens as Record<string, unknown> | undefined
-  if (!knownString(row.runId, 512) || !knownString(row.settledAt, 64) || Number.isNaN(Date.parse(row.settledAt))) return false
+function hasUsageIdentity(row: Record<string, unknown>): boolean {
+  if (!knownString(row.runId, 512)) return false
+  if (!knownString(row.settledAt, 64)) return false
+  if (Number.isNaN(Date.parse(row.settledAt))) return false
   if (!['success', 'failed', 'halted', 'warning'].includes(String(row.status))) return false
   if (!['loop', 'external'].includes(String(row.executionKind))) return false
-  if (!knownString(row.runner, 160) || !Array.isArray(row.models) || row.models.some((model) => !knownString(model, 240))) return false
-  if (!['turn-record', 'runner-total'].includes(String(row.measurement))) return false
+  if (!knownString(row.runner, 160)) return false
+  if (!Array.isArray(row.models)) return false
+  if (row.models.some((model) => !knownString(model, 240))) return false
+  return ['turn-record', 'runner-total'].includes(String(row.measurement))
+}
+
+function hasUsageMeasurements(
+  row: Record<string, unknown>,
+  tokens: Record<string, unknown> | undefined,
+): boolean {
   if (!tokens || !finiteNonNegative(tokens.total)) return false
   for (const key of ['input', 'output', 'cachedRead', 'cachedWrite'] as const) {
     if (tokens[key] !== undefined && !finiteNonNegative(tokens[key])) return false
@@ -126,10 +133,21 @@ export function isUsageLedgerEntry(value: unknown): value is UsageLedgerEntry {
     if (!finiteNonNegative(row[key])) return false
   }
   if (row.costUsd !== undefined && !finiteNonNegative(row.costUsd)) return false
-  if (row.durationMs !== undefined && !finiteNonNegative(row.durationMs)) return false
+  return row.durationMs === undefined || finiteNonNegative(row.durationMs)
+}
+
+function hasUsageMetadata(row: Record<string, unknown>): boolean {
   if (row.projectRoot !== undefined && !knownString(row.projectRoot, 2000)) return false
-  if (row.sourceKind !== undefined && !knownString(row.sourceKind, 120)) return false
-  return true
+  return row.sourceKind === undefined || knownString(row.sourceKind, 120)
+}
+
+export function isUsageLedgerEntry(value: unknown): value is UsageLedgerEntry {
+  if (!value || typeof value !== 'object') return false
+  const row = value as Record<string, unknown>
+  const tokens = row.tokens as Record<string, unknown> | undefined
+  return hasUsageIdentity(row)
+    && hasUsageMeasurements(row, tokens)
+    && hasUsageMetadata(row)
 }
 
 export function emptyUsageLedger(now = new Date().toISOString()): UsageLedger {

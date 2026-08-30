@@ -51,12 +51,13 @@ await test('renderer setting contract has an explicit false default and General 
 await test('source drift guard pins the single Host gate and run_code re-entry', () => {
   const index = source('electron/piExtensionPacks/index.ts')
   const protocol = source('electron/piHostProtocol.ts')
+  const toolDomain = source('electron/piHostToolDomain.ts')
   const pack = source('electron/piExtensionPacks/workspaceTextSearch.ts')
 
   assert.match(index, /ensureWorkspaceTextSearchPackRegistered\(\)/)
   assert.match(protocol, /bindWorkspaceTextSearchRun\(sessionId/)
-  assert.match(protocol, /\.filter\(\(entry\) => workspaceTextSearch\.available \|\| !isWorkspaceTextSearchTool\(entry\.name\)\)/)
-  assert.match(protocol, /if \(isWorkspaceTextSearchTool\(name\)\)/)
+  assert.match(toolDomain, /\.filter\(\(entry\) => workspaceTextSearch\.available \|\| !isWorkspaceTextSearchTool\(entry\.name\)\)/)
+  assert.match(protocol, /if \(!isWorkspaceTextSearchTool\(name\)\) return undefined/)
   assert.match(protocol, /\.filter\(\(tool\) => gate\.available \|\| !isWorkspaceTextSearchTool\(tool\.name\)\)/)
   assert.match(protocol, /nestedRequest\[INTERNAL_INVOCATION_ORIGIN\] = 'code-mode'/)
   assert.match(protocol, /handlePiHostRequest\(state, nestedRequest, emit\)/)

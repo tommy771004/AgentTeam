@@ -40,6 +40,55 @@ class HangingTurnChild extends FakeChild {
   }
 }
 
+class BoundedLongToolChild extends FakeChild {
+  override postMessage(message: { id: number; method: string }) {
+    if (message.method === 'turn/cancel') return
+    if (message.method !== 'turn/submit') {
+      super.postMessage(message)
+      return
+    }
+    queueMicrotask(() => {
+      this.listeners.get('message')?.forEach((listener) => listener({
+        event: 'host/tool-start',
+        payload: {
+          runId: 'run-long-tool',
+          tool: 'bash',
+          callId: 'call-long-tool',
+          idleLeaseMs: 120,
+        },
+      }))
+    })
+    setTimeout(() => {
+      this.listeners.get('message')?.forEach((listener) => listener({
+        id: message.id,
+        result: { runId: 'run-long-tool', settlement: 'answered' },
+      }))
+    }, 90)
+  }
+}
+
+class SettledToolThenHangingTurnChild extends FakeChild {
+  override postMessage(message: { id: number; method: string }) {
+    if (message.method === 'turn/cancel') return
+    if (message.method !== 'turn/submit') {
+      super.postMessage(message)
+      return
+    }
+    queueMicrotask(() => {
+      this.listeners.get('message')?.forEach((listener) => listener({
+        event: 'host/tool-start',
+        payload: { runId: 'run-tool-then-hang', tool: 'bash', callId: 'call-tool-then-hang', idleLeaseMs: 120 },
+      }))
+    })
+    setTimeout(() => {
+      this.listeners.get('message')?.forEach((listener) => listener({
+        event: 'host/tool-result',
+        payload: { runId: 'run-tool-then-hang', tool: 'bash', callId: 'call-tool-then-hang', settlement: 'success' },
+      }))
+    }, 20)
+  }
+}
+
 class DegradedStorageChild extends FakeChild {
   override postMessage(message: { id: number; method: string }) {
     if (message.method !== 'initialize') return
@@ -109,6 +158,39 @@ await assert.rejects(
   /Pi Core Host turn\/submit timed out after 50ms/,
 )
 await boundedSupervisor.stop()
+
+const boundedLongToolSupervisor = new PiHostSupervisor(
+  () => new BoundedLongToolChild(),
+  { requestTimeoutMs: 30, turnIdleTimeoutMs: 30 },
+)
+await boundedLongToolSupervisor.start()
+const boundedLongTool = await boundedLongToolSupervisor.submitTurn(
+  'session-long-tool',
+  'run a bounded long tool',
+  'run-long-tool',
+)
+assert.equal(
+  boundedLongTool.settlement,
+  'answered',
+  'an active tool with a longer bounded timeout must not be killed by the shorter turn-idle deadline',
+)
+await boundedLongToolSupervisor.stop()
+
+const settledToolThenHangingSupervisor = new PiHostSupervisor(
+  () => new SettledToolThenHangingTurnChild(),
+  { requestTimeoutMs: 30, turnIdleTimeoutMs: 30 },
+)
+await settledToolThenHangingSupervisor.start()
+await assert.rejects(
+  settledToolThenHangingSupervisor.submitTurn(
+    'session-tool-then-hang',
+    'finish a tool, then hang',
+    'run-tool-then-hang',
+  ),
+  /Pi Core Host turn\/submit timed out after 30ms/,
+  'tool settlement must restore the ordinary turn-idle deadline',
+)
+await settledToolThenHangingSupervisor.stop()
 
 const degradedSupervisor = new PiHostSupervisor(() => new DegradedStorageChild(), { requestTimeoutMs: 50 })
 await assert.rejects(degradedSupervisor.start(), /Pi Core Host exited/)

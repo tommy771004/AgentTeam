@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Icon } from '../components/Icon'
 import { CommandComposer } from '../components/CommandComposer'
@@ -18,6 +18,7 @@ import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { resolveModelRunnerSelection } from '../agent/localCliRun'
 import { deriveRunLifecycle, orchestrationFromAgent } from '../agent/runLifecycle'
+import { continuationAnchorBubbleId } from '../agent/conversationRunLifecycle'
 import type { AgentMode, LoopType } from '../agent/types'
 import type { ThinkingDepth } from '../agent/thinking'
 import { getThinkingDepth } from '../agent/thinking'
@@ -591,6 +592,10 @@ export function ProtocolsPage() {
                     // in time: the answer it is working towards has not been
                     // pushed yet, and once the run settles the feed hides itself
                     // and the recorded run summary takes its place in sequence.
+                    const continuationAnchorId = continuationAnchorBubbleId(
+                      items,
+                      presentationRunId,
+                    )
                     const renderBubble = (b: (typeof items)[0]) =>
                       b.role === 'run' && b.runSummary ? (
                         <RunSummaryCard key={b.id} summary={b.runSummary} />
@@ -599,18 +604,22 @@ export function ProtocolsPage() {
                       )
                     return (
                       <>
-                        {items.map(renderBubble)}
+                        {items.map((bubble) => (
+                          <Fragment key={bubble.id}>
+                            {renderBubble(bubble)}
+                            {bubble.id === continuationAnchorId && activeId ? (
+                              <RunContinuationActions
+                                threadId={activeId}
+                                runId={presentationRunId}
+                              />
+                            ) : null}
+                          </Fragment>
+                        ))}
                         {presentationRunId ? (
                           <RunProcessFeed
                             runId={presentationRunId}
                             depthLabel={depthDef.label}
                             onOpenPanel={() => setShowRunPanel(true)}
-                          />
-                        ) : null}
-                        {activeId ? (
-                          <RunContinuationActions
-                            threadId={activeId}
-                            runId={presentationRunId}
                           />
                         ) : null}
                       </>

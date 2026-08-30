@@ -6,6 +6,7 @@ import {
 } from '../src/agent/runLifecycle.ts'
 import { deriveSubDesignWorkspace } from '../src/agent/subdesign/workspaceProjection.ts'
 import { useRunActivityStore } from '../src/store/runActivityStore.ts'
+import { continuationAnchorBubbleId } from '../src/agent/conversationRunLifecycle.ts'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -56,6 +57,23 @@ assert(!view.live && view.terminal && view.tone === 'success', 'terminal state m
 const eventCount = presentation?.events.length || 0
 store.push({ kind: 'tool', runId: 'lifecycle_smoke', title: 'late event', callId: 'late' })
 assert(useRunActivityStore.getState().getPresentation('lifecycle_smoke')?.events.length === eventCount, 'late events must not reopen a terminal run')
+
+// A settled run's controls belong to its own recorded summary. When the next
+// user turn is admitted or queued, those controls must stay above that new
+// message instead of being appended to the conversation tail.
+const previousRunBubbles = [
+  { id: 'answer-a', role: 'assistant' as const },
+  { id: 'summary-a', role: 'run' as const, runSummary: { runId: 'run-a' } },
+  { id: 'user-b', role: 'user' as const },
+]
+assert(
+  continuationAnchorBubbleId(previousRunBubbles, 'run-a') === 'summary-a',
+  'terminal continuation controls must remain anchored to the owning summary before the next turn',
+)
+assert(
+  continuationAnchorBubbleId(previousRunBubbles, 'run-b') === null,
+  'a new run must never borrow the previous run summary as its continuation anchor',
+)
 
 // ── Iteration-exhausted terminal vocabulary (issue 01) ──
 const exhausted = { iterations: 5, maxIterations: 5, dodMet: false, executionKind: 'loop' as const }
