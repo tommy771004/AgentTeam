@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
 const JOB_HEADER = /^  ([a-zA-Z0-9_-]+):\s*$/gm
-const CUSTOMER_PUBLISH_CREDENTIAL = /\bUPDATE_PUBLISH_(?:TOKEN|URL)\b/g
+const CUSTOMER_PUBLISH_CREDENTIAL = /\bUPDATE_(?:(?:BETA|STABLE)_PUBLISH_URL|PUBLISH_TOKEN)\b/g
 const REMOTE_UPLOAD_PATTERNS = [
   /\bcurl\b[\s\S]*?(?:--upload-file|-T\s)/,
   /\baws\s+s3\s+(?:cp|sync)\b/,
@@ -18,9 +18,13 @@ const APPROVED_PRE_QUALIFICATION_ACTIONS = new Set([
   'actions/download-artifact@v4',
 ])
 const APPROVED_PRE_QUALIFICATION_JOB_DIGESTS = new Set([
-  '38505e104217d19579211f816211a8a028c302913972e0f891201a96ad29431e',
+  '4e7224e5fffe7e59ce738272f4bfea7b3fd66e2226c156cd5bb182da982b27fc',
   'a86177eba04721423bc7ca5a9b90c1db5d737aa9fdf423f23129a601619bac75',
-  '1bd06472ab80efaf85d9e43f5a3c8d05df1552edcca38c499e85deac1f80204d',
+  '38dd37eb4370b90c1f4ad45c74cee2a81507d27bbf61e0c7f4b1e56943ad7af6',
+])
+const APPROVED_NON_PUBLISH_JOB_DIGESTS = new Set([
+  ...APPROVED_PRE_QUALIFICATION_JOB_DIGESTS,
+  'd34f37c26cdb25caf806010fc08d4bb8ee7dbef6dd2dbc49e63065581cbb696b',
 ])
 
 function workflowJobsSource(workflowSource) {
@@ -98,6 +102,15 @@ export function remoteUploadRequests(jobSource) {
   return [...commandMatches, ...unapprovedActions, ...unapprovedJobSource]
 }
 
+function remotePublicationMechanisms(jobSource) {
+  const commands = REMOTE_UPLOAD_PATTERNS.filter((pattern) => pattern.test(jobSource)).map((pattern) => pattern.source)
+  const actions = [...jobSource.matchAll(/^\s+uses:\s*(\S+)\s*$/gm)]
+    .map((match) => match[1])
+    .filter((action) => !APPROVED_PRE_QUALIFICATION_ACTIONS.has(action))
+    .map((action) => `uses:${action}`)
+  return [...commands, ...actions]
+}
+
 export function packageSuccessQualificationFailureOutcome(workflowSource) {
   const outcomes = new Map()
   const executedJobs = []
@@ -159,6 +172,51 @@ export function preQualificationPublicationBarrierErrors(workflowSource) {
   }
   if (failureOutcome.customerPublishCredentialReferences.length > 0 || failureOutcome.remoteUploadRequests.length > 0) {
     errors.push('package success plus qualification failure can issue a customer publication request')
+  }
+  return errors
+}
+
+export function verifiedPromotionOwnerErrors(workflowSource) {
+  const errors = []
+  let publishJob
+  try {
+    publishJob = workflowJobSource(workflowSource, 'publish')
+  } catch {
+    return ['verified publish owner is missing']
+  }
+  const needs = jobNeeds(publishJob)
+  if (needs.length !== 1 || needs[0] !== 'release-ready') {
+    errors.push('publish owner does not depend only on release-ready')
+  }
+  const publishCondition = jobCondition(publishJob)
+  if (!/needs\.release-ready\.result\s*==\s*'success'/.test(publishCondition)) {
+    errors.push('publish owner does not require successful release-ready completion')
+  }
+  if (!/needs\.release-ready\.outputs\.verified\s*==\s*'true'/.test(publishCondition)) {
+    errors.push('publish owner does not require a verified promotion receipt')
+  }
+  if (!/^    environment:\s*release-publishing\s*$/m.test(publishJob)) {
+    errors.push('publish owner does not use the protected release-publishing environment')
+  }
+  const workflowCredentials = customerPublishCredentialReferences(workflowSource)
+  const publishCredentials = customerPublishCredentialReferences(publishJob)
+  if (workflowCredentials.length !== publishCredentials.length) {
+    errors.push('customer publish credentials are referenced outside the publish owner')
+  }
+  for (const jobName of workflowJobNames(workflowSource)) {
+    if (jobName === 'publish') continue
+    const jobSource = workflowJobSource(workflowSource, jobName)
+    const digest = createHash('sha256').update(jobSource).digest('hex')
+    if (!APPROVED_NON_PUBLISH_JOB_DIGESTS.has(digest) || remotePublicationMechanisms(jobSource).length > 0) {
+      errors.push(`remote publication mechanism exists outside publish owner: ${jobName}`)
+    }
+  }
+  const publisherCalls = [...workflowSource.matchAll(/release-promotion\.mjs --publish/g)].length
+  if (publisherCalls !== 1 || !/release-promotion\.mjs --publish/.test(publishJob)) {
+    errors.push('workflow does not have exactly one promotion publisher call')
+  }
+  if (!/promotion-receipt\.json/.test(publishJob)) {
+    errors.push('publish owner does not consume the verified promotion receipt')
   }
   return errors
 }

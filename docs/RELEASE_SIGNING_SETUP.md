@@ -7,8 +7,8 @@
 本文件說明如何取得並設定 `Release evidence` workflow 所需的 GitHub
 Environment secrets 與 variables。平台簽章憑證來自 Microsoft/公開 CA 或 Apple，
 更新金鑰由發行者自行保管。`package` job 只使用簽章用的 `release-signing`
-Environment；客戶通道的發布網址與 token 必須隔離在 `release-publishing`，目前 workflow
-尚未引用它們。
+Environment；客戶通道的發布網址與 token 隔離在 `release-publishing`，只有 verified
+promotion receipt 成立後執行的唯一 `publish` job 可以引用它們。
 
 ## 0. 先讀：不要用跳過簽章來修 #35
 
@@ -38,20 +38,22 @@ Authenticode、Gatekeeper 與 notarization 證據 fail-closed。不要填假值�
 | `APPLE_TEAM_ID` | Apple Developer Membership | 10 字元 Team ID |
 | `UPDATE_PRIVATE_KEY` | AgentStudio 更新簽章金鑰 | PEM PKCS#8 RSA 私鑰；必須匹配 app 內建公鑰 |
 
-### `release-signing` Environment variables
+### Repository variables（非 Environment-scoped）
 
 | 名稱 | 用途 | 範例形狀，不是真實值 |
 |---|---|---|
-| `UPDATE_BASE_URL` | 客戶端公開下載根網址 | `https://updates.example.com/beta` |
+| `UPDATE_BETA_BASE_URL` | Beta 客戶端公開下載根網址 | `https://updates.example.com/beta` |
+| `UPDATE_STABLE_BASE_URL` | Stable 客戶端公開下載根網址 | `https://updates.example.com/stable` |
 
-`UPDATE_BASE_URL` 後面不要加 `/win32/x64` 或 `/darwin/arm64`；workflow 會自行附加
-平台與架構路徑。
+兩個 base URL 後面都不要加 `/win32/x64` 或 `/darwin/arm64`；workflow 依 closed
+`beta`／`stable` channel 選出一個，再自行附加平台與架構路徑。
 
-### `release-publishing` Environment（保留給 Ticket 03）
+### `release-publishing` Environment
 
-客戶通道的 `UPDATE_PUBLISH_TOKEN` secret 與 `UPDATE_PUBLISH_URL` variable 必須放在獨立、
-保護更嚴格的 `release-publishing` Environment。Ticket 02 的 workflow 不引用此 Environment，
-因此 qualification 前的 package job 無法取得發布 credential，也不能寫入客戶更新通道。
+客戶通道的 `UPDATE_PUBLISH_TOKEN` secret 與 `UPDATE_BETA_PUBLISH_URL`、
+`UPDATE_STABLE_PUBLISH_URL` variables 必須放在獨立、保護更嚴格的 `release-publishing`
+Environment。只有依賴 `release-ready` verified receipt 的 `publish` job 引用此 Environment；
+package、release gate 與 qualification 都無法取得發布 credential。
 
 ## 2. 建立 GitHub `release-signing` Environment
 
@@ -65,9 +67,11 @@ Authenticode、Gatekeeper 與 notarization 證據 fail-closed。不要填假值�
 5. 建議在 **Deployment branches and tags** 只允許 `v*` tags。
 6. 若設定 required reviewers，發版時必須先核准，job 才能取得 secrets。
 7. 在 **Environment secrets** 加入上表九個簽章 secrets。
-8. 在 **Environment variables** 加入 `UPDATE_BASE_URL`。
-9. 另建 `release-publishing` Environment，設定更嚴格的 required reviewers；可預先加入
-   `UPDATE_PUBLISH_TOKEN` 與 `UPDATE_PUBLISH_URL`，但目前不得讓任何 job 引用它。
+8. 在 **Settings → Secrets and variables → Actions → Variables** 的 repository variables
+   加入 `UPDATE_BETA_BASE_URL` 與 `UPDATE_STABLE_BASE_URL`；不要設成 Environment variable，
+   因為不持有 signing secrets 的 `release-ready` 也必須讀取同一映射。
+9. 另建 `release-publishing` Environment，設定更嚴格的 required reviewers，加入
+   `UPDATE_PUBLISH_TOKEN`、`UPDATE_BETA_PUBLISH_URL` 與 `UPDATE_STABLE_PUBLISH_URL`。
 10. 若 repository 曾依舊版手冊設定發布 credential，從 `release-signing` 刪除
     `UPDATE_PUBLISH_TOKEN` secret 與 `UPDATE_PUBLISH_URL` variable；只新增副本不足以完成
     ownership migration。
@@ -301,26 +305,50 @@ openssl pkey \
 私鑰永遠不能加入 Git。更新 manifest 與 artifact 使用 RSA-SHA256；實作見
 `app/scripts/build-update-manifest.mjs`。
 
-## 6. 建立更新發布服務（Ticket 03 前不由 workflow 呼叫）
+## 6. 建立 atomic 更新發布服務
 
 ### 6.1 這三個值從哪裡來
 
-`UPDATE_BASE_URL`、`UPDATE_PUBLISH_URL`、`UPDATE_PUBLISH_TOKEN` 不是 Apple、Microsoft
-或 GitHub 配發。你必須先建立一個 HTTPS object storage + upload API，或其他符合下列
-契約的發布服務。
+兩組 `UPDATE_*_BASE_URL`、兩組 `UPDATE_*_PUBLISH_URL` 與 `UPDATE_PUBLISH_TOKEN` 不是
+Apple、Microsoft 或 GitHub 配發。你必須先建立一個 HTTPS object storage + promotion
+API，或其他符合下列契約的發布服務。
 
-目前 workflow **不執行遠端 PUT**。每個 package matrix job 只把已簽章的 candidate
-manifest 與 installers 上傳到私有 GitHub Actions artifact storage；qualification 失敗時，
-不會產生客戶通道 publication request。
+每個 package matrix job 只把已簽章的 candidate manifest 與 installers 上傳到私有
+GitHub Actions artifact storage。`release-ready` 綁定 commit、run/attempt、version、
+qualification hash、manifest 與 installer hashes 後產生 receipt；只有 `publish` job 遠端寫入。
 
-Ticket 03 的 publish owner 完成後，預定使用下列介面：
+Publisher 先把 installers、再把 manifests 寫入不可見 staging identity：
 
 ```http
-PUT {UPDATE_PUBLISH_URL}/{platform}/{arch}/manifest.json
+HEAD {UPDATE_<CHANNEL>_PUBLISH_URL}/staging/{promotionIdentity}/{platform}/{arch}/{object}
+PUT  {UPDATE_<CHANNEL>_PUBLISH_URL}/staging/{promotionIdentity}/{platform}/{arch}/{object}
 Authorization: Bearer {UPDATE_PUBLISH_TOKEN}
+X-Content-SHA256: {verifiedHash}
+X-Promotion-Identity: {promotionIdentity}
 ```
 
-並以相同方式 PUT `.exe`、`.dmg` 等 artifact。客戶端則匿名 GET：
+所有三個平台 staging objects 完整後，最後一個 POST 必須由服務端原子切換整組 channel：
+
+```http
+POST {UPDATE_<CHANNEL>_PUBLISH_URL}/promotions/{version}
+Authorization: Bearer {UPDATE_PUBLISH_TOKEN}
+X-Promotion-Identity: {promotionIdentity}
+Content-Type: application/json
+```
+
+POST body 是不含 secret 的 verified promotion receipt。服務端必須在單一 transaction／
+原子 pointer swap 中驗證完整 staging set 並啟用全部 targets；POST 以前客戶端不得取得新
+manifest。成功回應必須是 `200`／`201` JSON，且逐字回傳已 commit 的 identity：
+
+```json
+{
+  "promotionIdentity": "promotion_<sha256>",
+  "channel": "beta",
+  "version": "1.2.3"
+}
+```
+
+publisher 會核對三個欄位；缺少或不一致時不會產生 `published` receipt。客戶端仍匿名 GET：
 
 ```http
 GET {UPDATE_BASE_URL}/{platform}/{arch}/manifest.json
@@ -338,12 +366,16 @@ GET {UPDATE_BASE_URL}/{platform}/{arch}/{encoded-artifact-name}
 發布服務必須：
 
 1. 僅接受 HTTPS。
-2. PUT 端要求 Bearer token，匿名使用者不可上傳或覆寫。
+2. HEAD／PUT／POST 端要求 Bearer token，匿名使用者不可上傳或 promote。
 3. GET 端允許 app 下載 manifest 與 artifact。
 4. 保留 Content-Length、二進位內容與檔名，不得轉碼。
 5. 支援至少 1 GB artifact，或配合 app 的下載上限調整。
-6. 對舊版本保留 rollback/evidence 所需物件，不要在新發版時直接清空 bucket。
-7. 記錄 uploader、時間、物件 hash 與失敗回應，但不得記錄 Bearer token。
+6. 同 promotion identity retry 必須 idempotent；同 channel/version 的不同 identity 或 hash
+   必須回 `409`，不得覆寫既有 promotion。
+7. 任一 staging 失敗不得改變 active manifest；promotion commit 必須一次啟用全部 targets。
+8. 對舊版本保留 rollback/evidence 所需物件，不要在新發版時直接清空 bucket。
+9. 記錄 uploader、時間、物件 hash 與失敗回應，但不得記錄 Bearer token。
+10. promotion response 必須回傳與 request 相同的 `promotionIdentity`、`channel`、`version`。
 
 本專案預設客戶端 URL 是：
 
@@ -351,15 +383,15 @@ GET {UPDATE_BASE_URL}/{platform}/{arch}/{encoded-artifact-name}
 https://updates.subagents.ai/beta/{platform}/{arch}/manifest.json
 ```
 
-若沿用此網域，`UPDATE_BASE_URL` 應設成 `https://updates.subagents.ai/beta`，並確保 DNS、
-TLS 與儲存服務已真正部署。`UPDATE_PUBLISH_URL` 可以是不同的私有 upload endpoint，
-但其最終物件必須能由 `UPDATE_BASE_URL` 指向的公開 URL 取得。
+若沿用此網域，`UPDATE_BETA_BASE_URL` 應設成 `https://updates.subagents.ai/beta`，Stable
+則使用獨立的 `UPDATE_STABLE_BASE_URL`。兩個 publish URL 可以是不同的私有 endpoint，
+但其 atomic promotion 最終物件必須能由對應 public base URL 取得。
 
 ### 6.3 建立 token
 
 在你選定的發布服務建立最小權限 credential：
 
-- 只能寫入 Beta update prefix；
+- 只能寫入 Beta／Stable promotion API，不得取得 account admin 權限；
 - 不應具有 account admin、刪除整個 bucket、DNS 或 billing 權限；
 - 設定到期日或固定輪替週期；
 - token 存為 `UPDATE_PUBLISH_TOKEN`；
@@ -375,10 +407,13 @@ TLS 與儲存服務已真正部署。`UPDATE_PUBLISH_URL` 可以是不同的私�
 在 **Settings → Environments → release-signing**：
 
 - **Environment secrets → Add secret**：加入九個簽章 secrets。
-- **Environment variables → Add variable**：加入 `UPDATE_BASE_URL`。
 
-發布 credential 只能加入 **Settings → Environments → release-publishing**，且在 Ticket 03
-的 qualification-bound publish owner 完成前，不要讓 workflow job 引用該 Environment。
+在 **Settings → Secrets and variables → Actions → Variables** 加入 repository-level
+`UPDATE_BETA_BASE_URL` 與 `UPDATE_STABLE_BASE_URL`。這兩個公開 URL 不屬於
+`release-signing` Environment，讓 package 與 `release-ready` 都能讀取。
+
+發布 credential 只能加入 **Settings → Environments → release-publishing**，且只允許
+workflow 的 qualification-bound `publish` job 引用該 Environment。
 若舊值仍存在於 `release-signing`，在各項目右側選單按 **Delete** 移除。
 
 GitHub 不允許重新讀取 secret 明文。新增前先在安全位置備份；更新後只會看到名稱與
@@ -420,14 +455,18 @@ base64 落到 repository 內的檔案。
 設定 variables：
 
 ```bash
-gh variable set UPDATE_BASE_URL \
-  --env release-signing \
+gh variable set UPDATE_BETA_BASE_URL \
   --body 'https://updates.subagents.ai/beta'
+gh variable set UPDATE_STABLE_BASE_URL \
+  --body 'https://updates.subagents.ai/stable'
 
 gh secret set UPDATE_PUBLISH_TOKEN --env release-publishing
-gh variable set UPDATE_PUBLISH_URL \
+gh variable set UPDATE_BETA_PUBLISH_URL \
   --env release-publishing \
   --body 'https://YOUR-UPLOAD-ENDPOINT.example/beta'
+gh variable set UPDATE_STABLE_PUBLISH_URL \
+  --env release-publishing \
+  --body 'https://YOUR-UPLOAD-ENDPOINT.example/stable'
 
 # 舊版設定遷移：package job 使用的 environment 不得保留發布 credential
 gh secret delete UPDATE_PUBLISH_TOKEN --env release-signing
@@ -461,15 +500,16 @@ WINDOWS_CSC_LINK
 WINDOWS_PUBLISHER_THUMBPRINT
 ```
 
-`gh variable list --env release-signing` 應包含：
+`gh variable list` 的 repository variables 應包含：
 
 ```text
-UPDATE_BASE_URL
+UPDATE_BETA_BASE_URL
+UPDATE_STABLE_BASE_URL
 ```
 
-`release-publishing` 可預先包含 `UPDATE_PUBLISH_TOKEN` 與 `UPDATE_PUBLISH_URL`，但目前
-workflow 不會讀取。`release-signing` 的兩份清單必須確認沒有這兩個名稱；不要把它們
-複製回 `release-signing`。
+`release-publishing` 應包含 `UPDATE_PUBLISH_TOKEN`、`UPDATE_BETA_PUBLISH_URL` 與
+`UPDATE_STABLE_PUBLISH_URL`。`release-signing` 的兩份清單必須確認沒有任何 publish
+credential；不要把它們複製回 `release-signing`。
 
 ### 8.2 本機安全檢查
 
@@ -500,7 +540,9 @@ gh run watch 32356529844 --exit-status
 4. update private key 與內建 public key 匹配；
 5. signed candidate manifest 與 installers 上傳到 GitHub Actions artifact storage；
 6. 三個 matrix job、release gate、Paid Beta qualification、release ready 全部通過；
-7. 客戶通道 publication 在 Ticket 03 完成前維持不可用。
+7. `release-ready` 產生 verified promotion receipt；
+8. protected `publish` job 先 staging installers、再 staging manifests，最後 atomic commit；
+9. publication receipt 上傳至 GitHub Actions artifacts，且不含 token。
 
 ## 9. 常見錯誤
 
@@ -559,10 +601,11 @@ electron-builder troubleshooting：
 
 ## 12. 專案內對應位置
 
-- `.github/workflows/release.yml`：簽章、公證、candidate artifact 與 qualification 契約；
-  Ticket 02 不包含客戶通道發布。
+- `.github/workflows/release.yml`：簽章、公證、candidate artifact、qualification、verified
+  receipt 與唯一 protected publish owner 契約。
 - `app/package.json`：electron-builder 的 macOS hardened runtime/notarize 與 Windows NSIS 設定。
 - `app/electron/updatePublicKey.ts`：package 內建更新 public trust root。
 - `app/scripts/verify-update-signing-key.mts`：private/public key 配對檢查。
 - `app/scripts/build-update-manifest.mjs`：RSA-SHA256 manifest/artifact signature 與 URL 產生。
+- `app/scripts/release-promotion.mjs`：receipt identity 驗證、staging 與 atomic promotion client。
 - `app/electron/updateManager.ts`：預設公開更新 URL 與下載後驗章。

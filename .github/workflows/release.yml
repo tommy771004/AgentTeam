@@ -54,6 +54,8 @@ jobs:
       RELEASE_PLATFORM: ${{ matrix.platform }}
       UPDATE_PLATFORM: ${{ matrix.updatePlatform }}
       RELEASE_ARCH: ${{ matrix.arch }}
+      UPDATE_BETA_BASE_URL: ${{ vars.UPDATE_BETA_BASE_URL }}
+      UPDATE_STABLE_BASE_URL: ${{ vars.UPDATE_STABLE_BASE_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -309,15 +311,22 @@ jobs:
           test -n "$UPDATE_PRIVATE_KEY" || { echo "UPDATE_PRIVATE_KEY is required"; exit 1; }
           node --experimental-strip-types scripts/verify-update-signing-key.mts 2>&1 | tee release-evidence/update-key-verification.log
 
-      - name: Build signed Beta update candidate manifest
+      - name: Build signed update candidate manifest
         env:
           UPDATE_PRIVATE_KEY: ${{ secrets.UPDATE_PRIVATE_KEY }}
-          UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL }}
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
+          test -n "$UPDATE_BETA_BASE_URL" || { echo "UPDATE_BETA_BASE_URL is required"; exit 1; }
+          test -n "$UPDATE_STABLE_BASE_URL" || { echo "UPDATE_STABLE_BASE_URL is required"; exit 1; }
+          test "${UPDATE_BETA_BASE_URL%/}" != "${UPDATE_STABLE_BASE_URL%/}" || { echo "Beta and Stable public update URLs must be distinct"; exit 1; }
+          case "$RELEASE_CHANNEL" in
+            beta) UPDATE_BASE_URL="$UPDATE_BETA_BASE_URL" ;;
+            stable) UPDATE_BASE_URL="$UPDATE_STABLE_BASE_URL" ;;
+            *) echo "Unsupported release channel: $RELEASE_CHANNEL"; exit 1 ;;
+          esac
           test -n "$UPDATE_BASE_URL" || { echo "UPDATE_BASE_URL is required"; exit 1; }
-          node scripts/build-update-manifest.mjs --artifact-dir release --output-dir release-evidence/update-channel --version "$RELEASE_VERSION" --platform "$UPDATE_PLATFORM" --arch "$RELEASE_ARCH" --base-url "${UPDATE_BASE_URL%/}/$UPDATE_PLATFORM/$RELEASE_ARCH" 2>&1 | tee release-evidence/update-manifest.log
+          node scripts/build-update-manifest.mjs --artifact-dir release --output-dir release-evidence/update-channel --version "$RELEASE_VERSION" --platform "$UPDATE_PLATFORM" --arch "$RELEASE_ARCH" --channel "$RELEASE_CHANNEL" --base-url "${UPDATE_BASE_URL%/}/$UPDATE_PLATFORM/$RELEASE_ARCH" 2>&1 | tee release-evidence/update-manifest.log
 
       - name: Generate release evidence
         shell: bash
@@ -394,7 +403,7 @@ jobs:
       - name: Download all platform evidence
         uses: actions/download-artifact@v4
         with:
-          pattern: subagents-ai-*-evidence
+          pattern: subagents-ai-*-run-${{ github.run_attempt }}-evidence
           path: app/release-evidence-bundles
           merge-multiple: false
 
@@ -409,7 +418,7 @@ jobs:
       - name: Upload aggregate qualification
         uses: actions/upload-artifact@v4
         with:
-          name: subagents-ai-paid-beta-qualification
+          name: subagents-ai-paid-beta-qualification-run-${{ github.run_attempt }}
           path: app/release-evidence-bundles/paid-beta-qualification.*
           if-no-files-found: error
           retention-days: 90
@@ -419,8 +428,13 @@ jobs:
     if: needs.release-gate.result == 'success' && needs.release-qualification.result == 'success'
     needs: [package, release-gate, release-qualification]
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ github.event.inputs.version || '' }}
+      RELEASE_CHANNEL: ${{ github.event.inputs.channel || 'beta' }}
+      UPDATE_BETA_BASE_URL: ${{ vars.UPDATE_BETA_BASE_URL }}
+      UPDATE_STABLE_BASE_URL: ${{ vars.UPDATE_STABLE_BASE_URL }}
     outputs:
-      verified: ${{ steps.verify.outputs.verified }}
+      verified: ${{ steps.promotion.outputs.verified }}
     steps:
       - name: Checkout verification tooling
         uses: actions/checkout@v4
@@ -428,16 +442,22 @@ jobs:
       - name: Download verification evidence
         uses: actions/download-artifact@v4
         with:
-          pattern: subagents-ai-*-evidence
+          pattern: subagents-ai-*-run-${{ github.run_attempt }}-evidence
           path: release-inputs/evidence
           merge-multiple: false
 
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: subagents-ai-*-artifacts
+          pattern: subagents-ai-*-run-${{ github.run_attempt }}-artifacts
           path: release-inputs/artifacts
           merge-multiple: false
+
+      - name: Download aggregate qualification
+        uses: actions/download-artifact@v4
+        with:
+          name: subagents-ai-paid-beta-qualification-run-${{ github.run_attempt }}
+          path: release-inputs/qualification
 
       - name: Verify only signed artifacts are release-ready
         id: verify
@@ -463,9 +483,6 @@ jobs:
             evidence_dir="$(dirname "$report")"
             artifact_key="${key}-run-${best_attempt[$key]}-artifacts"
             artifact_dir="$(find release-inputs/artifacts -mindepth 1 -maxdepth 1 -type d -name "*${artifact_key}" -print -quit)"
-            if [ -z "$artifact_dir" ]; then
-              artifact_dir="$(find release-inputs/artifacts -mindepth 1 -maxdepth 1 -type d -name "*${key}-run-*-artifacts" -print | sort -V | tail -n 1)"
-            fi
             test -n "$artifact_dir" || { echo "Missing packaged artifact bundle for $key"; exit 1; }
             best_artifact[$key]="$artifact_dir"
             grep -q '^status=success$' "$report" || { echo "Verification did not pass: $report"; exit 1; }
@@ -499,15 +516,90 @@ jobs:
             fi
             node app/scripts/release-evidence.mjs --verify-manifest --manifest "$evidence_dir/release-manifest.json" --artifact-dir "$artifact_dir"
           done
-          echo "verified=true" >> "$GITHUB_OUTPUT"
-          echo "Release evidence is ready for protected Beta download selection"
+          echo "Release evidence is ready for protected channel promotion"
 
-  beta-download-selection:
-    name: beta download selection
-    if: needs.release-ready.outputs.verified == 'true'
+      - name: Resolve verified release version
+        shell: bash
+        run: echo "RELEASE_VERSION=$(node app/scripts/release-evidence.mjs --print-version)" >> "$GITHUB_ENV"
+
+      - name: Build verified promotion receipt
+        id: promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$UPDATE_BETA_BASE_URL" || { echo "UPDATE_BETA_BASE_URL is required"; exit 1; }
+          test -n "$UPDATE_STABLE_BASE_URL" || { echo "UPDATE_STABLE_BASE_URL is required"; exit 1; }
+          node app/scripts/release-promotion.mjs --build-receipt \
+            --evidence-root release-inputs/evidence \
+            --artifact-root release-inputs/artifacts \
+            --qualification release-inputs/qualification/paid-beta-qualification.json \
+            --update-public-key app/electron/updatePublicKey.ts \
+            --output release-inputs/promotion/promotion-receipt.json
+          echo "verified=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload verified promotion receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: subagents-ai-promotion-receipt-run-${{ github.run_attempt }}
+          path: release-inputs/promotion/promotion-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: protected channel publish
+    if: needs.release-ready.result == 'success' && needs.release-ready.outputs.verified == 'true'
     needs: release-ready
-    environment: beta-download
+    environment: release-publishing
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ github.event.inputs.version || '' }}
+      RELEASE_CHANNEL: ${{ github.event.inputs.channel || 'beta' }}
+      UPDATE_BETA_PUBLISH_URL: ${{ vars.UPDATE_BETA_PUBLISH_URL }}
+      UPDATE_STABLE_PUBLISH_URL: ${{ vars.UPDATE_STABLE_PUBLISH_URL }}
+      UPDATE_PUBLISH_TOKEN: ${{ secrets.UPDATE_PUBLISH_TOKEN }}
     steps:
-      - name: Expose verified release gate
-        run: echo "Only signed, notarized, and verified artifacts may be selected for Beta downloads"
+      - name: Checkout promotion tooling
+        uses: actions/checkout@v4
+
+      - name: Resolve promoted release version
+        shell: bash
+        run: echo "RELEASE_VERSION=$(node app/scripts/release-evidence.mjs --print-version)" >> "$GITHUB_ENV"
+
+      - name: Download verified promotion receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: subagents-ai-promotion-receipt-run-${{ github.run_attempt }}
+          path: release-inputs/promotion
+
+      - name: Download qualified evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: subagents-ai-*-run-${{ github.run_attempt }}-evidence
+          path: release-inputs/evidence
+          merge-multiple: false
+
+      - name: Download qualified installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: subagents-ai-*-run-${{ github.run_attempt }}-artifacts
+          path: release-inputs/artifacts
+          merge-multiple: false
+
+      - name: Publish verified channel atomically
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$UPDATE_PUBLISH_TOKEN" || { echo "UPDATE_PUBLISH_TOKEN is required"; exit 1; }
+          node app/scripts/release-promotion.mjs --publish \
+            --receipt release-inputs/promotion/promotion-receipt.json \
+            --evidence-root release-inputs/evidence \
+            --artifact-root release-inputs/artifacts \
+            --output release-inputs/promotion/published-receipt.json
+
+      - name: Upload publication receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: subagents-ai-published-${{ env.RELEASE_CHANNEL }}-run-${{ github.run_attempt }}
+          path: release-inputs/promotion/published-receipt.json
+          if-no-files-found: error
+          retention-days: 365

@@ -14,6 +14,7 @@ import {
   packageSuccessQualificationFailureOutcome,
   preQualificationPublicationBarrierErrors,
   remoteUploadRequests,
+  verifiedPromotionOwnerErrors,
   workflowJobSource,
 } from './release-workflow-contract.mjs'
 
@@ -50,7 +51,7 @@ await test('release evidence manifest contains artifact hash, SBOM, and provenan
     channel: 'beta',
     sbomPath: path.join(artifacts, 'sbom.cdx.json'),
     releaseNotesPath,
-    provenance: { workflow: 'release', runId: '123' },
+    provenance: { workflow: 'release', runId: '123', runAttempt: '2' },
   })
 
   assert.equal(manifest.version, '1.0.0')
@@ -66,6 +67,7 @@ await test('release evidence manifest contains artifact hash, SBOM, and provenan
     new RegExp(`${manifest.artifacts[0].sha256}  AgentStudio Setup 1\\.0\\.0\\.exe`),
   )
   assert.equal(manifest.provenance.runId, '123')
+  assert.equal(manifest.provenance.runAttempt, '2')
   assert.equal(manifest.artifacts.length, 1)
   assert.match(manifest.artifacts[0].sha256, /^[a-f0-9]{64}$/)
   assert.equal(manifest.artifacts[0].name, 'AgentStudio Setup 1.0.0.exe')
@@ -117,6 +119,7 @@ await test('release workflow requires Windows and macOS packaging evidence', asy
   const workflow = await fs.readFile(workflowPath, 'utf8')
   const signingSetup = await fs.readFile(signingSetupPath, 'utf8')
   const packageJob = workflowJobSource(workflow, 'package')
+  const publishJob = workflowJobSource(workflow, 'publish')
   assert.match(workflow, /windows-latest/)
   assert.match(workflow, /macos-15-intel/)
   assert.match(workflow, /macos-15(?:[^-]|$)/)
@@ -130,15 +133,20 @@ await test('release workflow requires Windows and macOS packaging evidence', asy
   assert.match(workflow, /build-update-manifest\.mjs/)
   assert.match(workflow, /verify-update-signing-key\.mts/)
   assert.match(workflow, /secrets\.UPDATE_PRIVATE_KEY/)
-  assert.match(workflow, /vars\.UPDATE_BASE_URL/)
+  assert.match(workflow, /vars\.UPDATE_BETA_BASE_URL/)
+  assert.match(workflow, /vars\.UPDATE_STABLE_BASE_URL/)
   assert.deepEqual(customerPublishCredentialReferences(packageJob), [])
   assert.deepEqual(remoteUploadRequests(packageJob), [])
   assert.match(packageJob, /environment: release-signing/)
+  assert.match(packageJob, /UPDATE_BETA_BASE_URL/)
+  assert.match(packageJob, /UPDATE_STABLE_BASE_URL/)
+  assert.match(packageJob, /--channel "\$RELEASE_CHANNEL"/)
   assert.match(signingSetup, /release-publishing/)
   assert.doesNotMatch(signingSetup, /secret set UPDATE_PUBLISH_TOKEN --env release-signing/)
-  assert.doesNotMatch(signingSetup, /variable set UPDATE_PUBLISH_URL[\s\S]{0,120}--env release-signing/)
+  assert.doesNotMatch(signingSetup, /variable set UPDATE_(?:BETA|STABLE)_PUBLISH_URL[\s\S]{0,120}--env release-signing/)
   assert.match(signingSetup, /UPDATE_PUBLISH_TOKEN --env release-publishing/)
-  assert.match(signingSetup, /UPDATE_PUBLISH_URL[\s\S]{0,120}--env release-publishing/)
+  assert.match(signingSetup, /UPDATE_BETA_PUBLISH_URL[\s\S]{0,120}--env release-publishing/)
+  assert.match(signingSetup, /UPDATE_STABLE_PUBLISH_URL[\s\S]{0,120}--env release-publishing/)
   assert.match(signingSetup, /secret delete UPDATE_PUBLISH_TOKEN --env release-signing/)
   assert.match(signingSetup, /variable delete UPDATE_PUBLISH_URL --env release-signing/)
   assert.match(packageJob, /electron-builder --win --x64 --publish never/)
@@ -152,6 +160,24 @@ await test('release workflow requires Windows and macOS packaging evidence', asy
   assert.match(workflow, /release-qualification:/)
   assert.match(workflow, /npm run release:qualification/)
   assert.match(workflow, /needs\.release-qualification\.result == 'success'/)
+  assert.match(workflowJobSource(workflow, 'release-ready'), /release-promotion\.mjs --build-receipt/)
+  assert.match(workflowJobSource(workflow, 'release-ready'), /promotion-receipt\.json/)
+  assert.match(publishJob, /^  publish:/)
+  assert.match(publishJob, /needs: release-ready/)
+  assert.match(publishJob, /needs\.release-ready\.result == 'success'/)
+  assert.match(publishJob, /needs\.release-ready\.outputs\.verified == 'true'/)
+  assert.match(publishJob, /environment: release-publishing/)
+  assert.match(publishJob, /release-promotion\.mjs --publish/)
+  assert.match(publishJob, /UPDATE_BETA_PUBLISH_URL/)
+  assert.match(publishJob, /UPDATE_STABLE_PUBLISH_URL/)
+  const publishCredentials = ['UPDATE_BETA_PUBLISH_URL', 'UPDATE_PUBLISH_TOKEN', 'UPDATE_STABLE_PUBLISH_URL'].sort()
+  const workflowPublishReferences = customerPublishCredentialReferences(workflow)
+  const publishJobReferences = customerPublishCredentialReferences(publishJob)
+  assert.deepEqual([...new Set(workflowPublishReferences)].sort(), publishCredentials)
+  assert.deepEqual([...new Set(publishJobReferences)].sort(), publishCredentials)
+  assert.equal(workflowPublishReferences.length, publishJobReferences.length)
+  assert.deepEqual(verifiedPromotionOwnerErrors(workflow), [])
+  assert.doesNotMatch(workflow, /beta-download-selection:/)
   assert.match(workflow, /if: needs\.release-gate\.result == 'success'/)
   assert.match(workflow, /needs: \[package, release-gate\]/)
   assert.match(workflow, /Checkout verification tooling/)
@@ -286,6 +312,32 @@ await test('release workflow requires Windows and macOS packaging evidence', asy
   const bypassErrors = preQualificationPublicationBarrierErrors(bypassedQualification).join('\n')
   assert.match(bypassErrors, /release-ready does not depend on release-qualification/)
   assert.match(bypassErrors, /release-ready does not require successful release-qualification/)
+
+  const unprotectedPublisher = workflow
+    .replace('needs: release-ready\n    environment: release-publishing', 'needs: release-qualification\n    environment: release-signing')
+    .replace("if: needs.release-ready.result == 'success' && needs.release-ready.outputs.verified == 'true'", 'if: always()')
+  const publisherErrors = verifiedPromotionOwnerErrors(unprotectedPublisher).join('\n')
+  assert.match(publisherErrors, /publish owner does not depend only on release-ready/)
+  assert.match(publisherErrors, /publish owner does not require successful release-ready completion/)
+  assert.match(publisherErrors, /publish owner does not require a verified promotion receipt/)
+  assert.match(publisherErrors, /publish owner does not use the protected release-publishing environment/)
+
+  const secondWriter = workflow.replace(
+    '  publish:\n',
+    "  second-writer:\n    needs: release-ready\n    if: needs.release-ready.result == 'success'\n    runs-on: ubuntu-latest\n    steps:\n      - name: Illicit second writer\n        run: aws s3 cp release/ s3://customer-channel/ --recursive\n\n  publish:\n",
+  )
+  assert.match(
+    verifiedPromotionOwnerErrors(secondWriter).join('\n'),
+    /remote publication mechanism exists outside publish owner: second-writer/,
+  )
+  const opaqueSecondWriter = workflow.replace(
+    '  publish:\n',
+    "  opaque-second-writer:\n    needs: release-ready\n    if: needs.release-ready.result == 'success'\n    runs-on: ubuntu-latest\n    steps:\n      - name: Illicit opaque writer\n        run: python scripts/deploy.py\n\n  publish:\n",
+  )
+  assert.match(
+    verifiedPromotionOwnerErrors(opaqueSecondWriter).join('\n'),
+    /remote publication mechanism exists outside publish owner: opaque-second-writer/,
+  )
   assert.match(workflow, /github\.run_attempt/)
   assert.match(workflow, /actions\/download-artifact@v4/)
   assert.match(workflow, /verified=true/)

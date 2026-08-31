@@ -180,6 +180,7 @@ export async function buildReleaseEvidence({
       commit: process.env.GITHUB_SHA || null,
       ref: process.env.GITHUB_REF_NAME || null,
       runId: process.env.GITHUB_RUN_ID || null,
+      runAttempt: process.env.GITHUB_RUN_ATTEMPT || null,
       ...provenance,
     },
   }

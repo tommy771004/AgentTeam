@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { normalizeReleaseChannel } from './release-promotion.mjs'
 
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -39,6 +40,7 @@ function assertHttpsBaseUrl(value) {
 export async function buildSignedUpdateManifest({ artifactDir, outputDir, version, platform, arch, channel = 'beta', baseUrl, privateKeyPem }) {
   if (!privateKeyPem || !baseUrl || !artifactDir || !outputDir || !version || !platform || !arch) throw new Error('artifactDir, outputDir, version, platform, arch, baseUrl, and privateKeyPem are required')
   platform = normalizePlatform(platform)
+  channel = normalizeReleaseChannel(channel)
   baseUrl = assertHttpsBaseUrl(baseUrl)
   const files = await listFiles(artifactDir)
   if (!files.length) throw new Error('no installer artifacts found')
