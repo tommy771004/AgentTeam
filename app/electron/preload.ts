@@ -32,6 +32,7 @@ import type { ReviewComment, ReviewCommentStatus, ReviewFeedbackBundle, ReviewFi
 import type { ReviewVerificationKind, ReviewVerificationProjection } from '../src/agent/reviewVerificationContract'
 import type { ReviewMutationIntent, ReviewMutationPreview, ReviewMutationReceipt } from '../src/agent/reviewMutationContract'
 import type { ReviewDeliveryIntent, ReviewDeliveryPreview, ReviewDeliveryReceipt } from '../src/agent/reviewDeliveryContract'
+import type { CredentialVaultIntent, CredentialVaultIntentResult } from './credentialVaultAuthority'
 
 type PiHostThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 type PiHostSettings = {
@@ -928,6 +929,10 @@ const api = {
       ipcRenderer.invoke('shell:openExternal', url) as Promise<{ ok: boolean }>,
   },
   /** Connector credential vault metadata; raw tokens stay in main. */
+  credentials: {
+    intent: (intent: CredentialVaultIntent) =>
+      ipcRenderer.invoke('credentials:intent', intent) as Promise<CredentialVaultIntentResult>,
+  },
   secrets: {
     list: () =>
       ipcRenderer.invoke('secrets:list') as Promise<

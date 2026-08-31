@@ -33,7 +33,7 @@ export type VaultMeta = {
   updatedAt: string
   hasRefreshToken: boolean
   hasClientCredentials: boolean
-  /** encrypted-at-rest? false only when OS keychain unavailable */
+  /** Encoding of the loaded/persisted vault revision, not current keychain availability. */
   encrypted: boolean
 }
 
@@ -46,12 +46,14 @@ function vaultPath(): string {
 function canEncrypt(): boolean {
   try {
     return safeStorage.isEncryptionAvailable()
+      && safeStorage.getSelectedStorageBackend?.() !== 'basic_text'
   } catch {
     return false
   }
 }
 
 let cache: VaultMap | null = null
+let cacheEncrypted = false
 
 function readVault(): VaultMap {
   if (cache) return cache
@@ -63,15 +65,19 @@ function readVault(): VaultMap {
     }
     const raw = fs.readFileSync(p)
     let text: string
-    if (raw.subarray(0, 5).toString('utf8') === 'PLAIN') {
+    const encrypted = raw.subarray(0, 5).toString('utf8') !== 'PLAIN'
+    if (!encrypted) {
       text = raw.subarray(5).toString('utf8')
     } else {
       text = safeStorage.decryptString(raw)
     }
     const parsed = JSON.parse(text) as VaultMap
     cache = parsed && typeof parsed === 'object' ? parsed : {}
+    cacheEncrypted = encrypted
   } catch {
-    cache = {}
+    // A locked/corrupt vault is not an empty vault. Keep it intact and retry
+    // on the next request; never cache a fabricated empty revision.
+    throw new Error('Credential vault could not be read')
   }
   return cache
 }
@@ -79,33 +85,31 @@ function readVault(): VaultMap {
 /**
  * Issue 06 — 無 OS 鑰匙圈時預設拒絕落地（PLAINTEXT_REQUIRED），
  * 只有呼叫端帶使用者明確同意的 allowPlaintext 才寫 PLAIN 檔。
- * 刪除（clear）永遠允許：移除資料不應被 gating 擋下。
+ * 新 credential namespace 不允許任何 legacy caller 將其降級為明文。
  */
 function writeVault(map: VaultMap, opts?: { allowPlaintext?: boolean }) {
   const decision = decideSecretPersistence({
     encryptionAvailable: canEncrypt(),
-    allowPlaintext: opts?.allowPlaintext,
+    allowPlaintext: opts?.allowPlaintext && !Object.keys(map).some((id) => id.startsWith('credential:')),
   })
   if (decision.mode === 'refuse') {
     const err = new Error(decision.reason) as Error & { code?: string }
     err.code = decision.code
     throw err
   }
-  cache = map
-  try {
-    const text = JSON.stringify(map)
-    const p = vaultPath()
-    if (decision.mode === 'encrypted') {
-      fs.writeFileSync(p, safeStorage.encryptString(text), { mode: 0o600 })
-    } else {
-      // Degraded（使用者已明確同意）：仍是 main-only 檔案，metadata 標示未加密
-      fs.writeFileSync(p, Buffer.concat([Buffer.from('PLAIN'), Buffer.from(text)]), {
-        mode: 0o600,
-      })
-    }
-  } catch {
-    /* keep in-memory cache */
+  const text = JSON.stringify(map)
+  const p = vaultPath()
+  if (decision.mode === 'encrypted') {
+    fs.writeFileSync(p, safeStorage.encryptString(text), { mode: 0o600 })
+  } else {
+    // Degraded（使用者已明確同意）：仍是 main-only 檔案，metadata 標示未加密
+    fs.writeFileSync(p, Buffer.concat([Buffer.from('PLAIN'), Buffer.from(text)]), {
+      mode: 0o600,
+    })
   }
+  // Only publish a new in-memory revision after durable persistence succeeds.
+  cache = map
+  cacheEncrypted = decision.mode === 'encrypted'
 }
 
 function hint(token: string): string {
@@ -198,7 +202,10 @@ export function setVaultOAuthSecret(
 export function clearVaultSecret(id: string) {
   const map = { ...readVault() }
   delete map[id]
-  writeVault(map, { allowPlaintext: true })
+  // Clearing must not decrypt the remaining records into a new plaintext file.
+  const p = vaultPath()
+  const alreadyPlain = fs.existsSync(p) && fs.readFileSync(p).subarray(0, 5).toString('utf8') === 'PLAIN'
+  writeVault(map, { allowPlaintext: alreadyPlain || Object.keys(map).length === 0 })
 }
 
 function metaOf(id: string, rec: VaultRecord): VaultMeta {
@@ -210,7 +217,7 @@ function metaOf(id: string, rec: VaultRecord): VaultMeta {
     updatedAt: rec.updatedAt,
     hasRefreshToken: Boolean(rec.refreshToken),
     hasClientCredentials: Boolean(rec.clientId),
-    encrypted: canEncrypt(),
+    encrypted: cacheEncrypted,
   }
 }
 

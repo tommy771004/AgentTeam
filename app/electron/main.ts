@@ -37,6 +37,8 @@ import {
   resolveSecretPlaceholders,
   setVaultSecret,
 } from './secretsVault'
+import { handleCredentialVaultIntent } from './integrationCredentialVault'
+import type { CredentialVaultIntent } from './credentialVaultAuthority'
 import {
   decidePermissionRequest,
   isAllowedNavigationUrl,
@@ -4924,6 +4926,11 @@ ipcMain.handle('tools:httpRequest', async (_evt, input: { url: string; method?: 
 })
 
 // ── Connector credential vault (renderer sees metadata only) ──
+
+ipcMain.handle(
+  'credentials:intent',
+  async (_evt, intent: CredentialVaultIntent) => handleCredentialVaultIntent(intent),
+)
 
 ipcMain.handle('secrets:list', async () => listVaultMeta())
 
