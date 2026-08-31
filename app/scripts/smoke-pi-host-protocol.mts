@@ -20,6 +20,7 @@ type HostMessage = {
     capabilities?: string[]
     status?: string
     config?: { oauthImportedProviders?: string[]; oauthSkippedProviders?: string[]; oauthConflicts?: string[] }
+    settings?: { provider?: string; model?: string }
   }
   error?: { code: string; message: string }
   event?: string
@@ -91,6 +92,22 @@ try {
     refreshedSettings.result?.config?.oauthConflicts?.includes('openai-codex'),
     'settings/get re-reads CLI OAuth instead of replaying the startup snapshot',
   )
+  host.stdin.write(`${JSON.stringify({ id: 24, method: 'settings/update', params: { provider: 'openai-codex', model: 'gpt-5.6-sol' } })}\n`)
+  const conflictedSave = await waitFor((message) => message.id === 24)
+  assert.equal(conflictedSave.error?.code, 'invalid_request')
+  assert.match(conflictedSave.error?.message || '', /OAuth.*衝突/, 'a model save must not bypass an account conflict')
+  await writeCodexLogin('account-a')
+  host.stdin.write(`${JSON.stringify({ id: 25, method: 'settings/update', params: { provider: 'openai-codex', model: 'gpt-5.6-sol' } })}\n`)
+  const restoredSave = await waitFor((message) => message.id === 25)
+  assert.equal(restoredSave.error, undefined, 'save refreshes resolved OAuth facts without requiring a prior settings/get')
+  assert.equal(restoredSave.result?.settings?.provider, 'openai-codex')
+  assert.equal(restoredSave.result?.settings?.model, 'gpt-5.6-sol', 'Sol exists under the native subscription provider')
+  host.stdin.write(`${JSON.stringify({ id: 26, method: 'settings/update', params: { model: 'missing-subscription-model' } })}\n`)
+  const missingModelSave = await waitFor((message) => message.id === 26)
+  assert.equal(missingModelSave.error?.code, 'invalid_request')
+  host.stdin.write(`${JSON.stringify({ id: 27, method: 'settings/get', params: {} })}\n`)
+  const preservedSettings = await waitFor((message) => message.id === 27)
+  assert.equal(preservedSettings.result?.settings?.model, 'gpt-5.6-sol', 'failed save leaves the valid Host pair intact')
 
   host.stdin.write(`${JSON.stringify({ id: 2, method: 'runs/active', params: {} })}\n`)
   const attachments = await waitFor((message) => message.id === 2)

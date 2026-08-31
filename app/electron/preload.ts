@@ -388,11 +388,10 @@ const api = {
       ipcRenderer.invoke('power:allowSleep') as Promise<{ ok: boolean }>,
   },
   webhook: {
-    start: (opts?: { port?: number; token?: string }) =>
+    start: (opts?: { port?: number }) =>
       ipcRenderer.invoke('webhook:start', opts || {}) as Promise<{
         running: boolean
         port: number
-        token: string
         url: string | null
         lastError: string | null
         hitCount: number
@@ -401,7 +400,6 @@ const api = {
       ipcRenderer.invoke('webhook:stop') as Promise<{
         running: boolean
         port: number
-        token: string
         url: string | null
         lastError: string | null
         hitCount: number
@@ -410,7 +408,6 @@ const api = {
       ipcRenderer.invoke('webhook:status') as Promise<{
         running: boolean
         port: number
-        token: string
         url: string | null
         lastError: string | null
         hitCount: number
@@ -930,6 +927,8 @@ const api = {
   },
   /** Connector credential vault metadata; raw tokens stay in main. */
   credentials: {
+    migrateLegacy: (legacy: Record<string, string>) =>
+      ipcRenderer.invoke('credentials:migrateLegacy', legacy) as Promise<{ ok: boolean; error?: string }>,
     intent: (intent: CredentialVaultIntent) =>
       ipcRenderer.invoke('credentials:intent', intent) as Promise<CredentialVaultIntentResult>,
   },
@@ -1492,7 +1491,7 @@ const api = {
     },
   },
   gateway: {
-    telegramStart: (opts: { token: string; allowedChatIds?: string }) =>
+    telegramStart: (opts: { allowedChatIds?: string }) =>
       ipcRenderer.invoke('gateway:telegramStart', opts) as Promise<{
         telegram: {
           running: boolean
@@ -1529,7 +1528,6 @@ const api = {
       channel: 'telegram' | 'webhook' | 'system'
       chatId: string
       text: string
-      token?: string
       runId?: string
     }) =>
       // evidence is issued in main after the send actually succeeded (ADR-0048)

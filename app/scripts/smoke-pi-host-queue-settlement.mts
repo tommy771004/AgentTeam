@@ -5,6 +5,8 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { handlePiHostRunDomain } from '../electron/piHostRunDomain.ts'
+import type { PiQueuedRun } from '../electron/piRunQueue.ts'
 
 type Message = { id?: number; result?: { sessionId?: string; run?: { runId: string; status: string }; queue?: Array<{ runId: string; status: string }> }; error?: { code: string; message: string } }
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-host-queue-settlement-'))
@@ -46,4 +48,27 @@ try {
   await once(host, 'exit')
   await rm(stateDir, { recursive: true, force: true })
 }
+const retrySnapshot: { queue: PiQueuedRun[] } = {
+  queue: [{ runId: 'retry-run', sessionId: 'retry-session', prompt: 'retry settlement', trigger: 'interactive', profile: {}, status: 'running' }],
+}
+let settlementAttempts = 0
+const settleWithRetry = () => handlePiHostRunDomain({
+  method: 'runs/settle',
+  params: { runId: 'retry-run', settlement: 'answered' },
+  id: 8,
+  snapshot: retrySnapshot,
+  commitQueue: (queue) => { retrySnapshot.queue = queue },
+  isSettlement: (value): value is 'answered' => value === 'answered',
+  handleAttachment: () => undefined,
+  recordLifecycle: () => true,
+  hasRecordedLifecycle: () => true,
+  onSettled: () => {
+    settlementAttempts += 1
+    if (settlementAttempts === 1) throw new Error('injected settlement side-effect failure')
+  },
+})
+await assert.rejects(() => Promise.resolve(settleWithRetry()), /injected settlement side-effect failure/)
+await Promise.resolve(settleWithRetry())
+assert.equal(settlementAttempts, 2, 'a settled retry must complete idempotent settlement side effects')
+
 console.log('Pi Host Automation Extension owns queue claim and settlement')

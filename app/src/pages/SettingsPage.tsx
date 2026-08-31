@@ -20,6 +20,7 @@ import {
 import { PolicyAdminSection } from '../components/settings/PolicyAdminSection'
 import { PiCoreSettingsSection } from '../components/settings/PiCoreSettingsSection'
 import { getLegacyPersonalizationPresence, useSettingsStore } from '../store/settingsStore'
+import { IntegrationCredentialField } from '../components/IntegrationCredentialField'
 import { useLearningStore } from '../store/learningStore'
 import { modelsGroupedByCliProvider } from '../agent/cliProviders'
 import { CLI_ADAPTERS, DISCOVERY_ONLY_AGENT_ADAPTERS } from '../agent/cliAdapters'
@@ -195,7 +196,7 @@ type SettingsPatch = (patch: Partial<LlmSettings>) => void
 
 function providerSettingsPatch(providerId: ApiProviderPreset): Partial<LlmSettings> {
   const provider = apiProviderPreset(providerId)
-  if (provider.id === 'custom') return { apiProvider: 'custom' }
+  if (provider.id === 'custom') return { apiProvider: 'custom', model: '', fallbackModels: [], discoveredModels: [] }
   if (isSubscriptionProviderPreset(provider.id)) {
     return { apiProvider: provider.id, model: '', fallbackModels: [], discoveredModels: [] }
   }
@@ -402,7 +403,7 @@ function ProviderServiceTierSettings({
 }
 
 export function SettingsPage() {
-  const { settings, update, testConnection, exportBundle, importBundle } = useSettingsStore()
+  const { settings, update, testConnection, exportBundle, importBundle, loaded, load, credentialMigrationError } = useSettingsStore()
   const legacyPersonalizationPresence = getLegacyPersonalizationPresence()
   const [section, setSection] = useState('general')
   const [testMsg, setTestMsg] = useState<string | null>(null)
@@ -453,6 +454,7 @@ export function SettingsPage() {
   const [verifyingModel, setVerifyingModel] = useState(false)
   const isSubscriptionProvider = isSubscriptionProviderPreset(settings.apiProvider || 'custom')
   const [modelVerifyMsg, setModelVerifyMsg] = useState('')
+  const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null)
   const [customToolsDraft, setCustomToolsDraft] = useState('')
   const [customToolsError, setCustomToolsError] = useState<string | null>(null)
   const [oauthRefreshMsg, setOauthRefreshMsg] = useState<string | null>(null)
@@ -487,7 +489,11 @@ export function SettingsPage() {
 
   /** Instant apply — no save button */
   const set = (patch: Partial<typeof settings>) => {
-    void update(patch)
+    if (credentialMigrationError) return
+    setSettingsSaveError(null)
+    void update(patch).catch((error: unknown) => {
+      setSettingsSaveError(error instanceof Error ? error.message : '設定儲存失敗，請重試。')
+    })
   }
 
   // Capture new shortcut chord
@@ -579,13 +585,13 @@ export function SettingsPage() {
   // Auto-apply webhook when related settings change
   useEffect(() => {
     if (!window.subagents?.webhook) return
+    if (!loaded || credentialMigrationError) return
     let cancelled = false
     void (async () => {
       try {
         if (settings.webhookEnabled) {
           const st = await window.subagents!.webhook!.start({
             port: settings.webhookPort || 8787,
-            token: settings.webhookToken || '',
           })
           if (!cancelled) {
             setWebhookStatus(
@@ -605,7 +611,7 @@ export function SettingsPage() {
     return () => {
       cancelled = true
     }
-  }, [settings.webhookEnabled, settings.webhookPort, settings.webhookToken])
+  }, [loaded, credentialMigrationError, settings.webhookEnabled, settings.webhookPort])
 
   // Auto-refresh gateway status when telegram settings change (start/stop is in App.tsx)
   useEffect(() => {
@@ -635,7 +641,6 @@ export function SettingsPage() {
     }
   }, [
     settings.telegramEnabled,
-    settings.telegramBotToken,
     settings.telegramAllowedChatIds,
   ])
 
@@ -854,6 +859,8 @@ export function SettingsPage() {
     >
       <>
         <SettingsHeader title={meta.title} subtitle={meta.subtitle} />
+        {credentialMigrationError && <div role="alert" className="mb-4 text-[13px] text-error">{credentialMigrationError} <button type="button" className={settingsBtnCls} onClick={() => void load()}>重試遷移</button></div>}
+        {settingsSaveError ? <p role="alert" className="mb-4 rounded-control border border-red/30 px-3 py-2 text-[13px] text-red">{settingsSaveError}</p> : null}
 
         {section === 'piCore' && <PiCoreSettingsSection />}
 
@@ -2988,12 +2995,7 @@ export function SettingsPage() {
                 control={
                   <SettingsToggle
                     checked={settings.webhookEnabled === true}
-                    onChange={(v) => set({
-                      webhookEnabled: v,
-                      ...(v && !settings.webhookToken
-                        ? { webhookToken: crypto.randomUUID().replace(/-/g, '') }
-                        : {}),
-                    })}
+                    onChange={(v) => set({ webhookEnabled: v })}
                   />
                 }
               />
@@ -3012,14 +3014,15 @@ export function SettingsPage() {
                   />
                 }
               />
-              <SettingsStack title="驗證 Token（留空＝不驗證，不建議）">
-                <input
-                  type="password"
-                  className={settingsInputCls}
-                  value={settings.webhookToken || ''}
-                  onChange={(e) => set({ webhookToken: e.target.value })}
-                  autoComplete="off"
-                />
+              <SettingsStack title="驗證 Token（必填）">
+                <IntegrationCredentialField kind="webhook" disabled={!loaded || Boolean(credentialMigrationError)} onChanged={async (configured) => {
+                  if (!configured) { setWebhookStatus('已清除憑證，Webhook 已停止'); return }
+                  const current = useSettingsStore.getState().settings
+                  if (current.webhookEnabled) {
+                    const st = await window.subagents?.webhook?.start({ port: current.webhookPort || 8787 })
+                    setWebhookStatus(st?.running ? `Webhook 聆聽中：${st.url}` : 'Webhook 未啟動，請設定憑證')
+                  }
+                }} />
               </SettingsStack>
               <SettingsStack title="Post-state Webhook target（選填）">
                 <input
@@ -3062,13 +3065,14 @@ export function SettingsPage() {
                 }
               />
               <SettingsStack title="Bot Token（@BotFather）">
-                <input
-                  className={settingsInputCls}
-                  type="password"
-                  value={settings.telegramBotToken || ''}
-                  onChange={(e) => set({ telegramBotToken: e.target.value })}
-                  placeholder="123456:ABC-DEF..."
-                />
+                <IntegrationCredentialField kind="telegram" disabled={!loaded || Boolean(credentialMigrationError)} onChanged={async (configured) => {
+                  if (!configured) { setGatewayMsg('已清除憑證，Telegram 已停止'); return }
+                  const current = useSettingsStore.getState().settings
+                  if (current.telegramEnabled) {
+                    const st = await window.subagents?.gateway?.telegramStart({ allowedChatIds: current.telegramAllowedChatIds || '' })
+                    setGatewayMsg(st?.telegram.running ? '運行中' : st?.telegram.lastError || '已停止')
+                  }
+                }} />
               </SettingsStack>
               <SettingsStack title="允許的 Chat ID" description="逗號分隔，空白＝全部">
                 <input

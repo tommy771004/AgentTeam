@@ -33,6 +33,27 @@ export type PiSettingsPatch = {
   workspaceTextSearch?: boolean
 }
 
+export type PiHostSettingsProjection = {
+  provider?: string
+  model: string
+  approvalMode: LlmSettings['approvalMode']
+  unattended: boolean
+  workspaceTextSearch?: boolean
+}
+
+/** Startup and live refresh must project the same non-secret connection pair. */
+export function llmSettingsFromPiHost(pi: PiHostSettingsProjection): Partial<LlmSettings> {
+  const provider = pi.provider?.trim()
+  return {
+    ...(provider ? { apiProvider: provider as LlmSettings['apiProvider'] } : {}),
+    model: pi.model,
+    approvalMode: pi.approvalMode,
+    unattended: pi.unattended,
+    workspaceTextSearch: pi.workspaceTextSearch === true,
+    ...(provider && isSubscriptionProviderPreset(provider) ? { baseUrl: '', apiKey: '' } : {}),
+  }
+}
+
 /**
  * Renderer setting -> the Pi Host settings field that stores and executes it.
  *

@@ -752,6 +752,7 @@ function SchedulerBootstrap() {
 
 /** Bridge Electron webhook HTTP hits → Proactive event matching → agent run */
 function WebhookBootstrap() {
+  const credentialReady = useSettingsStore((s) => s.loaded && !s.credentialMigrationError)
   const navigate = useNavigate()
   const matchEventEvidence = useScheduleStore((s) => s.matchEventEvidence)
   const recordEventTrigger = useScheduleStore((s) => s.recordEventTrigger)
@@ -772,6 +773,7 @@ function WebhookBootstrap() {
   // Auto-start / stop webhook when settings say so (after load)
   useEffect(() => {
     if (!window.subagents?.webhook) return
+    if (!credentialReady) return
     let cancelled = false
     void (async () => {
       await waitForStartupRecovery()
@@ -780,7 +782,6 @@ function WebhookBootstrap() {
         try {
           await window.subagents!.webhook!.start({
             port: settings.webhookPort || 8787,
-            token: settings.webhookToken || '',
           })
         } catch {
           /* main may already own server */
@@ -795,7 +796,7 @@ function WebhookBootstrap() {
       }
     })()
     return () => { cancelled = true }
-  }, [settings.webhookEnabled, settings.webhookPort, settings.webhookToken])
+  }, [credentialReady, settings.webhookEnabled, settings.webhookPort])
 
   useEffect(() => {
     if (!window.subagents?.webhook?.onEvent) return
@@ -930,6 +931,7 @@ function MonitorBootstrap() {
 }
 
 function GatewayBootstrap() {
+  const credentialReady = useSettingsStore((s) => s.loaded && !s.credentialMigrationError)
   const navigate = useNavigate()
   const settings = useSettingsStore((s) => s.settings)
   const pushInbound = useGatewayStore((s) => s.pushInbound)
@@ -951,15 +953,14 @@ function GatewayBootstrap() {
   // Auto-start telegram from settings
   useEffect(() => {
     const gw = window.subagents?.gateway
-    if (!gw) return
+    if (!gw || !credentialReady) return
     let cancelled = false
     void (async () => {
       await waitForStartupRecovery()
       if (cancelled) return
-      if (settings.telegramEnabled && settings.telegramBotToken) {
+      if (settings.telegramEnabled) {
         try {
           await gw.telegramStart({
-            token: settings.telegramBotToken,
             allowedChatIds: settings.telegramAllowedChatIds || '',
           })
         } catch {
@@ -976,8 +977,8 @@ function GatewayBootstrap() {
     })()
     return () => { cancelled = true }
   }, [
+    credentialReady,
     settings.telegramEnabled,
-    settings.telegramBotToken,
     settings.telegramAllowedChatIds,
     refreshStatus,
   ])
@@ -1009,7 +1010,6 @@ function GatewayBootstrap() {
           channel: msg.channel,
           chatId: msg.chatId,
           text: `AgentStudio 在線 · running=${useAgentStore.getState().isRunning}`,
-          token: useSettingsStore.getState().settings.telegramBotToken || undefined,
         })
         return
       }
@@ -1042,7 +1042,6 @@ function GatewayBootstrap() {
             channel: msg.channel,
             chatId: msg.chatId,
             text: summary.slice(0, 3500),
-            token: s.telegramBotToken || undefined,
           })
         }
         const r = await runTask({
@@ -1074,7 +1073,6 @@ function GatewayBootstrap() {
             text: r.queued
               ? '代理忙碌中，你的訊息已加入待跑佇列，稍後會自動執行並回覆。'
               : '代理忙碌中，請稍後再試。',
-            token: s.telegramBotToken || undefined,
           })
           return
         }

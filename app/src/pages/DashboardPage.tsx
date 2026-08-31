@@ -390,7 +390,6 @@ export function DashboardPage() {
                         if (v && window.subagents?.webhook) {
                           const st = await window.subagents.webhook.start({
                             port: settings.webhookPort || 8787,
-                            token: settings.webhookToken || '',
                           })
                           setWebhook(st)
                         } else if (window.subagents?.webhook) {

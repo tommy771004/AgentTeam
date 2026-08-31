@@ -29,7 +29,7 @@ export function ExecutionStepsProgress({ tasks }: { tasks: readonly ExecutionSte
 
   return (
     <div
-      className="execution-steps-progress relative z-20 w-fit max-w-full"
+      className="execution-steps-progress relative z-20 w-fit max-w-full shrink-0"
       data-execution-steps-progress
       onMouseEnter={() => setHoverOpen(true)}
       onMouseLeave={() => setHoverOpen(false)}
@@ -40,11 +40,11 @@ export function ExecutionStepsProgress({ tasks }: { tasks: readonly ExecutionSte
         type="button"
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="agent-process-row inline-flex max-w-full items-center gap-2 text-left text-[12px] text-ink-2"
+        className="agent-process-row inline-flex max-w-full items-center gap-2 whitespace-nowrap text-left text-[12px] text-ink-2"
         onClick={togglePinned}
       >
         <Icon name="checklist" size={16} className="shrink-0 text-ink-3" />
-        <span className="font-medium tabular-nums">執行步驟：{completed}/{tasks.length}</span>
+        <span className="font-medium tabular-nums">執行步驟：{completed} / {tasks.length}</span>
         {failed > 0 ? <span className="text-red">{failed} 項失敗</span> : null}
         <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 text-ink-3" />
       </button>

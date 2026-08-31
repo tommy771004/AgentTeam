@@ -77,6 +77,10 @@ try {
 
   host.send(4, 'agents/spawn', childParams('writer-b', rootId, 'write scope B', { mode: 'shared-leased-write', projectRoot: workspace, scopes: ['protected.txt'] }))
   assert.match((await host.waitFor(4)).error?.message || '', /conflicts with agent/)
+  host.send(40, 'agents/spawn', childParams('writer-b', rootId, 'write scope B', { mode: 'shared-leased-write', projectRoot: workspace, scopes: ['protected.txt'] }))
+  const duplicateConflict = await host.waitFor(40)
+  assert.match(duplicateConflict.error?.message || '', /conflicts with agent/, 'a rejected spawn retry must replay rejection')
+  assert.equal(duplicateConflict.result, undefined, 'a rejected spawn retry must not become duplicate success')
   host.send(5, 'sessions/list')
   const sessions = (await host.waitFor(5)).result?.sessions || []
   const writerB = sessions.find((session: Record<string, any>) => session.agentAdmission?.spawnId === 'writer-b')

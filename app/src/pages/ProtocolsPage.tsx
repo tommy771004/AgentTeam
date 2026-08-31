@@ -890,10 +890,12 @@ export function ProtocolsPage() {
 
             {/* 專案 pill 置於輸入上方；其餘次要控制集中在左下＋選單。 */}
             <div className="shrink-0 w-full pt-3 pb-4 space-y-2">
-              <ProjectContextBar />
-              {lifecycle.live ? (
-                <ExecutionStepsProgress tasks={activity?.tasks.length ? activity.tasks : thread?.runPlan || []} />
-              ) : null}
+              <div className="flex min-w-0 items-center gap-2">
+                <ProjectContextBar />
+                {lifecycle.live ? (
+                  <ExecutionStepsProgress tasks={activity?.tasks.length ? activity.tasks : thread?.runPlan || []} />
+                ) : null}
+              </div>
               <CommandComposer
                 scopeKey={activeId || 'no-thread'}
                 value={activeId ? threadDraft : draftInput}

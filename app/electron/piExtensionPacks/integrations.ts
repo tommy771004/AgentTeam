@@ -1,4 +1,6 @@
 import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
+import { requestPiHostService } from '../piHostServices.ts'
+import type { SideEffectEvidence } from '../../src/agent/evidence/sideEffectEvidence.ts'
 
 /**
  * Integrations pack（整合包）— outbound web access and messaging.
@@ -92,16 +94,9 @@ const webSearch: PiPackTool = {
 
 /**
  * Messaging rides the same gateway contract the renderer used: chatId + text
- * in, delivery evidence out. The credential is OPERATOR property: it reaches
- * this pack through the gateway configuration bridge and never through model
- * arguments (ADR-0048 — a model may not supply its own execution credential).
+ * in, delivery evidence out. The credential never enters this process:
+ * the main-process vault resolves it through the Host service bridge.
  */
-let messagingGatewayToken = process.env.SUBAGENTS_TELEGRAM_BOT_TOKEN?.trim() || ''
-
-export function configurePiMessagingGateway(input: { botToken?: unknown }): void {
-  if (typeof input.botToken === 'string') messagingGatewayToken = input.botToken.trim()
-}
-
 const messageSend: PiPackTool = {
   name: 'message_send',
   label: 'Message Send',
@@ -118,7 +113,7 @@ const messageSend: PiPackTool = {
   },
   approval: () => ({ need: true, reason: 'message_send sends a message outside this machine' }),
   policyMigration: { outbound: true, sideEffect: true },
-  execute: async (args) => {
+  execute: async (args, context) => {
     const chatId = String(args.chatId || '').trim()
     const text = String(args.text || '').trim()
     if (!chatId || !text) {
@@ -126,32 +121,23 @@ const messageSend: PiPackTool = {
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error }) }], details: { ok: false, error } }
     }
     // A model may never supply its own execution credential (ADR-0048).
-    if (!messagingGatewayToken) {
-      const error = 'Messaging gateway 未設定憑證：請在 Settings 補填 Telegram Bot Token'
-      return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error }) }], details: { ok: false, error } }
-    }
     try {
-      const response = await fetch(`https://api.telegram.org/bot${encodeURIComponent(messagingGatewayToken)}/sendMessage`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text }),
-      })
-      const payload = await response.json().catch(() => ({})) as { ok?: boolean; description?: string; result?: { message_id?: number } }
-      const delivered = response.ok && payload.ok === true
+      const result = await requestPiHostService<{ ok: boolean; error?: string; evidence?: SideEffectEvidence }>('messaging/send', { chatId, text, runId: context.runId })
+      const delivered = result.ok === true
       return {
         content: [{
           type: 'text',
-          text: delivered ? `已送出至 telegram:${chatId}` : JSON.stringify({ ok: false, error: payload.description || `gateway HTTP ${response.status}` }),
+          text: delivered ? `已送出至 telegram:${chatId}` : JSON.stringify({ ok: false, error: result.error || 'Messaging gateway delivery failed' }),
         }],
         details: {
           ok: delivered,
           channel: 'telegram',
           chatId,
-          ...(delivered ? { messageId: payload.result?.message_id } : { error: payload.description || `gateway HTTP ${response.status}` }),
+          ...(delivered ? { evidence: result.evidence } : { error: result.error || 'Messaging gateway delivery failed' }),
         },
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+    } catch {
+      const message = 'Messaging gateway 不可用，請確認桌面版憑證與連線'
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: message }) }], details: { ok: false, error: message } }
     }
   },

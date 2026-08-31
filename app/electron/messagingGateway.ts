@@ -8,6 +8,8 @@ import {
   createSideEffectEvidence,
   type SideEffectEvidence,
 } from '../src/agent/evidence/sideEffectEvidence.ts'
+import { setTimeout as delay } from 'node:timers/promises'
+import { withIntegrationCredential } from './integrationCredentialVault'
 
 export type GatewayChannel = 'telegram' | 'webhook' | 'system'
 
@@ -44,10 +46,9 @@ export type GatewayStatus = {
 type InboundHandler = (msg: GatewayInbound) => void
 
 let onInbound: InboundHandler | null = null
-let telegramAbort = false
+let telegramController: AbortController | null = null
 let telegramRunning = false
 let telegramLoop: Promise<void> | null = null
-let telegramToken = ''
 let allowedChatIds = new Set<string>()
 let updateOffset = 0
 let messageCount = 0
@@ -86,21 +87,22 @@ function parseAllowed(ids: string | string[] | undefined): Set<string> {
 }
 
 async function telegramApi<T = unknown>(
-  token: string,
   method: string,
   body?: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<T> {
-  const url = `https://api.telegram.org/bot${token}/${method}`
-  const res = await fetch(url, {
-    method: body ? 'POST' : 'GET',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+  return withIntegrationCredential('credential:telegram:primary', async (token) => {
+    const url = `https://api.telegram.org/bot${token}/${method}`
+    const res = await fetch(url, {
+      signal,
+      method: body ? 'POST' : 'GET',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    const data = (await res.json()) as { ok: boolean; result?: T }
+    if (!res.ok || !data.ok) throw new Error(`Telegram API ${method} failed`)
+    return data.result as T
   })
-  const data = (await res.json()) as { ok: boolean; result?: T; description?: string }
-  if (!data.ok) {
-    throw new Error(data.description || `Telegram API ${method} failed`)
-  }
-  return data.result as T
 }
 
 type TgPhotoSize = { file_id: string; file_size?: number; width?: number; height?: number }
@@ -121,16 +123,16 @@ type TgMessage = {
 }
 
 async function downloadTelegramFile(
-  token: string,
   fileId: string,
   nameHint: string,
   mimeHint?: string,
+  signal?: AbortSignal,
 ): Promise<GatewayAttachment | null> {
   try {
     const meta = await telegramApi<{ file_path?: string; file_size?: number }>(
-      token,
       'getFile',
       { file_id: fileId },
+      signal,
     )
     if (!meta.file_path) return null
     if (meta.file_size && meta.file_size > MAX_TG_FILE_BYTES) {
@@ -141,8 +143,7 @@ async function downloadTelegramFile(
         size: meta.file_size,
       }
     }
-    const fileUrl = `https://api.telegram.org/file/bot${token}/${meta.file_path}`
-    const res = await fetch(fileUrl)
+    const res = await withIntegrationCredential('credential:telegram:primary', (token) => fetch(`https://api.telegram.org/file/bot${token}/${meta.file_path}`, { signal }))
     if (!res.ok) return null
     const buf = Buffer.from(await res.arrayBuffer())
     if (buf.byteLength > MAX_TG_FILE_BYTES) {
@@ -177,57 +178,58 @@ async function downloadTelegramFile(
 }
 
 async function extractAttachments(
-  token: string,
   msg: TgMessage,
+  signal: AbortSignal,
 ): Promise<GatewayAttachment[]> {
   const out: GatewayAttachment[] = []
   if (msg.photo?.length) {
     // largest photo last
     const best = msg.photo[msg.photo.length - 1]
     const att = await downloadTelegramFile(
-      token,
       best.file_id,
       `tg-photo-${msg.message_id}.jpg`,
       'image/jpeg',
+      signal,
     )
     if (att) out.push(att)
   }
   if (msg.document?.file_id) {
     const d = msg.document
     const att = await downloadTelegramFile(
-      token,
       d.file_id,
       d.file_name || `tg-doc-${msg.message_id}`,
       d.mime_type,
+      signal,
     )
     if (att) out.push(att)
   }
   return out
 }
 
-async function pollLoop(token: string) {
+async function pollLoop(signal: AbortSignal) {
   // resolve bot username once
   try {
-    const me = await telegramApi<{ username?: string }>(token, 'getMe')
+    const me = await telegramApi<{ username?: string }>('getMe', undefined, signal)
     botUsername = me.username || null
-  } catch (e) {
-    lastError = e instanceof Error ? e.message : String(e)
+  } catch {
+    if (!signal.aborted) lastError = 'Telegram 連線失敗，請檢查憑證或網路'
   }
 
-  while (!telegramAbort) {
+  while (!signal.aborted) {
     try {
       const updates = await telegramApi<
         Array<{
           update_id: number
           message?: TgMessage
         }>
-      >(token, 'getUpdates', {
+      >('getUpdates', {
         offset: updateOffset,
         timeout: 25,
         allowed_updates: ['message'],
-      })
+      }, signal)
 
       for (const u of updates || []) {
+        if (signal.aborted) break
         updateOffset = u.update_id + 1
         const msg = u.message
         if (!msg) continue
@@ -242,7 +244,8 @@ async function pollLoop(token: string) {
         }
         messageCount += 1
         lastMessageAt = new Date().toISOString()
-        const attachments = hasMedia ? await extractAttachments(token, msg) : []
+        const attachments = hasMedia ? await extractAttachments(msg, signal) : []
+        if (signal.aborted) break
         const inbound: GatewayInbound = {
           channel: 'telegram',
           chatId,
@@ -256,24 +259,19 @@ async function pollLoop(token: string) {
         onInbound?.(inbound)
       }
       lastError = null
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e)
+    } catch {
+      if (signal.aborted) break
+      lastError = 'Telegram 輪詢失敗，請檢查憑證或網路'
       // back off on errors
-      await sleep(3000)
+      await delay(3000, undefined, { signal }).catch(() => undefined)
     }
   }
 }
 
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
 export async function startTelegramGateway(opts: {
-  token: string
   allowedChatIds?: string | string[]
 }): Promise<GatewayStatus> {
-  const token = (opts.token || '').trim()
-  if (!token) {
+  try { withIntegrationCredential('credential:telegram:primary', () => undefined) } catch {
     lastError = '缺少 Telegram Bot Token'
     return getGatewayStatus()
   }
@@ -281,12 +279,12 @@ export async function startTelegramGateway(opts: {
     // restart with new config
     await stopTelegramGateway()
   }
-  telegramToken = token
   allowedChatIds = parseAllowed(opts.allowedChatIds)
-  telegramAbort = false
+  const controller = new AbortController()
+  telegramController = controller
   telegramRunning = true
   lastError = null
-  telegramLoop = pollLoop(token).finally(() => {
+  telegramLoop = pollLoop(controller.signal).finally(() => {
     telegramRunning = false
     telegramLoop = null
   })
@@ -294,25 +292,16 @@ export async function startTelegramGateway(opts: {
 }
 
 export async function stopTelegramGateway(): Promise<GatewayStatus> {
-  telegramAbort = true
-  // wake long-poll by setting abort; next iteration exits
-  // also try a short getUpdates with timeout 0 to not leave hanging forever
+  telegramController?.abort()
   telegramRunning = false
-  if (telegramToken) {
-    try {
-      await telegramApi(telegramToken, 'getUpdates', { offset: updateOffset, timeout: 0 })
-    } catch {
-      /* ignore */
-    }
-  }
   if (telegramLoop) {
     try {
-      await Promise.race([telegramLoop, sleep(2000)])
+      await telegramLoop
     } catch {
       /* ignore */
     }
   }
-  telegramToken = ''
+  telegramController = null
   return getGatewayStatus()
 }
 
@@ -325,16 +314,13 @@ export async function gatewaySendMessage(input: {
   channel: GatewayChannel
   chatId: string
   text: string
-  token?: string
   runId?: string
 }): Promise<{ ok: boolean; error?: string; evidence?: SideEffectEvidence }> {
   if (input.channel !== 'telegram') {
     return { ok: false, error: 'only telegram outbound supported' }
   }
-  const token = (input.token || telegramToken || '').trim()
-  if (!token) return { ok: false, error: 'missing telegram token' }
   try {
-    await telegramApi(token, 'sendMessage', {
+    await telegramApi('sendMessage', {
       chat_id: input.chatId,
       text: (input.text || '').slice(0, 4000),
     })
@@ -347,7 +333,7 @@ export async function gatewaySendMessage(input: {
         metadata: { channel: input.channel, targetRef: input.chatId, payload: 'metadata-only' },
       }),
     }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  } catch {
+    return { ok: false, error: 'Telegram 傳送失敗，請檢查憑證或網路' }
   }
 }

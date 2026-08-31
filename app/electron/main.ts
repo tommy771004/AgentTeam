@@ -39,6 +39,8 @@ import {
 } from './secretsVault'
 import { handleCredentialVaultIntent } from './integrationCredentialVault'
 import type { CredentialVaultIntent } from './credentialVaultAuthority'
+import { migrateIntegrationCredentials, migrateIntegrationSettingsFile } from './integrationCredentialMigration'
+import { legacyIntegrationCredentials, withoutIntegrationCredentials } from '../src/agent/integrationCredentials'
 import {
   decidePermissionRequest,
   isAllowedNavigationUrl,
@@ -254,12 +256,13 @@ delete process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
 const userEnvironment = warmUserEnvironment()
 const piHostSupervisor = new PiHostSupervisor(async () => {
   const environment = await userEnvironment
+  const { SUBAGENTS_TELEGRAM_BOT_TOKEN: _legacyTelegramToken, ...hostEnvironment } = environment
   const userHome = app.getPath('home')
   const userData = app.getPath('userData')
   return utilityProcess.fork(path.join(__dirname, 'pi-host.js'), [], {
     serviceName: 'AgentStudio Pi Core Host',
     env: {
-      ...environment,
+      ...hostEnvironment,
       SUBAGENTS_PI_VENDOR_DIR: path.resolve(__dirname, '../../vendor/pi'),
       SUBAGENTS_PI_AGENT_DIR: configuredUserPath(
         process.env,
@@ -572,7 +575,7 @@ function writeUsageLedger(ledger: UsageLedger): void {
 
 function settingsForDisk(value: unknown) {
   if (!value || typeof value !== 'object') return value
-  const settings = { ...(value as Record<string, unknown>) }
+  const settings = withoutIntegrationCredentials({ ...(value as Record<string, unknown>) })
   const secrets = settings.customToolSecrets
   if (secrets && typeof secrets === 'object' && safeStorage.isEncryptionAvailable()) {
     settings.encryptedCustomToolSecrets = safeStorage.encryptString(JSON.stringify(secrets)).toString('base64')
@@ -583,7 +586,7 @@ function settingsForDisk(value: unknown) {
 
 function settingsForRenderer(value: unknown) {
   if (!value || typeof value !== 'object') return value
-  const settings = { ...(value as Record<string, unknown>) }
+  const settings = withoutIntegrationCredentials({ ...(value as Record<string, unknown>) })
   const encrypted = settings.encryptedCustomToolSecrets
   if (typeof encrypted === 'string') {
     try { settings.customToolSecrets = JSON.parse(safeStorage.decryptString(Buffer.from(encrypted, 'base64'))) }
@@ -918,25 +921,21 @@ app.whenReady().then(async () => {
   try {
     const file = settingsPath()
     if (fs.existsSync(file)) {
-      const s = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
+      const s = migrateIntegrationSettingsFile(file) as {
         webhookEnabled?: boolean
         webhookPort?: number
-        webhookToken?: string
         telegramEnabled?: boolean
-        telegramBotToken?: string
         telegramAllowedChatIds?: string
       }
       if (s.webhookEnabled) {
         void startWebhookServer({
           port: s.webhookPort || 8787,
-          token: s.webhookToken || '',
         }).catch((e) => {
           console.error('Webhook auto-start failed', e)
         })
       }
-      if (s.telegramEnabled && s.telegramBotToken) {
+      if (s.telegramEnabled) {
         void startTelegramGateway({
-          token: s.telegramBotToken,
           allowedChatIds: s.telegramAllowedChatIds || '',
         }).catch((e) => {
           console.error('Telegram gateway auto-start failed', e)
@@ -1050,17 +1049,17 @@ ipcMain.handle('usage:clear', async () => {
 // ── Settings (userData) ─────────────────────────────────────────
 
 ipcMain.handle('settings:get', async () => {
-  const file = settingsPath()
-  if (!fs.existsSync(file)) return null
   try {
-    return settingsForRenderer(JSON.parse(fs.readFileSync(file, 'utf-8')))
+    return settingsForRenderer(migrateIntegrationSettingsFile(settingsPath()))
   } catch {
-    return null
+    throw new Error('設定或憑證遷移失敗；原始資料已保留，請重試。')
   }
 })
 
 ipcMain.handle('settings:set', async (_evt, settings: unknown) => {
   const file = settingsPath()
+  migrateIntegrationSettingsFile(file)
+  if (Object.keys(legacyIntegrationCredentials(settings)).length) throw new Error('請使用憑證 Vault intent 儲存 Token')
   fs.writeFileSync(file, JSON.stringify(settingsForDisk(settings), null, 2), 'utf-8')
   return { ok: true }
 })
@@ -1244,8 +1243,8 @@ ipcMain.handle('power:allowSleep', async () => {
 
 ipcMain.handle(
   'webhook:start',
-  async (_evt, opts: { port?: number; token?: string }) => {
-    return startWebhookServer(opts || {})
+  async (_evt, opts: { port?: number }) => {
+    return startWebhookServer({ port: opts?.port })
   },
 )
 
@@ -1477,8 +1476,8 @@ ipcMain.handle('mcp:discover', async (_evt, projectRoot?: string) => discoverMcp
 
 ipcMain.handle(
   'gateway:telegramStart',
-  async (_evt, opts: { token: string; allowedChatIds?: string }) =>
-    startTelegramGateway(opts || { token: '' }),
+  async (_evt, opts: { allowedChatIds?: string }) =>
+    startTelegramGateway({ allowedChatIds: opts?.allowedChatIds }),
 )
 
 ipcMain.handle('gateway:telegramStop', async () => stopTelegramGateway())
@@ -1493,7 +1492,6 @@ ipcMain.handle(
       channel: 'telegram' | 'webhook' | 'system'
       chatId: string
       text: string
-      token?: string
       runId?: string
     },
   ) => gatewaySendMessage(input),
@@ -3967,6 +3965,9 @@ async function tokenConsistencyGateSubDesignArtifact(input: { artifact: unknown;
 }
 
 async function runPiHostMainService(service: string, input: Record<string, unknown>): Promise<unknown> {
+  if (service === 'messaging/send') {
+    return gatewaySendMessage({ channel: 'telegram', chatId: String(input.chatId || ''), text: String(input.text || ''), runId: typeof input.runId === 'string' ? input.runId : undefined })
+  }
   const request = { artifact: input.artifact, projectRoot: String(input.projectRoot || '') || undefined }
   if (service === 'subdesign/capture-evidence') {
     const kind = input.kind === 'screenshot' || input.kind === 'dom' ? input.kind : undefined
@@ -4929,8 +4930,29 @@ ipcMain.handle('tools:httpRequest', async (_evt, input: { url: string; method?: 
 
 ipcMain.handle(
   'credentials:intent',
-  async (_evt, intent: CredentialVaultIntent) => handleCredentialVaultIntent(intent),
+  async (_evt, intent: CredentialVaultIntent) => {
+    // Prevent a later settings read from resurrecting a cleared legacy credential.
+    try { migrateIntegrationSettingsFile(settingsPath()) } catch {
+      return { ok: false, code: 'VAULT_ERROR', error: '憑證遷移尚未完成，請重試。', availability: handleCredentialVaultIntent({ action: 'list' }).availability }
+    }
+    const result = handleCredentialVaultIntent(intent)
+    if (result.ok && intent.action === 'clear') {
+      if (intent.ref === 'credential:telegram:primary') await stopTelegramGateway()
+      if (intent.ref === 'credential:webhook:primary') await stopWebhookServer()
+    }
+    return result
+  },
 )
+
+ipcMain.handle('credentials:migrateLegacy', async (_evt, legacy: unknown) => {
+  try {
+    migrateIntegrationSettingsFile(settingsPath())
+    migrateIntegrationCredentials(legacyIntegrationCredentials(legacy))
+    return { ok: true }
+  } catch {
+    return { ok: false, error: '憑證遷移失敗：原始資料已保留，請確認安全儲存後重試。' }
+  }
+})
 
 ipcMain.handle('secrets:list', async () => listVaultMeta())
 

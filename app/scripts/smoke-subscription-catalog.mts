@@ -358,6 +358,64 @@ const keyedProbe = await useSettingsStore.getState().testConnection()
 assert.equal(keyedProbe.message, 'API key is empty', 'OpenAI-compatible probes still demand a key first')
 useSettingsStore.setState({ settings: store.settings })
 
+// Reproduce restart -> model-only save against the real Settings store.
+// Host runtime fields are intentionally absent from renderer storage.
+const originalWindow = globalThis.window
+const originalStorage = globalThis.localStorage
+const memoryStorage = new Map<string, string>()
+let hostSettings = { provider: 'openai-codex', model: 'gpt-5.6-luna', approvalMode: 'auto' as const, unattended: false }
+const sentPatches: Record<string, unknown>[] = []
+let rejectSettings = false
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+  getItem: (key: string) => memoryStorage.get(key) ?? null,
+  setItem: (key: string, value: string) => memoryStorage.set(key, value),
+} })
+Object.defineProperty(globalThis, 'window', { configurable: true, value: { subagents: {
+  platform: () => 'darwin',
+  settings: { get: async () => ({}), set: async () => undefined },
+  piHost: {
+    sessions: { list: async () => ({ sessions: [] }) },
+    settings: {
+      get: async () => ({ settings: hostSettings }),
+      update: async (patch: Record<string, unknown>) => {
+        sentPatches.push(patch)
+        if (rejectSettings) throw new Error('model pair rejected')
+        hostSettings = { ...hostSettings, ...patch }
+        return { settings: hostSettings }
+      },
+    },
+  },
+} } })
+try {
+  await useSettingsStore.getState().load()
+  assert.equal(useSettingsStore.getState().settings.apiProvider, 'openai-codex', 'restart must hydrate the provider together with its model')
+  await useSettingsStore.getState().update({ model: 'gpt-5.6-sol' })
+  assert.equal(sentPatches.at(-1)?.provider, 'openai-codex', 'model-only save must not turn OAuth into custom')
+  assert.ok(!('baseUrl' in sentPatches.at(-1)!) && !('apiKey' in sentPatches.at(-1)!), 'subscription never sends endpoint or credentials')
+  await useSettingsStore.getState().load()
+  assert.equal(useSettingsStore.getState().settings.model, 'gpt-5.6-sol')
+  assert.equal(useSettingsStore.getState().settings.apiProvider, 'openai-codex')
+  useSettingsStore.getState().syncPiHostSettings({ ...hostSettings, provider: 'anthropic', model: 'claude-test' })
+  assert.equal(useSettingsStore.getState().settings.apiProvider, 'anthropic', 'live Host sync uses the same provider/model projection')
+  await useSettingsStore.getState().load()
+  rejectSettings = true
+  await assert.rejects(useSettingsStore.getState().update({ apiProvider: 'custom', model: 'invalid' }), /model pair rejected/)
+  assert.equal(useSettingsStore.getState().settings.apiProvider, 'openai-codex', 'rejected save must not publish an unacknowledged provider')
+  assert.equal(useSettingsStore.getState().settings.model, 'gpt-5.6-sol', 'rejected save preserves the acknowledged model')
+  rejectSettings = false
+  await Promise.all([
+    useSettingsStore.getState().update({ model: 'gpt-5.6-luna' }),
+    useSettingsStore.getState().update({ model: 'gpt-5.6-sol' }),
+  ])
+  assert.equal(hostSettings.model, 'gpt-5.6-sol', 'rapid selections preserve submission order after a rejected save')
+  assert.equal(useSettingsStore.getState().settings.model, hostSettings.model)
+  assert.ok(!('apiProvider' in JSON.parse(memoryStorage.get('subagents.settings.v1')!)), 'renderer storage never becomes provider authority')
+} finally {
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalStorage })
+  useSettingsStore.setState({ settings: store.settings })
+}
+
 // Traditional-Chinese copy standard: 訂閱 (U+95B1), never the variant 閲 (U+95B2).
 const storeSourceRecheck = await readFile(resolve(import.meta.dirname, '../src/store/settingsStore.ts'), 'utf8')
 assert.ok(!storeSourceRecheck.includes('訂閲'), 'the variant 閲 must not appear in user-facing copy')

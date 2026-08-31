@@ -5,8 +5,10 @@ import { recommendToolTuning } from '../agent/modelTuning.ts'
 import { redactSettingsForExport, withoutLegacyHermesMemory, preserveLegacyHermesMemory } from '../agent/settingsExport.ts'
 import {
   isElectronPiProduction,
+  llmSettingsFromPiHost,
   piSettingsPatchFromLlmSettings,
   stripPiOwnedSettings,
+  type PiHostSettingsProjection,
 } from '../agent/piProduction.ts'
 import {
   SETTINGS_CUSTOM_MERGE_KEYS,
@@ -14,10 +16,15 @@ import {
 } from '../agent/settingsMergeKeys.ts'
 import type { LlmSettings } from '../agent/types.ts'
 import { isSubscriptionProviderPreset } from '../agent/apiProviders.ts'
+import { legacyIntegrationCredentials, withoutIntegrationCredentials } from '../agent/integrationCredentials.ts'
+import { migrateLocalIntegrationSettings } from '../agent/integrationCredentialSettings.ts'
 
 export { SETTINGS_CUSTOM_MERGE_KEYS, type SettingsCustomMergeKey }
 
 const STORAGE_KEY = 'subagents.settings.v1'
+// Serialize saves so a slow Host acknowledgement cannot overwrite a later
+// selection, and a failed save does not poison subsequent updates.
+let settingsUpdateQueue: Promise<void> = Promise.resolve()
 
 export type LegacyPersonalizationPresence = Readonly<{
   personality: boolean
@@ -144,7 +151,8 @@ function loadLocal(): LlmSettings {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return mergeSettings()
     const parsed = JSON.parse(raw) as Partial<LlmSettings>
-    return mergeSettings(isElectronPiProduction() ? stripPiOwnedSettings(parsed) : parsed)
+    const safe = withoutIntegrationCredentials(parsed)
+    return mergeSettings(isElectronPiProduction() ? stripPiOwnedSettings(safe) : safe)
   } catch {
     return mergeSettings()
   }
@@ -156,25 +164,26 @@ function stripLegacyPersonalization(s: LlmSettings): Omit<LlmSettings, 'personal
 }
 
 function saveLocal(s: LlmSettings) {
+  // Keep the sole old copy intact until the explicit migration ingress succeeds.
+  try {
+    const previous = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
+    if (Object.keys(legacyIntegrationCredentials(previous)).length) return
+  } catch { return /* preserve unreadable storage until explicit recovery */ }
   // Electron persists custom-tool secrets through safeStorage in the main process;
   // don't duplicate those values in renderer localStorage.
   const source = isElectronPiProduction() ? stripPiOwnedSettings(stripLegacyPersonalization(s)) : stripLegacyPersonalization(s)
   const local = window.subagents?.settings ? { ...source, customToolSecrets: {} } : source
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(local))
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(withoutIntegrationCredentials(local)))
 }
 
 interface SettingsStore {
   settings: LlmSettings
   loaded: boolean
+  credentialMigrationError: string | null
   load: () => Promise<void>
   update: (patch: Partial<LlmSettings>) => Promise<void>
   /** Refresh the renderer projection after Pi Host-owned settings change. */
-  syncPiHostSettings: (settings: {
-    model: string
-    approvalMode: LlmSettings['approvalMode']
-    unattended: boolean
-    workspaceTextSearch?: boolean
-  }) => void
+  syncPiHostSettings: (settings: PiHostSettingsProjection) => void
   testConnection: (model?: string) => Promise<{ ok: boolean; message: string }>
   exportBundle: () => Promise<string>
   importBundle: (json: string) => Promise<{ ok: boolean; message: string }>
@@ -193,34 +202,38 @@ function shouldRejectBrowserProbe(settings: LlmSettings): boolean {
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   settings: loadLocal(),
   loaded: false,
+  credentialMigrationError: null,
 
   syncPiHostSettings: (pi) => {
-    const next = mergeSettings(get().settings, {
-      model: pi.model,
-      approvalMode: pi.approvalMode,
-      unattended: pi.unattended,
-      workspaceTextSearch: pi.workspaceTextSearch === true,
-    })
+    const next = mergeSettings(get().settings, llmSettingsFromPiHost(pi))
     set({ settings: next })
     saveLocal(next)
   },
 
   load: async () => {
+    set({ loaded: false })
+    let credentialMigrationError: string | null = null
     let base: LlmSettings
     if (window.subagents?.settings?.get) {
       try {
         const remote = (await window.subagents.settings.get()) as Partial<LlmSettings> | null
         if (remote) {
           observeLegacyPersonalizationPresence(remote)
-          base = mergeSettings(loadLocal(), isElectronPiProduction() ? stripPiOwnedSettings(remote) : remote)
+          const safe = withoutIntegrationCredentials(remote)
+          base = mergeSettings(loadLocal(), isElectronPiProduction() ? stripPiOwnedSettings(safe) : safe)
         } else {
           base = loadLocal()
         }
       } catch {
+        credentialMigrationError = '設定或憑證遷移失敗，請確認安全儲存後重試。'
         base = loadLocal()
       }
     } else {
       base = loadLocal()
+    }
+    if (!credentialMigrationError) {
+      try { await migrateLocalIntegrationSettings(localStorage, window.subagents?.credentials?.migrateLegacy) }
+      catch (error) { credentialMigrationError = error instanceof Error ? error.message : '憑證遷移失敗，請重試。' }
     }
 
     // Electron Pi Host owns the overlapping runtime profile. The legacy
@@ -230,12 +243,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       try {
         const pi = await window.subagents.piHost.settings.get()
         if (pi?.settings) {
-          base = mergeSettings(base, {
-            model: pi.settings.model,
-            approvalMode: pi.settings.approvalMode,
-            unattended: pi.settings.unattended,
-            workspaceTextSearch: pi.settings.workspaceTextSearch === true,
-          })
+          base = mergeSettings(base, llmSettingsFromPiHost(pi.settings))
         }
       } catch {
         /* Pi Host startup/recovery will retry on the next bootstrap. */
@@ -293,60 +301,65 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       /* browser / missing bridge — keep env/settings fallback */
     }
 
-    set({ settings: base, loaded: true })
-    saveLocal(base)
+    set({ settings: base, loaded: true, credentialMigrationError })
+    if (!credentialMigrationError) saveLocal(base)
   },
 
-  update: async (patch) => {
-    let next = mergeSettings(get().settings, patch)
-    // Soft-auto: when model changes and tool budgets still match defaults, apply tuning
-    if (patch.model != null && patch.model !== get().settings.model) {
-      const prev = get().settings
-      const atDefaults =
-        prev.toolSearchThreshold === DEFAULT_LLM_SETTINGS.toolSearchThreshold &&
-        prev.maxToolPayloadKb === DEFAULT_LLM_SETTINGS.maxToolPayloadKb &&
-        prev.maxToolRounds === DEFAULT_LLM_SETTINGS.maxToolRounds
-      const notOverridden =
-        patch.toolSearchThreshold == null &&
-        patch.maxToolPayloadKb == null &&
-        patch.maxToolRounds == null
-      if (atDefaults && notOverridden && String(patch.model).trim()) {
-        const rec = recommendToolTuning(String(patch.model))
-        next = mergeSettings(next, {
-          toolSearchThreshold: rec.toolSearchThreshold,
-          maxToolPayloadKb: rec.maxToolPayloadKb,
-          maxToolRounds: rec.maxToolRounds,
-        })
+  update: (patch) => {
+    const apply = async () => {
+      if (get().credentialMigrationError) throw new Error(get().credentialMigrationError!)
+      patch = withoutIntegrationCredentials(patch)
+      let next = mergeSettings(get().settings, patch)
+      // Soft-auto: when model changes and tool budgets still match defaults, apply tuning
+      if (patch.model != null && patch.model !== get().settings.model) {
+        const prev = get().settings
+        const atDefaults =
+          prev.toolSearchThreshold === DEFAULT_LLM_SETTINGS.toolSearchThreshold &&
+          prev.maxToolPayloadKb === DEFAULT_LLM_SETTINGS.maxToolPayloadKb &&
+          prev.maxToolRounds === DEFAULT_LLM_SETTINGS.maxToolRounds
+        const notOverridden =
+          patch.toolSearchThreshold == null &&
+          patch.maxToolPayloadKb == null &&
+          patch.maxToolRounds == null
+        if (atDefaults && notOverridden && String(patch.model).trim()) {
+          const rec = recommendToolTuning(String(patch.model))
+          next = mergeSettings(next, {
+            toolSearchThreshold: rec.toolSearchThreshold,
+            maxToolPayloadKb: rec.maxToolPayloadKb,
+            maxToolRounds: rec.maxToolRounds,
+          })
+        }
+      }
+      // Host validates the connection before any optimistic UI/local persistence.
+      // A rejected model selection must leave the acknowledged pair intact.
+      if (window.subagents?.piHost?.settings?.update) {
+        const connectionChanged = ['apiProvider', 'baseUrl', 'apiKey', 'model']
+          .some((key) => Object.prototype.hasOwnProperty.call(patch, key))
+        const piPatch = piSettingsPatchFromLlmSettings(connectionChanged
+          ? { ...patch, apiProvider: next.apiProvider, baseUrl: next.baseUrl, model: next.model }
+          : patch)
+        if (Object.keys(piPatch).length) {
+          const acknowledged = await window.subagents.piHost.settings.update(piPatch)
+          if (acknowledged?.settings) next = mergeSettings(next, llmSettingsFromPiHost(acknowledged.settings))
+        }
+      }
+      set({ settings: next })
+      saveLocal(next)
+      // Pi Host is the only runtime owner (ADR-0045/ADR-0046). Nothing in the
+      // renderer executes settings any more; the bridge only persists them.
+      if (!isElectronPiProduction()) {
+        if (window.subagents?.settings?.set) await window.subagents.settings.set(stripLegacyPersonalization(next))
+      } else if (window.subagents?.settings?.set) {
+        // Pi Host owns runtime settings, but the legacy bridge still persists
+        // renderer-owned preferences (theme, layout, notifications, integrations,
+        // and other UI settings). Keep it in sync so a later load/remount cannot
+        // overwrite a newer local value with a stale disk snapshot.
+        await window.subagents.settings.set(stripPiOwnedSettings(stripLegacyPersonalization(next)))
       }
     }
-    set({ settings: next })
-    saveLocal(next)
-    // Pi Host is the only runtime owner (ADR-0045/ADR-0046). Nothing in the
-    // renderer executes settings any more; the bridge only persists them.
-    if (!isElectronPiProduction()) {
-      if (window.subagents?.settings?.set) await window.subagents.settings.set(stripLegacyPersonalization(next))
-    } else if (window.subagents?.settings?.set) {
-      // Pi Host owns runtime settings, but the legacy bridge still persists
-      // renderer-owned preferences (theme, layout, notifications, integrations,
-      // and other UI settings). Keep it in sync so a later load/remount cannot
-      // overwrite a newer local value with a stale disk snapshot.
-      await window.subagents.settings.set(stripPiOwnedSettings(stripLegacyPersonalization(next)))
-    }
-    if (window.subagents?.piHost?.settings?.update) {
-      const connectionChanged = ['apiProvider', 'baseUrl', 'apiKey', 'model']
-        .some((key) => Object.prototype.hasOwnProperty.call(patch, key))
-      // Subscription stripping lives in piSettingsPatchFromLlmSettings
-      // (ADR-0052) — the single owner for what may reach the Host.
-      const piPatch = piSettingsPatchFromLlmSettings(connectionChanged
-        ? {
-            ...patch,
-            apiProvider: next.apiProvider,
-            baseUrl: next.baseUrl,
-            model: next.model,
-          }
-        : patch)
-      if (Object.keys(piPatch).length) await window.subagents.piHost.settings.update(piPatch)
-    }
+    const pending = settingsUpdateQueue.then(apply)
+    settingsUpdateQueue = pending.catch(() => undefined)
+    return pending
   },
 
   testConnection: async (model) => {
@@ -493,7 +506,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       }
       if (data.settings) {
         // Skip redacted secrets so we do not wipe live keys
-        const patch = { ...data.settings } as Partial<LlmSettings>
+        const legacy = legacyIntegrationCredentials(data.settings)
+        if (Object.keys(legacy).length) {
+          const migrate = window.subagents?.credentials?.migrateLegacy
+          if (!migrate) throw new Error('匯入憑證需要桌面版安全儲存')
+          const migrated = await migrate(legacy)
+          if (!migrated.ok) throw new Error(migrated.error || '憑證匯入失敗')
+        }
+        const patch = withoutIntegrationCredentials({ ...data.settings }) as Partial<LlmSettings>
         if (patch.apiKey === '***REDACTED***') delete patch.apiKey
         if (patch.telegramBotToken === '***REDACTED***') delete patch.telegramBotToken
         if (patch.webhookToken === '***REDACTED***') delete patch.webhookToken

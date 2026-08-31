@@ -29,7 +29,7 @@ export function handleCredentialVaultIntent(intent: CredentialVaultIntent) {
 }
 
 /** Main-process runtime use only. Never expose this function through preload or IPC. */
-export function useIntegrationCredential<Result>(
+export function withIntegrationCredential<Result>(
   ref: CredentialRef,
   consumer: (secret: string) => Result,
 ): Result {

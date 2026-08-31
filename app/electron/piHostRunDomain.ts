@@ -73,7 +73,12 @@ async function settleRun(input: RunDomainInput): Promise<PiHostMessage[]> {
   const queue = new PiRunQueue(24, input.snapshot.queue)
   const existing = queue.snapshot().find((item) => item.runId === runId)
   if (existing?.status === 'settled') {
-    return [{ id: input.id, result: { run: existing, queue: queue.snapshot(), settlement } }]
+    const lifecycle = agentLifecycleFromTurnSettlement(settlement)
+    if (input.hasRecordedLifecycle && !input.hasRecordedLifecycle(existing.sessionId, lifecycle, existing.runId)) {
+      return [errorResponse(input.id, 'Settlement retry does not match the recorded terminal lifecycle', 'conflict')]
+    }
+    await input.onSettled?.(existing, settlement)
+    return [{ id: input.id, result: { run: existing, queue: input.snapshot.queue, settlement } }]
   }
   const run = queue.settle(runId)
   if (!run) return [errorResponse(input.id, 'Unknown active Pi run')]

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 
 type Message = {
   id?: number
-  result?: { sessionId?: string }
+  result?: { sessionId?: string; settings?: { provider?: string; model?: string } }
   error?: { code: string; message: string }
 }
 
@@ -48,13 +48,20 @@ try {
   send(2, 'sessions/create', { title: 'invalid model smoke' })
   const created = await waitFor(2)
   assert.ok(created.result?.sessionId)
-  send(3, 'settings/update', { provider: 'missing-provider', model: 'missing-model' })
-  await waitFor(3)
+  send(3, 'settings/update', { provider: 'custom', model: 'gpt-5.6-sol' })
+  const invalidSave = await waitFor(3)
+  assert.equal(invalidSave.error?.code, 'invalid_request', 'invalid provider/model must fail at save, not the next turn')
+  assert.match(invalidSave.error?.message || '', /custom\/gpt-5.6-sol/)
+  send(5, 'settings/get')
+  const unchanged = await waitFor(5)
+  assert.notEqual(unchanged.result?.settings?.provider, 'custom', 'rejected save cannot mutate Host settings')
   send(4, 'turn/submit', {
     sessionId: created.result?.sessionId,
     runId: 'invalid-model-run',
     cwd: root,
     prompt: 'This must fail before any network request.',
+    // Per-turn overrides still fail closed, even when bypassing Settings UI.
+    profile: { provider: 'missing-provider', model: 'missing-model' },
   })
   const failed = await waitFor(4)
   assert.equal(failed.error?.code, 'runtime_error')

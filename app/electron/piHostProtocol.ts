@@ -4,6 +4,8 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
 import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatalog.ts'
+import { isSubscriptionProviderPreset } from '../src/agent/apiProviders.ts'
+import { assertPiModelConfigured } from './piModelSelection.ts'
 import type { MemoryStorageHealth } from './memoryStorageLifecycle.ts'
 import { normalizePiHostPendingApproval, PiHostAttachmentJournal, PI_HOST_ATTACHMENT_PAGE_LIMIT, type PiHostAttachment, type PiHostAttachmentPage, type PiHostFinalizationClaimResult, type PiHostFinalizationCompleteResult } from './piHostAttachment.ts'
 import type { RunLearningFinalOutcome } from '../src/agent/runLearningSettlement.ts'
@@ -447,7 +449,6 @@ import {
   unbindWorkspaceTextSearchRun,
   workspaceTextSearchAvailability,
 } from './piWorkspaceTextSearchRuntime.ts'
-import { configurePiMessagingGateway } from './piExtensionPacks/integrations.ts'
 import { discoveredPiSkills, selectFrozenPiPreflightSkills, type PiSkillSyncResult } from './piSkills.ts'
 import {
   clearPiPlanGateCandidate,
@@ -5936,10 +5937,24 @@ export function handlePiHostRequest(
       // endpoint already persisted for this provider — otherwise the Host would
       // adopt a provider/model pair that models.json never registered and every
       // turn would fail with "Pi model is not configured".
-      const persistedBaseUrl = explicitBaseUrl
+      const subscription = isSubscriptionProviderPreset(provider)
+      if (subscription && (explicitBaseUrl || settingsParams.apiKey)) {
+        throw new Error('訂閱連線不可設定 Base URL 或 API key。')
+      }
+      const persistedBaseUrl = subscription ? '' : explicitBaseUrl
         || (connectionChanged ? await readPiLegacyProviderBaseUrl(provider) : '')
       const baseUrl = persistedBaseUrl || (connectionChanged ? piProviderDefaultBaseUrl(provider) : '') || ''
       const apiKey = typeof input.params?.apiKey === 'string' ? input.params.apiKey.trim() : ''
+      if (connectionChanged && model) {
+        if (subscription) {
+          if (state.snapshot.config?.oauthConflicts.includes(provider)) {
+            throw new Error('訂閱 OAuth 憑證衝突：未儲存模型。請先確認要使用的 CLI 登入帳號；不會自動覆蓋 Pi 憑證。')
+          }
+          await assertPiModelConfigured(provider, model)
+        } else if (!baseUrl) {
+          await assertPiModelConfigured(provider, model)
+        }
+      }
       if (baseUrl) {
         const persisted = await persistPiLegacyModelConfig({ provider, model, baseUrl })
         if (!persisted) throw new Error('Pi model endpoint requires provider, model, and baseUrl')
@@ -6387,8 +6402,6 @@ export function createPiHostServer(
     state.toolContracts.reserveNextRevision(session.id, session.toolContractRevisionFloor || 1)
   }
   ensurePiPacksRegistered()
-  // The gateway credential is operator configuration, never a model argument.
-  configurePiMessagingGateway({ botToken: process.env.SUBAGENTS_TELEGRAM_BOT_TOKEN })
   // Packs reach durable Host state ONLY through these accessors: one memory
   // store, the real child-session/run-queue path, and the live extension
   // registry. No pack holds a copy of any of them.
@@ -6679,7 +6692,7 @@ export function createPiHostServer(
 }
 
 function hostRequestNeedsFreshOAuth(method: string | undefined): boolean {
-  return method === 'settings/get' || method === 'turn/submit'
+  return method === 'settings/get' || method === 'turn/submit' || method === 'settings/update'
 }
 
 async function refreshHostConfigForRequest(

@@ -333,7 +333,7 @@ export class PiAgentCommunicationDomain {
     if (!parent) return error(input.id, 'parentAgentId is unknown')
     this.compactRetention(input.state)
     const duplicate = input.state.sessions.find((session) => session.agentAdmission?.spawnId === spawnId)
-    if (duplicate) return this.spawnResponse(input.id, input.state, duplicate)
+    if (duplicate) return this.duplicateSpawnResponse(input.id, input.state, parent, duplicate)
     const prepared = this.prepareSpawnSpec(input.state, params, parent, spawnId)
     if (!prepared.ok) return this.rejectSpawn(input, parent, spawnId, prepared.reason)
     const { objective, role, profile, context, depth, childPolicy, childProfile, workspace, rootAgentId, runId } = prepared.value
@@ -392,9 +392,11 @@ export class PiAgentCommunicationDomain {
 
   private finishSpawnAdmission(input: { id: string | number; state: PiAgentCommunicationState }, parent: SessionRecord, spawnId: string, runId: string, session: SessionRecord, admission: AgentAdmissionSnapshot, childProfile: Record<string, unknown>, objective: string): PiHostMessage[] {
     const workspace = admission.workspace
-    const sessions = [...input.state.sessions, session]
+    const previousSessions = input.state.sessions
+    const sessions = [...previousSessions, session]
     input.state.sessions = sessions
     if (!appendLifecycle(input.state, session.id, 'admitted')) {
+      input.state.sessions = previousSessions
       return this.rejectSpawn(input, parent, spawnId, 'Unable to record child admission')
     }
     const lease = this.workspaceAuthority.acquire(sessions, session.id, workspace)
@@ -421,17 +423,39 @@ export class PiAgentCommunicationDomain {
       },
       recordLifecycle: (sessionId, lifecycle, admittedRunId) => appendLifecycle(input.state, sessionId, lifecycle, admittedRunId),
     })
-    if (!queueOutcome.ok) return this.rejectSpawn(input, parent, spawnId, queueOutcome.message)
+    if (!queueOutcome.ok) return this.failSpawnAdmission(input, parent, session, spawnId, runId, queueOutcome.message)
     const spawned: AgentCollaborationEvent = { type: 'spawned', agentId: session.id, runId, admission }
-    if (!appendEvent(input.state, parent.id, spawned)) return this.rejectSpawn(input, parent, spawnId, 'Unable to record child spawn')
+    if (!appendEvent(input.state, parent.id, spawned)) return this.failSpawnAdmission(input, parent, session, spawnId, runId, 'Unable to record child spawn')
     input.state.commit(input.state.sessions, queueOutcome.queue)
     return this.spawnResponse(input.id, { ...input.state, queue: queueOutcome.queue }, session, runId)
+  }
+
+  private failSpawnAdmission(input: { id: string | number; state: PiAgentCommunicationState }, parent: SessionRecord, child: SessionRecord, spawnId: string, runId: string, reason: string): PiHostMessage[] {
+    this.releaseWorkspaceLease(input.state, child)
+    appendLifecycle(input.state, child.id, 'failed', runId, reason)
+    return this.rejectSpawn(input, parent, spawnId, reason)
   }
 
   private rejectSpawn(input: { id: string | number; state: PiAgentCommunicationState }, parent: SessionRecord, spawnId: string, reason: string): PiHostMessage[] {
     appendEvent(input.state, parent.id, { type: 'spawn-rejected', parentAgentId: parent.id, spawnId, reason: boundedAgentText(reason, 2_048) })
     input.state.commit(input.state.sessions, input.state.queue)
     return error(input.id, reason)
+  }
+
+  private duplicateSpawnResponse(id: string | number, state: PiAgentCommunicationState, parent: SessionRecord, child: SessionRecord): PiHostMessage[] {
+    const spawnId = child.agentAdmission!.spawnId
+    const rejected = [...collaborationEvents(parent)].reverse()
+      .find((event) => event.type === 'spawn-rejected' && event.spawnId === spawnId)
+    if (rejected?.type === 'spawn-rejected') return error(id, rejected.reason)
+    const conflict = [...collaborationEvents(child)].reverse()
+      .find((event) => event.type === 'conflict' && event.conflict.requesterAgentId === child.id)
+    if (lifecycleOf(child) === 'blocked' && conflict?.type === 'conflict') {
+      return error(id, `Write scope conflicts with agent ${conflict.conflict.ownerAgentId}`)
+    }
+    const admitted = collaborationEvents(parent).some((event) => event.type === 'spawned' && event.agentId === child.id)
+    return admitted
+      ? this.spawnResponse(id, state, child)
+      : error(id, 'Previous spawn admission did not complete')
   }
 
   private spawnResponse(id: string | number, state: PiAgentCommunicationState, child: SessionRecord, runId?: string): PiHostMessage[] {

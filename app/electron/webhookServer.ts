@@ -6,6 +6,7 @@
 
 import http from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { withIntegrationCredential } from './integrationCredentialVault'
 
 export type WebhookPayload = {
   receivedAt: string
@@ -22,7 +23,6 @@ export type WebhookPayload = {
 export type WebhookStatus = {
   running: boolean
   port: number
-  token: string
   url: string | null
   lastError: string | null
   hitCount: number
@@ -45,7 +45,6 @@ let server: http.Server | null = null
 let status: WebhookStatus = {
   running: false,
   port: 8787,
-  token: '',
   url: null,
   lastError: null,
   hitCount: 0,
@@ -143,14 +142,13 @@ export async function dispatchWebhook(
 
 export async function startWebhookServer(opts: {
   port?: number
-  token?: string
 }): Promise<WebhookStatus> {
+  withIntegrationCredential('credential:webhook:primary', () => undefined)
   if (server) {
     await stopWebhookServer()
   }
 
-  const port = opts.port && opts.port > 0 ? opts.port : 8787
-  const token = opts.token || ''
+  const port = opts.port ?? 8787
 
   server = http.createServer(async (req, res) => {
     const url = req.url || '/'
@@ -173,20 +171,23 @@ export async function startWebhookServer(opts: {
 
     if (method === 'POST' && (url.startsWith('/webhook') || url.startsWith('/events'))) {
       // Auth: Bearer token or X-Webhook-Token
-      if (token) {
+      let authorized = false
+      try {
         const auth = req.headers.authorization || ''
         const headerToken = String(req.headers['x-webhook-token'] || '')
         const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-        if (bearer !== token && headerToken !== token) {
-          sendJson(res, 401, { ok: false, error: 'Unauthorized' })
-          return
-        }
+        authorized = withIntegrationCredential('credential:webhook:primary', (token) => bearer === token || headerToken === token)
+      } catch { /* missing/locked credential fails closed, including after clear */ }
+      if (!authorized) {
+        sendJson(res, 401, { ok: false, error: 'Unauthorized' })
+        return
       }
 
       try {
         const text = await readBody(req)
         const headers: Record<string, string> = {}
         for (const [k, v] of Object.entries(req.headers)) {
+          if (/^(authorization|x-webhook-token|cookie|proxy-authorization)$/i.test(k)) continue
           if (typeof v === 'string') headers[k] = v
           else if (Array.isArray(v)) headers[k] = v.join(',')
         }
@@ -199,10 +200,10 @@ export async function startWebhookServer(opts: {
           source: payload.source,
           receivedAt: payload.receivedAt,
         })
-      } catch (e) {
+      } catch {
         sendJson(res, 400, {
           ok: false,
-          error: e instanceof Error ? e.message : String(e),
+          error: 'Webhook event could not be processed',
         })
       }
       return
@@ -220,11 +221,12 @@ export async function startWebhookServer(opts: {
       reject(err)
     })
     server!.listen(port, '127.0.0.1', () => {
+      const address = server!.address()
+      const boundPort = address && typeof address === 'object' ? address.port : port
       status = {
         running: true,
-        port,
-        token,
-        url: `http://127.0.0.1:${port}/webhook`,
+        port: boundPort,
+        url: `http://127.0.0.1:${boundPort}/webhook`,
         lastError: null,
         hitCount: status.hitCount,
       }

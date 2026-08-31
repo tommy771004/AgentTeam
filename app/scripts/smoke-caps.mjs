@@ -2335,9 +2335,10 @@ await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and r
     'the complete Host projection remains available only in the diagnostic disclosure')
   assert.doesNotMatch(feed, /ExecutionStepsProgress/,
     'compact live step progress no longer interrupts the conversation timeline')
-  assert.match(protocols, /<ProjectContextBar \/>[\s\S]*lifecycle\.live[\s\S]*<ExecutionStepsProgress[\s\S]*<CommandComposer/,
-    'run-scoped live step progress stays directly above the conversation composer')
-  assert.match(progress, /執行步驟：\{completed\}\/\{tasks\.length\}/)
+  assert.match(protocols, /flex min-w-0 items-center gap-2[\s\S]*<ProjectContextBar \/>[\s\S]*lifecycle\.live[\s\S]*<ExecutionStepsProgress[\s\S]*<CommandComposer/,
+    'run-scoped live step progress stays horizontally beside the project picker above the conversation composer')
+  assert.match(progress, /whitespace-nowrap/)
+  assert.match(progress, /執行步驟：\{completed\} \/ \{tasks\.length\}/)
   assert.match(progress, /onMouseEnter=\{\(\) => setHoverOpen\(true\)\}/)
   assert.match(progress, /aria-expanded=\{open\}/)
   assert.match(progress, /task\.status === 'done'[\s\S]*check_circle/,
