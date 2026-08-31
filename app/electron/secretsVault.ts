@@ -256,17 +256,14 @@ const SECRET_TOKEN = /{{\s*secret:([A-Za-z0-9_.-]+)\s*}}/g
 
 /**
  * Resolve {{secret:key}} placeholders main-side.
- * Order: settings customToolSecrets → vault[key] → vault[`${key}-connector`].
+ * Order: custom-tool stable reference → connector vault ids. No settings fallback.
  */
 export function resolveSecretPlaceholders(
   text: string,
-  customToolSecrets?: Record<string, string> | null,
 ): { text: string; missing: string[] } {
   const missing: string[] = []
   const out = (text || '').replace(SECRET_TOKEN, (_all, key: string) => {
-    const fromSettings = customToolSecrets?.[key]
-    if (fromSettings != null && String(fromSettings).length > 0) return String(fromSettings)
-    const rec = getVaultSecret(key) || getVaultSecret(`${key}-connector`)
+    const rec = getVaultSecret(`credential:custom-tool:${key}`) || getVaultSecret(key) || getVaultSecret(`${key}-connector`)
     if (rec?.token) return rec.token
     missing.push(key)
     return ''

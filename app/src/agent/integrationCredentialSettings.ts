@@ -5,7 +5,7 @@ export const INTEGRATION_SETTINGS_KEY = 'subagents.settings.v1'
 /** This ingress is the only renderer code allowed to forward old persisted values. */
 export async function migrateLocalIntegrationSettings(
   storage: Pick<Storage, 'getItem' | 'setItem'>,
-  migrate?: (legacy: Record<string, string>) => Promise<{ ok: boolean; error?: string }>,
+  migrate?: (legacy: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>,
 ): Promise<void> {
   const raw = storage.getItem(INTEGRATION_SETTINGS_KEY)
   if (!raw) return

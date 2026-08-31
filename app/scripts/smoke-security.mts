@@ -150,10 +150,9 @@ import {
   }
   const { settings: redacted, redactedFields } = redactSettingsForExport(input)
   assert.equal(redacted.apiKey, REDACTED)
-  assert.equal(redacted.telegramBotToken, REDACTED)
-  assert.equal(redacted.webhookToken, REDACTED)
-  assert.equal(redacted.customToolSecrets.github, REDACTED)
-  assert.equal(redacted.customToolSecrets.notion, '', '空值不需遮罩')
+  for (const field of ['telegramBotToken', 'webhookToken', 'customToolSecrets', 'encryptedCustomToolSecrets']) {
+    assert.equal(Object.hasOwn(redacted, field), false, 'legacy credentials are absent, not exportable placeholders')
+  }
   assert.equal(redacted.pluginOAuthClients.gh.clientSecret, REDACTED)
   assert.equal(redacted.pluginOAuthClients.gh.clientId, 'cid')
   assert.equal(redacted.cliProviders[0].apiKey, REDACTED)

@@ -934,7 +934,7 @@ const api = {
   },
   /** Connector credential vault metadata; raw tokens stay in main. */
   credentials: {
-    migrateLegacy: (legacy: Record<string, string>) =>
+    migrateLegacy: (legacy: Record<string, unknown>) =>
       ipcRenderer.invoke('credentials:migrateLegacy', legacy) as Promise<{ ok: boolean; error?: string }>,
     intent: (intent: CredentialVaultIntent) =>
       ipcRenderer.invoke('credentials:intent', intent) as Promise<CredentialVaultIntentResult>,

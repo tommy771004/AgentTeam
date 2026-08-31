@@ -733,16 +733,13 @@ export interface LlmSettings {
   /** Local webhook receiver for Proactive events */
   webhookEnabled: boolean
   webhookPort: number
-  webhookToken: string
   /** Optional outbound target for Next_State=Dispatch Webhook. */
   webhookTarget: string
   /** Declarative edge tools. Secrets are referenced by key, never embedded here. */
   customTools: CustomToolDefinition[]
-  /** Values used by {{secret:key}} template references; redacted on export. */
-  customToolSecrets: Record<string, string>
   /**
    * OAuth client credentials for connector plugins (github / notion / google / …).
-   * clientSecret is sensitive — redacted on export like customToolSecrets.
+   * clientSecret is sensitive — redacted on export.
    */
   pluginOAuthClients: Record<string, { clientId: string; clientSecret?: string }>
   /** MCP servers (minimal client) */
@@ -752,7 +749,6 @@ export interface LlmSettings {
   mcpAgentServers: Record<string, string[]>
   /** Messaging gateway (Phase 5 — Telegram etc.) */
   telegramEnabled: boolean
-  telegramBotToken: string
   /** Comma-separated allowed chat IDs; empty = allow all */
   telegramAllowedChatIds: string
   /** Auto-run agent when inbound message received */

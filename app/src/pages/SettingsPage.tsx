@@ -713,8 +713,12 @@ export function SettingsPage() {
       }
     }
     // Already stored secrets
-    for (const key of Object.keys(settings.customToolSecrets || {})) found.add(key)
-    for (const { id } of listPluginSecretMeta()) found.add(id)
+    for (const meta of listPluginSecretMeta()) {
+      if (meta.id.startsWith('credential:custom-tool:')) found.add(meta.id.slice('credential:custom-tool:'.length))
+    }
+    for (const { id } of listPluginSecretMeta()) {
+      if (!id.startsWith('credential:')) found.add(id)
+    }
     return [...found].sort()
   }, [settings, pluginsTick])
   const toolTuning = useMemo(
@@ -3321,14 +3325,9 @@ export function SettingsPage() {
               </SettingsStack>
               {customToolSecretKeys.map((key) => (
                 <SettingsStack key={key} title={`Secret · ${key}`}>
-                  <input
-                    type="password"
-                    className={settingsInputCls}
-                    value={settings.customToolSecrets?.[key] || ''}
-                    onChange={(event) => set({ customToolSecrets: { ...(settings.customToolSecrets || {}), [key]: event.target.value } })}
-                    autoComplete="off"
-                    placeholder={`{{secret:${key}}} / 市集授權會自動寫入；也可在此覆寫`}
-                  />
+                  <IntegrationCredentialField kind="custom-tool" ownerId={key} disabled={!loaded || Boolean(credentialMigrationError)} onChanged={async () => {
+                    await window.subagents?.mcp?.stdioStopAll?.()
+                  }} />
                 </SettingsStack>
               ))}
             </SettingsGroup>

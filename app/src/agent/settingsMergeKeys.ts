@@ -14,7 +14,6 @@ export const SETTINGS_CUSTOM_MERGE_KEYS = [
   'discoveredModels',
   'fallbackModels',
   'customTools',
-  'customToolSecrets',
   'pluginOAuthClients',
   'cliProviders',
   'alwaysOnCapabilities',

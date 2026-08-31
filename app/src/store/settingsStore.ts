@@ -79,7 +79,6 @@ export function mergeSettings(...parts: Array<Partial<LlmSettings> | null | unde
     mcpServers: [...(DEFAULT_LLM_SETTINGS.mcpServers || [])],
     mcpAgentServers: { ...(DEFAULT_LLM_SETTINGS.mcpAgentServers || {}) },
     customTools: [...(DEFAULT_LLM_SETTINGS.customTools || [])],
-    customToolSecrets: { ...(DEFAULT_LLM_SETTINGS.customToolSecrets || {}) },
     pluginOAuthClients: { ...(DEFAULT_LLM_SETTINGS.pluginOAuthClients || {}) },
     cliProviders: mergeCliProviders(DEFAULT_LLM_SETTINGS.cliProviders),
     alwaysOnCapabilities: [...(DEFAULT_LLM_SETTINGS.alwaysOnCapabilities || [])],
@@ -88,8 +87,9 @@ export function mergeSettings(...parts: Array<Partial<LlmSettings> | null | unde
     trustedHookProjects: [...(DEFAULT_LLM_SETTINGS.trustedHookProjects || [])],
     delegatePersonas: { ...(DEFAULT_LLM_SETTINGS.delegatePersonas || {}) },
   }
-  for (const p of parts) {
-    if (!p) continue
+  for (const part of parts) {
+    if (!part) continue
+    const p = withoutIntegrationCredentials(part)
     out = {
       ...out,
       ...p,
@@ -112,8 +112,6 @@ export function mergeSettings(...parts: Array<Partial<LlmSettings> | null | unde
       fallbackModels:
         p.fallbackModels != null ? [...new Set(p.fallbackModels.filter(Boolean))] : out.fallbackModels,
       customTools: p.customTools != null ? p.customTools : out.customTools,
-      customToolSecrets:
-        p.customToolSecrets != null ? { ...out.customToolSecrets, ...p.customToolSecrets } : out.customToolSecrets,
       pluginOAuthClients:
         p.pluginOAuthClients != null
           ? { ...out.pluginOAuthClients, ...p.pluginOAuthClients }
@@ -169,11 +167,8 @@ function saveLocal(s: LlmSettings) {
     const previous = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
     if (Object.keys(legacyIntegrationCredentials(previous)).length) return
   } catch { return /* preserve unreadable storage until explicit recovery */ }
-  // Electron persists custom-tool secrets through safeStorage in the main process;
-  // don't duplicate those values in renderer localStorage.
   const source = isElectronPiProduction() ? stripPiOwnedSettings(stripLegacyPersonalization(s)) : stripLegacyPersonalization(s)
-  const local = window.subagents?.settings ? { ...source, customToolSecrets: {} } : source
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(withoutIntegrationCredentials(local)))
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(withoutIntegrationCredentials(source)))
 }
 
 interface SettingsStore {
@@ -232,7 +227,11 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       base = loadLocal()
     }
     if (!credentialMigrationError) {
-      try { await migrateLocalIntegrationSettings(localStorage, window.subagents?.credentials?.migrateLegacy) }
+      try {
+        await migrateLocalIntegrationSettings(localStorage, window.subagents?.credentials?.migrateLegacy)
+        const { hydratePluginSecrets } = await import('../agent/hermes/pluginSecrets.ts')
+        await hydratePluginSecrets()
+      }
       catch (error) { credentialMigrationError = error instanceof Error ? error.message : '憑證遷移失敗，請重試。' }
     }
 
@@ -515,17 +514,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         }
         const patch = withoutIntegrationCredentials({ ...data.settings }) as Partial<LlmSettings>
         if (patch.apiKey === '***REDACTED***') delete patch.apiKey
-        if (patch.telegramBotToken === '***REDACTED***') delete patch.telegramBotToken
-        if (patch.webhookToken === '***REDACTED***') delete patch.webhookToken
-        if (patch.customToolSecrets) {
-          const live = get().settings.customToolSecrets || {}
-          patch.customToolSecrets = Object.fromEntries(
-            Object.entries(patch.customToolSecrets).map(([key, value]) => [
-              key,
-              value === '***REDACTED***' ? live[key] || '' : value,
-            ]),
-          )
-        }
         if (patch.pluginOAuthClients) {
           const live = get().settings.pluginOAuthClients || {}
           patch.pluginOAuthClients = Object.fromEntries(

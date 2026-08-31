@@ -2,7 +2,7 @@
 
 import type { CustomToolDefinition, LlmSettings } from '../types.ts'
 import { pluginRegistry } from '../hermes/plugins.ts'
-import { getPluginSecret, hasPluginSecret } from '../hermes/pluginSecrets.ts'
+import { hasToolCredential } from '../hermes/pluginSecrets.ts'
 import { compileToolPackage, validateToolPackage } from './toolPackage.ts'
 import type { OpenAiToolDef } from './schemas.ts'
 
@@ -192,29 +192,9 @@ export function customToolDefs(tools: ResolvedCustomTool[]): OpenAiToolDef[] {
   })
 }
 
-/** Renderer-visible availability check (never returns vault tokens on Electron). */
-function secretAvailable(key: string, settings: LlmSettings): boolean {
-  const fromSettings = settings.customToolSecrets?.[key]
-  if (fromSettings != null && String(fromSettings).length > 0) return true
-  return hasPluginSecret(key) || hasPluginSecret(`${key}-connector`)
-}
-
-function resolveSecret(key: string, settings: LlmSettings): string {
-  // 1) Settings customToolSecrets  2) pluginSecrets (browser fallback only —
-  //    on Electron raw plugin tokens live in the main vault)
-  const fromSettings = settings.customToolSecrets?.[key]
-  if (fromSettings != null && String(fromSettings).length > 0) return String(fromSettings)
-  const fromPlugin = getPluginSecret(key)?.token
-  if (fromPlugin) return fromPlugin
-  // Also allow ownerId-less aliases without -connector suffix
-  const alt = getPluginSecret(`${key}-connector`)?.token
-  return alt || ''
-}
-
 function interpolate(
   value: string | undefined,
   input: Record<string, unknown>,
-  settings: LlmSettings,
   missingSecrets?: string[],
   opts?: {
     /**
@@ -227,12 +207,11 @@ function interpolate(
   return (value || '').replace(TOKEN, (_all, secretPrefix: string | undefined, key: string) => {
     if (secretPrefix) {
       if (opts?.deferSecrets) {
-        if (!secretAvailable(key, settings)) missingSecrets?.push(key)
+        if (!hasToolCredential(key)) missingSecrets?.push(key)
         return `{{secret:${key}}}`
       }
-      const secret = resolveSecret(key, settings)
-      if (!secret) missingSecrets?.push(key)
-      return secret
+      missingSecrets?.push(key)
+      return ''
     }
     const v = input[key]
     // Sensible defaults for optional GitHub state etc.
@@ -252,12 +231,12 @@ export function isCustomToolApprovalRequired(tool: ResolvedCustomTool) {
 export async function executeCustomTool(
   tool: ResolvedCustomTool,
   input: Record<string, unknown>,
-  settings: LlmSettings,
+  _settings: LlmSettings,
   context?: { runId?: string; projectRoot?: string },
 ): Promise<{ ok: boolean; output: string; data?: unknown }> {
   const missingSecrets: string[] = []
   if (tool.kind === 'bash_template') {
-    const command = interpolate(tool.template.command, input, settings, missingSecrets)
+    const command = interpolate(tool.template.command, input, missingSecrets, { deferSecrets: Boolean(window.subagents?.shell?.bash) })
     if (missingSecrets.length) {
       return {
         ok: false,
@@ -283,16 +262,16 @@ export async function executeCustomTool(
   // HTTP path: on Electron, leave {{secret:*}} placeholders — the main process
   // resolves them from the vault so raw tokens never enter the renderer.
   const deferSecrets = Boolean(window.subagents?.tools?.httpRequest)
-  const url = interpolate(tool.template.url, input, settings, missingSecrets, { deferSecrets })
+  const url = interpolate(tool.template.url, input, missingSecrets, { deferSecrets })
   const headers = Object.fromEntries(
     Object.entries(tool.template.headers || {}).map(([k, v]) => [
       k,
-      interpolate(v, input, settings, missingSecrets, { deferSecrets }),
+      interpolate(v, input, missingSecrets, { deferSecrets }),
     ]),
   )
   const method = tool.template.method || 'GET'
   const body = tool.template.body
-    ? interpolate(tool.template.body, input, settings, missingSecrets, { deferSecrets })
+    ? interpolate(tool.template.body, input, missingSecrets, { deferSecrets })
     : undefined
   if (missingSecrets.length) {
     return {

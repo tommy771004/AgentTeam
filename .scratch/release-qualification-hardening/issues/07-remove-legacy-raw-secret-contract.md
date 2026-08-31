@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 — Telegram／Webhook vault migration；06 — Custom-tool vault migration。
 
-**Status:** 可交給代理
+**Status:** claimed
 
 - [ ] Flat settings schema、defaults、merge、local persistence、IPC projection 與 bundle import/export 不再接受或回傳 raw integration credentials。
 - [ ] Legacy data 只可進入 idempotent migration ingress，不能重新被 renderer hydration 復活。

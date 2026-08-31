@@ -140,9 +140,16 @@ await test('typed renderer intents expose metadata only and have no raw getter',
   }
 
   const settingsTypes = await fs.readFile(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
-  assert.match(settingsTypes, /telegramBotToken: string/)
-  assert.match(settingsTypes, /webhookToken: string/)
-  assert.match(settingsTypes, /customToolSecrets: Record<string, string>/)
+  assert.doesNotMatch(settingsTypes, /(?:telegramBotToken|webhookToken|customToolSecrets)\s*:/)
+  for (const relative of ['src/agent/llm.ts', 'src/agent/settingsMergeKeys.ts', 'src/store/settingsStore.ts', 'src/pages/SettingsPage.tsx']) {
+    assert.doesNotMatch(await fs.readFile(path.join(appRoot, relative), 'utf8'), /telegramBotToken|webhookToken|customToolSecrets|encryptedCustomToolSecrets/, relative)
+  }
+  for (const relative of ['src/agent/tools/customTools.ts', 'src/agent/hermes/mcpSecrets.ts']) {
+    assert.doesNotMatch(await fs.readFile(path.join(appRoot, relative), 'utf8'), /getPluginSecret\b|customToolSecrets/, relative)
+  }
+  assert.doesNotMatch(main, /currentCustomToolSecrets|encryptedCustomToolSecrets|decryptString/)
+  const vaultSource = await fs.readFile(path.join(appRoot, 'electron/secretsVault.ts'), 'utf8')
+  assert.doesNotMatch(vaultSource, /customToolSecrets|fromSettings/)
 })
 
 await test('shipped vault survives fresh module restarts without downgrading remaining credentials', async () => {

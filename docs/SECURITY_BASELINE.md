@@ -24,5 +24,13 @@ validated by `app/scripts/smoke-security.mts`.
   persistence is rejected unless an explicit, testable policy permits it.
 - Plugin and MCP boundaries disclose credential references only; raw tokens do
   not enter Pi Host extension metadata or renderer state.
+- Telegram, Webhook and custom-tool credentials use `credential:*` vault records
+  and typed store/rotate/clear intents. Their flat-settings fields are deleted;
+  only the one-way migration ingress accepts legacy data. Migration verifies the
+  vault before scrubbing the original copy and fails closed without OS encryption.
+  Settings hydration, persistence and bundle export never return these secrets.
+- Custom-tool HTTP/shell and MCP placeholders resolve in main at execution time.
+  Reflected credential values are redacted from results and MCP session metadata;
+  changing a custom-tool credential invalidates existing MCP processes.
 - LLM/CLI egress passes the outbound data gate and deterministic baseline
   detectors before leaving the local workspace.

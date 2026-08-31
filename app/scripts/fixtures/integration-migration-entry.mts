@@ -1,4 +1,8 @@
 export * from './credential-vault-entry.mts'
+export { safeStorage } from './credential-vault-electron.mts'
+export { resolveSecretPlaceholders } from '../../electron/secretsVault'
+export { credentialHttpRequest } from '../../electron/customToolCredentials'
+export { mcpStdioEnsure, mcpStdioStopAll, mcpStdioCallTool } from '../../electron/mcpBridge'
 export { migrateIntegrationCredentials, migrateIntegrationSettingsFile } from '../../electron/integrationCredentialMigration'
 export { startWebhookServer, stopWebhookServer, setWebhookHandler } from '../../electron/webhookServer'
 export { gatewaySendMessage, startTelegramGateway, stopTelegramGateway } from '../../electron/messagingGateway'

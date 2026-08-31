@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — Credential vault expand contract。
 
-**Status:** 可交給代理
+**Status:** claimed
 
 - [ ] Custom-tool secret store/rotate/clear 使用 stable credential IDs 與 main vault。
 - [ ] Tool invocation 只在 main-owned execution seam 解析 placeholder，renderer 與 Pi catalog 看不到 raw value。

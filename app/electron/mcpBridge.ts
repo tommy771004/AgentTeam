@@ -8,7 +8,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { spawnCommandSpec, terminateProcessTree } from './platformProcess'
-import { hasSecretPlaceholder, resolveSecretPlaceholders } from './secretsVault'
+import { createToolCredentialScope } from './customToolCredentials'
 
 type JsonRpc = {
   jsonrpc: '2.0'
@@ -52,21 +52,13 @@ class McpStdioSession {
   lastError: string | null = null
   requestCount = 0
   private initPromise: Promise<void> | null = null
+  private readonly credentials = createToolCredentialScope()
 
   constructor(id: string, command: string, args: string[], env?: Record<string, string>) {
     this.id = id
     this.command = command
-    // Renderer sends {{secret:pluginId}} placeholders; raw tokens are
-    // resolved here (main) at spawn time from the credential vault.
-    const resolve = (v: string) =>
-      hasSecretPlaceholder(v) ? resolveSecretPlaceholders(v).text : v
-    this.args = (args || []).map((a) => (typeof a === 'string' ? resolve(a) : a))
-    this.env = Object.fromEntries(
-      Object.entries(env || {}).map(([k, v]) => [
-        k,
-        typeof v === 'string' ? resolve(v) : v,
-      ]),
-    )
+    this.args = [...(args || [])]
+    this.env = { ...env }
   }
 
   get pid(): number | null {
@@ -81,7 +73,7 @@ class McpStdioSession {
       alive: this.alive && !!this.child && !this.child.killed,
       pid: this.pid,
       startedAt: this.startedAt,
-      lastError: this.lastError,
+      lastError: this.lastError == null ? null : this.credentials.redact(this.lastError),
       requestCount: this.requestCount,
     }
   }
@@ -104,15 +96,16 @@ class McpStdioSession {
         return
       }
       try {
-        const spec = spawnCommandSpec(this.command, this.args)
+        const spec = spawnCommandSpec(this.command, this.args.map(this.credentials.resolve))
+        const env = Object.fromEntries(Object.entries(this.env).map(([key, value]) => [key, this.credentials.resolve(value)]))
         this.child = spawn(spec.file, spec.args, {
           stdio: ['pipe', 'pipe', 'pipe'],
-          env: { ...process.env, ...this.env },
+          env: { ...process.env, ...env },
           windowsHide: true,
           windowsVerbatimArguments: spec.windowsVerbatimArguments,
         })
       } catch (e) {
-        reject(e instanceof Error ? e : new Error(String(e)))
+        reject(new Error(this.credentials.redact(e instanceof Error ? e.message : String(e))))
         return
       }
 
@@ -238,9 +231,9 @@ class McpStdioSession {
     clearTimeout(p.timer)
     this.pending.delete(id)
     if (msg.error) {
-      p.reject(new Error(msg.error.message || `MCP error ${msg.error.code}`))
+      p.reject(new Error(this.credentials.redact(msg.error.message || `MCP error ${msg.error.code}`)))
     } else {
-      p.resolve(msg.result)
+      p.resolve(msg.result === undefined ? undefined : JSON.parse(this.credentials.redact(JSON.stringify(msg.result))))
     }
   }
 

@@ -1153,10 +1153,10 @@ await test('P1-A vault: renderer never reads raw tokens; main resolves placehold
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   assert.match(main, /secrets:list/)
   assert.match(main, /secrets:refresh/)
-  assert.match(main, /resolveSecretPlaceholders/) // tools:httpRequest + mcp:httpRpc
+  assert.match(main, /credentialHttpRequest|createToolCredentialScope/) // main-only execution owners
 
   const mcpBridge = fs.readFileSync(path.join(appRoot, 'electron/mcpBridge.ts'), 'utf8')
-  assert.match(mcpBridge, /resolveSecretPlaceholders/) // stdio env/args at spawn
+  assert.match(mcpBridge, /createToolCredentialScope/) // stdio env/args at spawn
 
   const mcpSecrets = fs.readFileSync(
     path.join(appRoot, 'src/agent/hermes/mcpSecrets.ts'),

@@ -24,7 +24,37 @@ try {
   await fs.writeFile(bundle, chunk.code)
   const api = await import(pathToFileURL(bundle).href) as typeof import('./fixtures/integration-migration-entry.mts')
   api.configureVaultTestEnvironment(directory, true)
-  const legacy = { telegramBotToken: 'telegram-MIGRATION-CANARY', webhookToken: 'webhook-MIGRATION-CANARY', webhookPort: 8787 }
+  const customLegacy = {
+    encryptedCustomToolSecrets: api.safeStorage.encryptString(JSON.stringify({ deploy: 'custom-MIGRATION-CANARY' })).toString('base64'),
+    webhookPort: 8787,
+  }
+  const customFile = path.join(directory, 'custom-settings.json')
+  await fs.writeFile(customFile, JSON.stringify(customLegacy))
+  assert.deepEqual(api.migrateIntegrationSettingsFile(customFile), { webhookPort: 8787 })
+  assert.equal(api.withIntegrationCredential('credential:custom-tool:deploy', (secret) => secret), 'custom-MIGRATION-CANARY')
+  assert.doesNotMatch(await fs.readFile(customFile, 'utf8'), /CustomToolSecrets|CANARY/)
+  assert.deepEqual(api.resolveSecretPlaceholders('Bearer {{secret:deploy}}'), { text: 'Bearer custom-MIGRATION-CANARY', missing: [] })
+  assert.equal(api.handleCredentialVaultIntent({ action: 'rotate', ref: 'credential:custom-tool:deploy', secret: 'custom-ROTATED-CANARY' }).ok, true)
+  api.migrateIntegrationCredentials(customLegacy)
+  assert.equal(api.resolveSecretPlaceholders('{{secret:deploy}}').text, 'custom-ROTATED-CANARY')
+  const customRestart = await import(`${pathToFileURL(bundle).href}?customRestart`) as typeof api
+  customRestart.configureVaultTestEnvironment(directory, true)
+  assert.equal(customRestart.resolveSecretPlaceholders('{{secret:deploy}}').text, 'custom-ROTATED-CANARY')
+  assert.equal(api.handleCredentialVaultIntent({ action: 'clear', ref: 'credential:custom-tool:deploy' }).ok, true)
+  assert.deepEqual(api.resolveSecretPlaceholders('{{secret:deploy}}'), { text: '', missing: ['deploy'] })
+  api.handleCredentialVaultIntent({ action: 'store', kind: 'custom-tool', ownerId: 'deploy', secret: 'mcp-ARG-CANARY' })
+  const mcpInput = {
+    id: 'credential-mcp', command: process.execPath,
+    args: ['-e', `require('readline').createInterface({input:process.stdin}).on('line',line=>{const msg=JSON.parse(line);if(msg.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:msg.id,result:msg.method==='initialize'?{}:{content:[{type:'text',text:process.argv[1]}]}})+'\\n')})`, '{{secret:deploy}}'],
+  }
+  try {
+    const status = await api.mcpStdioEnsure(mcpInput)
+    assert.doesNotMatch(JSON.stringify(status), /mcp-ARG-CANARY/)
+    const called = await api.mcpStdioCallTool({ ...mcpInput, toolName: 'echo', arguments: {} })
+    assert.equal(called.ok, true)
+    assert.doesNotMatch(JSON.stringify(called), /mcp-ARG-CANARY/)
+  } finally { api.mcpStdioStopAll() }
+  const legacy = { telegramBotToken: 'telegram-MIGRATION-CANARY', webhookToken: 'webhook-MIGRATION-CANARY', customToolSecrets: { deploy: 'custom-LOCAL-CANARY' }, webhookPort: 8787 }
   const safe = api.migrateIntegrationCredentials(legacy)
   assert.deepEqual(safe, { webhookPort: 8787 })
   assert.equal(api.withIntegrationCredential('credential:telegram:primary', (secret) => secret), legacy.telegramBotToken)
@@ -35,6 +65,9 @@ try {
   const locked = await import(`${pathToFileURL(bundle).href}?locked`) as typeof api
   locked.configureVaultTestEnvironment(directory, false)
   assert.throws(() => locked.migrateIntegrationCredentials(legacy), /憑證/)
+  await fs.writeFile(customFile, JSON.stringify(customLegacy))
+  assert.throws(() => locked.migrateIntegrationSettingsFile(customFile), /憑證/)
+  assert.deepEqual(JSON.parse(await fs.readFile(customFile, 'utf8')), customLegacy)
   assert.equal(legacy.telegramBotToken, 'telegram-MIGRATION-CANARY', 'failed migration leaves source intact for retry')
   const settingsFile = path.join(directory, 'settings.json')
   await fs.writeFile(settingsFile, JSON.stringify(legacy))
@@ -70,6 +103,21 @@ try {
   } finally { await api.stopWebhookServer() }
   const originalFetch = globalThis.fetch
   try {
+    api.handleCredentialVaultIntent({ action: 'store', kind: 'custom-tool', ownerId: 'deploy', secret: 'custom-HTTP-CANARY' })
+    globalThis.fetch = (async (_url, options) => {
+      assert.equal((options?.headers as Record<string, string>).Authorization, 'Bearer custom-HTTP-CANARY')
+      return new Response('echo custom-HTTP-CANARY')
+    }) as typeof fetch
+    const customSent = await api.credentialHttpRequest({ url: 'https://example.invalid', headers: { Authorization: 'Bearer {{secret:deploy}}' } })
+    assert.equal(customSent.ok, true)
+    assert.equal(customSent.text, 'echo [REDACTED]')
+    globalThis.fetch = (async () => { throw new Error('echo custom-HTTP-CANARY') }) as typeof fetch
+    const customFailed = await api.credentialHttpRequest({ url: 'https://example.invalid', headers: { Authorization: '{{secret:deploy}}' } })
+    assert.equal(customFailed.ok, false)
+    assert.doesNotMatch(JSON.stringify(customFailed), /CANARY/)
+    api.handleCredentialVaultIntent({ action: 'clear', ref: 'credential:custom-tool:deploy' })
+    globalThis.fetch = (async () => { assert.fail('missing credentials must not perform a request') }) as typeof fetch
+    assert.equal((await api.credentialHttpRequest({ url: 'https://example.invalid', headers: { Authorization: '{{secret:deploy}}' } })).ok, false)
     globalThis.fetch = (async (url) => {
       assert.match(String(url), /botrotated-CANARY\/sendMessage$/)
       return new Response(JSON.stringify({ ok: true, result: {} }))
@@ -142,15 +190,20 @@ try {
     piHost: { memoryProjection: { exportBundle: async () => ({ entries: [] }) } },
   } } })
   try {
-    const { useSettingsStore } = await import('../src/store/settingsStore.ts')
+    const { useSettingsStore, mergeSettings } = await import('../src/store/settingsStore.ts')
+    const rawPatch = { telegramBotToken: 'forbidden-state-CANARY', webhookToken: 'forbidden-state-CANARY', customToolSecrets: { deploy: 'forbidden-state-CANARY' } }
+    assert.doesNotMatch(JSON.stringify(mergeSettings(rawPatch as never)), /customToolSecrets|telegramBotToken|webhookToken|CANARY/)
     assert.doesNotMatch(JSON.stringify(useSettingsStore.getState().settings), /CANARY/)
     await useSettingsStore.getState().load()
     assert.equal(useSettingsStore.getState().credentialMigrationError, null)
     assert.doesNotMatch(JSON.stringify(useSettingsStore.getState().settings), /CANARY/)
-    await useSettingsStore.getState().update({ telegramBotToken: 'forbidden-state-CANARY', webhookToken: 'forbidden-state-CANARY' })
+    await useSettingsStore.getState().update(rawPatch as never)
     assert.doesNotMatch(JSON.stringify(useSettingsStore.getState().settings), /CANARY/)
     assert.doesNotMatch(local.get(INTEGRATION_SETTINGS_KEY)!, /CANARY/)
     assert.doesNotMatch(await useSettingsStore.getState().exportBundle(), /CANARY/)
+    assert.equal((await useSettingsStore.getState().importBundle(JSON.stringify({ settings: legacy }))).ok, true)
+    assert.doesNotMatch(JSON.stringify(useSettingsStore.getState().settings), /customToolSecrets|telegramBotToken|webhookToken|CANARY/)
+    assert.doesNotMatch(local.get(INTEGRATION_SETTINGS_KEY)!, /CANARY/)
   } finally {
     if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
     else Reflect.deleteProperty(globalThis, 'window')

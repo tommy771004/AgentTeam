@@ -19,6 +19,7 @@ import {
   accountHintFromToken,
   clearPluginSecret,
   hasPluginSecret,
+  hasToolCredential,
   setPluginSecret,
 } from '../agent/hermes/pluginSecrets.ts'
 import { oauthProviderForPlugin } from '../agent/hermes/pluginOAuth.ts'
@@ -1212,8 +1213,7 @@ export const useLearningStore = create<LearningStore>((set, get) => {
             item?.dependsOnPluginId
           if (
             secretOwner &&
-            !hasPluginSecret(secretOwner) &&
-            !useSettingsStore.getState().settings.customToolSecrets?.[secretOwner]
+            !hasToolCredential(secretOwner)
           ) {
             health = {
               ok: false,
@@ -1481,11 +1481,11 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     },
 
     clearPluginAuth: async (id) => {
-      clearPluginSecret(id)
-      const settingsStore = useSettingsStore.getState()
-      const secrets = { ...(settingsStore.settings.customToolSecrets || {}) }
-      delete secrets[id]
-      await settingsStore.update({ customToolSecrets: secrets })
+      await clearPluginSecret(id)
+      const result = await window.subagents?.credentials?.intent({ action: 'clear', ref: `credential:custom-tool:${id}` })
+      if (result && !result.ok) throw new Error(result.error)
+      const { hydratePluginSecrets } = await import('../agent/hermes/pluginSecrets.ts')
+      await hydratePluginSecrets()
       const existing = pluginRegistry.list().find((plugin) => plugin.id === id)
       if (existing) {
         const next = {
