@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { chmod, lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { resolveUserPathValue } from './userEnvironment.ts'
 import { piCodingAgentModule } from './piVendor.ts'
+import { resolvePiPackageSkillResources } from './piPackageDomain.ts'
 
 /**
  * Host-owned skills（技能目錄）— one SKILL.md per skill, discovered by Pi's
@@ -41,11 +42,21 @@ export function resolvePiSkillsDir(
   return join(agentDir, 'skills')
 }
 
+export type PiPackageSkillProvenance = Readonly<{
+  packageName: string
+  version: string
+  source: string
+  origin: 'package'
+  contentDigest: string
+}>
+
 export type PiSkillResourceSnapshot = {
   root: string
   digest: string
   manifest: readonly string[]
   fileDigests?: Readonly<Record<string, string>>
+  packageProvenance?: Readonly<Record<string, PiPackageSkillProvenance>>
+  diagnostics?: ReadonlyArray<{ path: string; message: string }>
 }
 
 export type PiSkillCatalogSource = 'agentstudio' | 'project' | 'user' | 'system'
@@ -298,9 +309,17 @@ export async function snapshotPiSkillResources(
 ): Promise<PiSkillResourceSnapshot | undefined> {
   const source = resolvePiSkillsDir(agentDir)
   if (!source) return undefined
-  const files: Array<{ relativePath: string; content: Buffer; granted: boolean }> = []
+  type PackageFileOrigin = Omit<PiPackageSkillProvenance, 'contentDigest'>
+  const files: Array<{ relativePath: string; content: Buffer; granted: boolean; packageOrigin?: PackageFileOrigin }> = []
+  const diagnostics: Array<{ path: string; message: string }> = []
   let bytes = 0
-  const appendFile = async (relativePath: string, absolute: string, granted: boolean, strict = true): Promise<boolean> => {
+  const appendFile = async (
+    relativePath: string,
+    absolute: string,
+    granted: boolean,
+    strict = true,
+    packageOrigin?: PackageFileOrigin,
+  ): Promise<boolean> => {
     if (files.length >= 128) {
       if (strict) throw new Error('Skill Resource View exceeds 128 files')
       return false
@@ -313,7 +332,7 @@ export async function snapshotPiSkillResources(
       return false
     }
     bytes += content.byteLength
-    files.push({ relativePath, content, granted })
+    files.push({ relativePath, content, granted, ...(packageOrigin ? { packageOrigin } : {}) })
     return true
   }
   const visit = async (dir: string, prefix = ''): Promise<void> => {
@@ -355,6 +374,17 @@ export async function snapshotPiSkillResources(
       else if (stat.isFile()) collected.push({ relativePath, absolute })
     }
   }
+  const pathContainsSymlink = async (root: string, target: string): Promise<boolean> => {
+    const rel = relative(resolve(root), resolve(target))
+    if (rel.startsWith('..') || isAbsolute(rel)) return true
+    let current = resolve(root)
+    if ((await lstat(current)).isSymbolicLink()) return true
+    for (const segment of rel.split(/[\\/]/).filter(Boolean)) {
+      current = join(current, segment)
+      if ((await lstat(current)).isSymbolicLink()) return true
+    }
+    return false
+  }
   if (projectRoot) {
     // Pinned status is Host-owned metadata. Keep it in the frozen view so the
     // prompt expansion reads the same immutable revision as Pi's loader, but
@@ -364,6 +394,7 @@ export async function snapshotPiSkillResources(
     const catalog = await readPiSkillCatalog({ agentDir, projectRoot, home })
     const supportingFiles: Array<{ relativePath: string; absolute: string }> = []
     const includedManifests = new Set<string>()
+    const includedSkillNames = new Set(catalog.files.map((skill) => skill.name))
     // Preserve every Host-managed bundle, including a malformed one that Pi
     // must diagnose and a body-only pinned skill that is expanded separately.
     // The catalog intentionally contains only skills accepted by Pi's parser,
@@ -393,17 +424,85 @@ export async function snapshotPiSkillResources(
         files.push({ relativePath, content, granted: true })
       }
     }
-    // Every installed skill manifest is guaranteed to enter the immutable
-    // view. Supporting files fill the remaining bounded budget in stable
-    // order; a large library can never prevent the turn from starting.
+    const packageSkills = await resolvePiPackageSkillResources(agentDir)
+    diagnostics.push(...packageSkills.diagnostics)
+    const loadSkills = (piCodingAgentModule as Partial<{ loadSkills: PiLoadSkills }>).loadSkills
+    const packageSupportingFiles: Array<{
+      relativePath: string
+      absolute: string
+      origin: PackageFileOrigin
+    }> = []
+    if (typeof loadSkills === 'function' && agentDir) {
+      for (const resource of packageSkills.resources) {
+        try {
+          if (await pathContainsSymlink(resource.installedPath, resource.path)) {
+            diagnostics.push({ path: resource.path, message: 'Package skill path contains a symlink' })
+            continue
+          }
+          const installedRoot = await realpath(resource.installedPath)
+          const resourceRoot = await realpath(resource.path)
+          if (!pathIsWithin(installedRoot, resourceRoot)) {
+            diagnostics.push({ path: resource.path, message: 'Package skill escaped its installed package root' })
+            continue
+          }
+          const loaded = loadSkills({ cwd: projectRoot, agentDir, skillPaths: [resource.path], includeDefaults: false })
+          diagnostics.push(...loaded.diagnostics.map((entry) => ({
+            path: typeof entry.path === 'string' ? entry.path : resource.path,
+            message: typeof entry.message === 'string' ? entry.message : String(entry.message || 'Package skill discovery warning'),
+          })))
+          for (const skill of loaded.skills) {
+            if (!skill.name || includedSkillNames.has(skill.name)) {
+              diagnostics.push({ path: skill.filePath, message: `Package skill name collision: ${skill.name || 'unknown'}` })
+              continue
+            }
+            if (await pathContainsSymlink(resource.installedPath, skill.filePath)) {
+              diagnostics.push({ path: skill.filePath, message: 'Package skill manifest contains a symlink' })
+              continue
+            }
+            const skillRealPath = await realpath(skill.filePath)
+            if (!pathIsWithin(installedRoot, skillRealPath)) {
+              diagnostics.push({ path: skill.filePath, message: 'Package skill manifest escaped its installed package root' })
+              continue
+            }
+            const prefixHash = createHash('sha256').update(resource.source).update('\0').update(skill.filePath).digest('hex').slice(0, 12)
+            const prefix = `package-${prefixHash}-${slugifyPiSkillName(skill.name)}`
+            const origin: PackageFileOrigin = Object.freeze({
+              packageName: resource.packageName,
+              version: resource.version,
+              source: resource.source,
+              origin: 'package',
+            })
+            const bundleFiles: Array<{ relativePath: string; absolute: string }> = []
+            if (basename(skill.filePath) === 'SKILL.md') {
+              await collectBundleFiles(dirname(skill.filePath), prefix, bundleFiles)
+            }
+            await appendFile(join(prefix, 'SKILL.md'), skill.filePath, true, true, origin)
+            includedSkillNames.add(skill.name)
+            packageSupportingFiles.push(...bundleFiles
+              .filter((file) => resolve(file.absolute) !== resolve(skill.filePath))
+              .map((file) => ({ ...file, origin })))
+          }
+        } catch (error) {
+          diagnostics.push({ path: resource.path, message: error instanceof Error ? error.message : 'Unable to freeze package skill' })
+        }
+      }
+    }
+    // Every manifest enters first. Supporting files from local and package
+    // bundles then share the same remaining bounded budget in stable order.
     for (const file of supportingFiles.sort((a, b) => a.relativePath.localeCompare(b.relativePath))) {
       await appendFile(file.relativePath, file.absolute, true, false)
+    }
+    for (const file of packageSupportingFiles.sort((a, b) => a.relativePath.localeCompare(b.relativePath))) {
+      await appendFile(file.relativePath, file.absolute, true, false, file.origin)
     }
   } else {
     await visit(source)
   }
   const hash = createHash('sha256')
-  for (const file of files) hash.update(file.relativePath).update('\0').update(file.content).update('\0')
+  for (const file of files) {
+    hash.update(file.relativePath).update('\0').update(file.content).update('\0')
+    if (file.packageOrigin) hash.update(JSON.stringify(file.packageOrigin)).update('\0')
+  }
   const digest = hash.digest('hex')
   const root = join(tmpdir(), 'subagents-pi-skill-resource-view', String(process.pid), safeSegment(scope), digest)
   await mkdir(root, { recursive: true })
@@ -423,6 +522,14 @@ export async function snapshotPiSkillResources(
     await chmod(target, 0o444)
   }
   const granted = files.filter((file) => file.granted)
+  const packageProvenance = Object.fromEntries(granted.flatMap((file) => {
+    if (!file.packageOrigin) return []
+    const relativePath = relative(root, join(root, file.relativePath))
+    return [[relativePath, Object.freeze({
+      ...file.packageOrigin,
+      contentDigest: createHash('sha256').update(file.content).digest('hex'),
+    })]]
+  }))
   return {
     root,
     digest,
@@ -431,6 +538,8 @@ export async function snapshotPiSkillResources(
       relative(root, join(root, file.relativePath)),
       createHash('sha256').update(file.content).digest('hex'),
     ]))),
+    ...(Object.keys(packageProvenance).length ? { packageProvenance: Object.freeze(packageProvenance) } : {}),
+    ...(diagnostics.length ? { diagnostics: Object.freeze(diagnostics.slice(0, 32).map((entry) => Object.freeze({ ...entry }))) } : {}),
   }
 }
 
@@ -698,7 +807,13 @@ export async function buildPinnedPiSkillsPromptBlock(agentDir: string | undefine
 
 /* ── Loader discovery capture ─────────────────────────────────────────── */
 
-export type PiDiscoveredSkill = { name: string; description: string; filePath: string; disableModelInvocation: boolean }
+export type PiDiscoveredSkill = {
+  name: string
+  description: string
+  filePath: string
+  disableModelInvocation: boolean
+  packageProvenance?: PiPackageSkillProvenance
+}
 
 type DiscoveredSkills = {
   skills: PiDiscoveredSkill[]
@@ -723,28 +838,32 @@ export function resetDiscoveredPiSkills(): void {
   discovered = { skills: [], diagnostics: [], capturedAt: 0 }
 }
 
-export function captureDiscoveredPiSkills(loaded: unknown): void {
+export function captureDiscoveredPiSkills(loaded: unknown, resourceView?: PiSkillResourceSnapshot): void {
   if (!loaded || typeof loaded !== 'object') return
   const skills = Array.isArray((loaded as { skills?: unknown }).skills) ? (loaded as { skills: unknown[] }).skills : []
   const diagnostics = Array.isArray((loaded as { diagnostics?: unknown }).diagnostics) ? (loaded as { diagnostics: unknown[] }).diagnostics : []
   discovered = {
     skills: skills.map((skill) => {
       const candidate = skill as Partial<PiDiscoveredSkill>
+      const filePath = typeof candidate.filePath === 'string' ? candidate.filePath : ''
+      const relativePath = resourceView && filePath ? relative(resourceView.root, filePath) : ''
+      const packageProvenance = relativePath ? resourceView?.packageProvenance?.[relativePath] : undefined
       return {
         name: typeof candidate.name === 'string' ? candidate.name : '',
         description: typeof candidate.description === 'string' ? candidate.description : '',
-        filePath: typeof candidate.filePath === 'string' ? candidate.filePath : '',
+        filePath,
         disableModelInvocation: candidate.disableModelInvocation === true,
+        ...(packageProvenance ? { packageProvenance } : {}),
       }
     }),
-    diagnostics: diagnostics.map((diagnostic) => {
+    diagnostics: [...diagnostics.map((diagnostic) => {
       const entry = diagnostic as { path?: unknown; message?: unknown; severity?: unknown }
       return {
         path: typeof entry.path === 'string' ? entry.path : '',
         severity: entry.severity,
         message: entry.message,
       }
-    }),
+    }), ...(resourceView?.diagnostics || [])],
     capturedAt: Date.now(),
   }
 }

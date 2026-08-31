@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
@@ -37,6 +38,16 @@ assert.equal(
   '/Users/skill-owner/shared-skills',
 )
 await mkdir(skillsDir, { recursive: true })
+const packageRoot = join(agentDir, 'npm', 'node_modules', 'pi-skill-fixture')
+const packageSkillDir = join(packageRoot, 'skills', 'package-review')
+const packageSkillRaw = '---\nname: package-review\ndescription: Package-owned review checklist\n---\n\n# Review\n\nVerify the package skill provenance.\n'
+await mkdir(packageSkillDir, { recursive: true })
+await writeFile(join(packageRoot, 'package.json'), JSON.stringify({
+  name: 'pi-skill-fixture',
+  version: '1.2.3',
+  pi: { skills: ['./skills'] },
+}), 'utf8')
+await writeFile(join(packageSkillDir, 'SKILL.md'), packageSkillRaw, 'utf8')
 // A malformed skill written directly to disk must surface as a diagnostic,
 // not disappear.
 await writeFile(join(skillsDir, 'broken.md'), '# no frontmatter at all\n', 'utf8')
@@ -95,7 +106,12 @@ await writeFile(join(agentDir, 'models.json'), JSON.stringify({
   },
 }))
 await writeFile(join(agentDir, 'auth.json'), JSON.stringify({ loopback: { type: 'api_key', key: 'test-key' } }))
-await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'loopback', defaultModel: 'smoke-model', defaultThinkingLevel: 'off' }))
+await writeFile(join(agentDir, 'settings.json'), JSON.stringify({
+  defaultProvider: 'loopback',
+  defaultModel: 'smoke-model',
+  defaultThinkingLevel: 'off',
+  packages: ['npm:pi-skill-fixture@1.2.3'],
+}))
 
 const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], {
   env: {
@@ -167,6 +183,8 @@ try {
   assert.match(systemPrompt1, /<available_skills>/, 'the turn advertises discovered skills')
   assert.match(systemPrompt1, /release-notes/)
   assert.match(systemPrompt1, /寫發布說明的步驟/, 'name AND description travel with the advertisement')
+  assert.match(systemPrompt1, /package-review/, 'a configured package skill enters the same frozen prompt view')
+  assert.match(systemPrompt1, /Package-owned review checklist/, 'package skill description comes from Pi discovery')
   // The intent is that `read` can reach the body from the prompt alone, so the
   // assertion is on a resolvable absolute path to THIS skill's SKILL.md. The
   // literal `skills/` segment is gone on purpose: skills are Pi resources now
@@ -184,10 +202,18 @@ try {
   const resources = resourcesListed.result?.resources || []
   const releaseEntry = resources.find((resource: { id: string }) => resource.id === 'release-notes')
   const legacyEntry = resources.find((resource: { id: string }) => resource.id === 'legacy-promo')
+  const packageEntry = resources.find((resource: { id: string }) => resource.id === 'package-review')
   assert.ok(releaseEntry, 'resources/list reflects the loader findings instead of an empty array')
   assert.equal(releaseEntry.kind, 'skill')
   assert.equal(releaseEntry.enabled, true)
   assert.equal(legacyEntry?.enabled, false, 'archived stays listed as disabled')
+  assert.deepEqual(packageEntry?.packageProvenance, {
+    packageName: 'pi-skill-fixture',
+    version: '1.2.3',
+    source: 'npm:pi-skill-fixture@1.2.3',
+    origin: 'package',
+    contentDigest: createHash('sha256').update(packageSkillRaw).digest('hex'),
+  }, 'package provenance is derived from the frozen manifest, not renderer state')
   // The malformed skill is REPORTED, not dropped. It is identified by the
   // problem, not by its directory name: a skill missing its frontmatter has no
   // usable name, so the loader gives it a generated slug and the actionable

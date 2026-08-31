@@ -19,11 +19,15 @@ export function handlePiHostResourceDomain(input: {
   if (input.method === 'resources/list') {
     const found = discoveredPiSkills()
     const readActive = input.activeTools.length === 0 || input.activeTools.includes('read')
-    const skills: Array<PiResource & { reason?: string }> = found.skills.filter((skill) => skill.name).map((skill) => ({
+    const skills: Array<PiResource & {
+      reason?: string
+      packageProvenance?: NonNullable<(typeof found.skills)[number]['packageProvenance']>
+    }> = found.skills.filter((skill) => skill.name).map((skill) => ({
       id: skill.name,
       kind: 'skill',
       source: skill.filePath,
       enabled: !skill.disableModelInvocation,
+      ...(skill.packageProvenance ? { packageProvenance: { ...skill.packageProvenance } } : {}),
       ...(!readActive && !skill.disableModelInvocation ? { reason: 'read 工具未啟用：此技能在 run 中不可用' } : {}),
     }))
     return [{ id: input.id, result: {

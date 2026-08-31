@@ -54,8 +54,18 @@ type ConfiguredPackage = {
 }
 
 type ResolvedResource = {
+  path: string
   enabled: boolean
   metadata: { source: string; scope: 'user' | 'project' | 'temporary'; origin: 'package' | 'top-level' }
+}
+
+export type PiPackageSkillResource = {
+  path: string
+  installedPath: string
+  packageName: string
+  version: string
+  source: string
+  origin: 'package'
 }
 
 type ResolvedPaths = Record<PiPackageResourceKind, ResolvedResource[]>
@@ -238,6 +248,65 @@ export async function listPiPackageInventory(): Promise<PiPackageInventory> {
   }))
 
   return { packages, diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS) }
+}
+
+export async function resolvePiPackageSkillResources(agentDir: string | undefined): Promise<{
+  resources: PiPackageSkillResource[]
+  diagnostics: Array<{ path: string; message: string }>
+}> {
+  if (!agentDir) return { resources: [], diagnostics: [] }
+  const packageManager = createPackageManager(agentDir)
+  const configured = packageManager.listConfiguredPackages()
+    .filter((item) => item.scope === 'user')
+    .slice(0, MAX_PACKAGES)
+  const configuredBySource = new Map(configured.map((item) => [item.source, item]))
+  let resolved: ResolvedPaths
+  try {
+    resolved = await packageManager.resolve(async () => 'skip')
+  } catch (error) {
+    return {
+      resources: [],
+      diagnostics: [{ path: '', message: boundedMessage(error instanceof Error ? error.message : 'Unable to resolve package skills') }],
+    }
+  }
+
+  const metadataBySource = new Map<string, Awaited<ReturnType<typeof readPackageMetadata>>>()
+  const resources: PiPackageSkillResource[] = []
+  const diagnostics: Array<{ path: string; message: string }> = []
+  for (const resource of resolved.skills) {
+    if (!resource.enabled || resource.metadata.origin !== 'package' || resource.metadata.scope !== 'user') continue
+    const configuredPackage = configuredBySource.get(resource.metadata.source)
+    if (!configuredPackage?.installedPath) continue
+    let parsed: ReturnType<typeof parsePinnedNpmPackageSource>
+    try {
+      parsed = parsePinnedNpmPackageSource(configuredPackage.source)
+    } catch (error) {
+      diagnostics.push({ path: resource.path, message: error instanceof Error ? error.message : 'Package skill source is not pinned npm' })
+      continue
+    }
+    let metadata = metadataBySource.get(configuredPackage.source)
+    if (!metadata) {
+      metadata = await readPackageMetadata(configuredPackage.installedPath)
+      metadataBySource.set(configuredPackage.source, metadata)
+    }
+    if (metadata.diagnostic || metadata.name !== parsed.name || metadata.version !== parsed.version) {
+      diagnostics.push({
+        path: resource.path,
+        message: metadata.diagnostic?.message || `Package metadata does not match ${parsed.name}@${parsed.version}`,
+      })
+      continue
+    }
+    resources.push({
+      path: resource.path,
+      installedPath: configuredPackage.installedPath,
+      packageName: parsed.name,
+      version: parsed.version,
+      source: parsed.source,
+      origin: 'package',
+    })
+    if (resources.length >= MAX_PACKAGES) break
+  }
+  return { resources, diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS) }
 }
 
 export async function mutatePiPackage(

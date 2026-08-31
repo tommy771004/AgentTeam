@@ -496,7 +496,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     await resourceLoader.reload()
     options.resourceLoader = resourceLoader
     if (typeof resourceLoader.getSkills === 'function') {
-      captureDiscoveredPiSkills(resourceLoader.getSkills())
+      captureDiscoveredPiSkills(resourceLoader.getSkills(), skillSnapshot)
     }
   }
   const restrictedTools = configurePiToolOptions(options, settings, mcpDynamic)
