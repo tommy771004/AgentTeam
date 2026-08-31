@@ -2,12 +2,13 @@
 
 > 適用專案：AgentStudio / AgentTeam
 > 對應 workflow：`.github/workflows/release.yml`  
-> 最後查核：2026-08-20
+> 最後查核：2026-08-31
 
 本文件說明如何取得並設定 `Release evidence` workflow 所需的 GitHub
-Environment secrets 與 variables。這些值不是 GitHub 自動產生的：平台簽章憑證來自
-Microsoft/公開 CA 或 Apple，更新金鑰由發行者自行保管，發布網址與 token 則來自
-自行部署的更新服務。
+Environment secrets 與 variables。平台簽章憑證來自 Microsoft/公開 CA 或 Apple，
+更新金鑰由發行者自行保管。`package` job 只使用簽章用的 `release-signing`
+Environment；客戶通道的發布網址與 token 必須隔離在 `release-publishing`，目前 workflow
+尚未引用它們。
 
 ## 0. 先讀：不要用跳過簽章來修 #35
 
@@ -23,7 +24,7 @@ Authenticode、Gatekeeper 與 notarization 證據 fail-closed。不要填假值�
 
 ## 1. 完成前檢查表
 
-### GitHub Environment secrets
+### `release-signing` Environment secrets
 
 | 名稱 | 來源 | 值格式 |
 |---|---|---|
@@ -36,17 +37,21 @@ Authenticode、Gatekeeper 與 notarization 證據 fail-closed。不要填假值�
 | `APPLE_APP_SPECIFIC_PASSWORD` | Apple Account 網站 | app-specific password，不是登入密碼 |
 | `APPLE_TEAM_ID` | Apple Developer Membership | 10 字元 Team ID |
 | `UPDATE_PRIVATE_KEY` | AgentStudio 更新簽章金鑰 | PEM PKCS#8 RSA 私鑰；必須匹配 app 內建公鑰 |
-| `UPDATE_PUBLISH_TOKEN` | 自行部署的更新發布服務 | 可執行 HTTP PUT 的 Bearer token |
 
-### GitHub Environment variables
+### `release-signing` Environment variables
 
 | 名稱 | 用途 | 範例形狀，不是真實值 |
 |---|---|---|
 | `UPDATE_BASE_URL` | 客戶端公開下載根網址 | `https://updates.example.com/beta` |
-| `UPDATE_PUBLISH_URL` | CI 上傳根網址 | `https://upload.example.com/beta` |
 
-兩個 URL 後面都不要加 `/win32/x64` 或 `/darwin/arm64`；workflow 會自行附加平台與
-架構路徑。
+`UPDATE_BASE_URL` 後面不要加 `/win32/x64` 或 `/darwin/arm64`；workflow 會自行附加
+平台與架構路徑。
+
+### `release-publishing` Environment（保留給 Ticket 03）
+
+客戶通道的 `UPDATE_PUBLISH_TOKEN` secret 與 `UPDATE_PUBLISH_URL` variable 必須放在獨立、
+保護更嚴格的 `release-publishing` Environment。Ticket 02 的 workflow 不引用此 Environment，
+因此 qualification 前的 package job 無法取得發布 credential，也不能寫入客戶更新通道。
 
 ## 2. 建立 GitHub `release-signing` Environment
 
@@ -59,8 +64,13 @@ Authenticode、Gatekeeper 與 notarization 證據 fail-closed。不要填假值�
 4. 名稱輸入 `release-signing`，大小寫與 workflow 保持完全一致。
 5. 建議在 **Deployment branches and tags** 只允許 `v*` tags。
 6. 若設定 required reviewers，發版時必須先核准，job 才能取得 secrets。
-7. 在 **Environment secrets** 加入上表十個 secrets。
-8. 在 **Environment variables** 加入兩個 variables。
+7. 在 **Environment secrets** 加入上表九個簽章 secrets。
+8. 在 **Environment variables** 加入 `UPDATE_BASE_URL`。
+9. 另建 `release-publishing` Environment，設定更嚴格的 required reviewers；可預先加入
+   `UPDATE_PUBLISH_TOKEN` 與 `UPDATE_PUBLISH_URL`，但目前不得讓任何 job 引用它。
+10. 若 repository 曾依舊版手冊設定發布 credential，從 `release-signing` 刪除
+    `UPDATE_PUBLISH_TOKEN` secret 與 `UPDATE_PUBLISH_URL` variable；只新增副本不足以完成
+    ownership migration。
 
 官方文件：
 
@@ -291,7 +301,7 @@ openssl pkey \
 私鑰永遠不能加入 Git。更新 manifest 與 artifact 使用 RSA-SHA256；實作見
 `app/scripts/build-update-manifest.mjs`。
 
-## 6. 建立更新發布服務
+## 6. 建立更新發布服務（Ticket 03 前不由 workflow 呼叫）
 
 ### 6.1 這三個值從哪裡來
 
@@ -299,7 +309,11 @@ openssl pkey \
 或 GitHub 配發。你必須先建立一個 HTTPS object storage + upload API，或其他符合下列
 契約的發布服務。
 
-目前 workflow 使用：
+目前 workflow **不執行遠端 PUT**。每個 package matrix job 只把已簽章的 candidate
+manifest 與 installers 上傳到私有 GitHub Actions artifact storage；qualification 失敗時，
+不會產生客戶通道 publication request。
+
+Ticket 03 的 publish owner 完成後，預定使用下列介面：
 
 ```http
 PUT {UPDATE_PUBLISH_URL}/{platform}/{arch}/manifest.json
@@ -360,8 +374,12 @@ TLS 與儲存服務已真正部署。`UPDATE_PUBLISH_URL` 可以是不同的私�
 
 在 **Settings → Environments → release-signing**：
 
-- **Environment secrets → Add secret**：加入十個 secrets。
-- **Environment variables → Add variable**：加入兩個 URL。
+- **Environment secrets → Add secret**：加入九個簽章 secrets。
+- **Environment variables → Add variable**：加入 `UPDATE_BASE_URL`。
+
+發布 credential 只能加入 **Settings → Environments → release-publishing**，且在 Ticket 03
+的 qualification-bound publish owner 完成前，不要讓 workflow job 引用該 Environment。
+若舊值仍存在於 `release-signing`，在各項目右側選單按 **Delete** 移除。
 
 GitHub 不允許重新讀取 secret 明文。新增前先在安全位置備份；更新後只會看到名稱與
 最近更新時間。
@@ -384,7 +402,6 @@ gh secret set APPLE_TEAM_ID --env release-signing
 gh secret set MACOS_CSC_KEY_PASSWORD --env release-signing
 gh secret set WINDOWS_CSC_KEY_PASSWORD --env release-signing
 gh secret set WINDOWS_PUBLISHER_THUMBPRINT --env release-signing
-gh secret set UPDATE_PUBLISH_TOKEN --env release-signing
 ```
 
 從檔案或 pipe 上傳大型 secret：
@@ -407,9 +424,14 @@ gh variable set UPDATE_BASE_URL \
   --env release-signing \
   --body 'https://updates.subagents.ai/beta'
 
+gh secret set UPDATE_PUBLISH_TOKEN --env release-publishing
 gh variable set UPDATE_PUBLISH_URL \
-  --env release-signing \
+  --env release-publishing \
   --body 'https://YOUR-UPLOAD-ENDPOINT.example/beta'
+
+# 舊版設定遷移：package job 使用的 environment 不得保留發布 credential
+gh secret delete UPDATE_PUBLISH_TOKEN --env release-signing
+gh variable delete UPDATE_PUBLISH_URL --env release-signing
 ```
 
 只檢查名稱，不會顯示 secret 值：
@@ -417,6 +439,8 @@ gh variable set UPDATE_PUBLISH_URL \
 ```bash
 gh secret list --env release-signing
 gh variable list --env release-signing
+gh secret list --env release-publishing
+gh variable list --env release-publishing
 ```
 
 ## 8. 發版前驗證
@@ -432,7 +456,6 @@ APPLE_TEAM_ID
 MACOS_CSC_KEY_PASSWORD
 MACOS_CSC_LINK
 UPDATE_PRIVATE_KEY
-UPDATE_PUBLISH_TOKEN
 WINDOWS_CSC_KEY_PASSWORD
 WINDOWS_CSC_LINK
 WINDOWS_PUBLISHER_THUMBPRINT
@@ -442,8 +465,11 @@ WINDOWS_PUBLISHER_THUMBPRINT
 
 ```text
 UPDATE_BASE_URL
-UPDATE_PUBLISH_URL
 ```
+
+`release-publishing` 可預先包含 `UPDATE_PUBLISH_TOKEN` 與 `UPDATE_PUBLISH_URL`，但目前
+workflow 不會讀取。`release-signing` 的兩份清單必須確認沒有這兩個名稱；不要把它們
+複製回 `release-signing`。
 
 ### 8.2 本機安全檢查
 
@@ -472,8 +498,9 @@ gh run watch 32356529844 --exit-status
 2. electron-builder 強制簽章；
 3. Windows Authenticode 或 macOS codesign/Gatekeeper/notarization/stapler 通過；
 4. update private key 與內建 public key 匹配；
-5. manifest 與 artifacts 發布成功；
-6. 三個 matrix job、release gate、Paid Beta qualification、release ready 全部通過。
+5. signed candidate manifest 與 installers 上傳到 GitHub Actions artifact storage；
+6. 三個 matrix job、release gate、Paid Beta qualification、release ready 全部通過；
+7. 客戶通道 publication 在 Ticket 03 完成前維持不可用。
 
 ## 9. 常見錯誤
 
@@ -486,8 +513,8 @@ gh run watch 32356529844 --exit-status
 | `Unexpected publisher certificate` | `WINDOWS_PUBLISHER_THUMBPRINT` 與實際 signer 不同 | 從正式 PFX/簽後檔案重新取得 thumbprint，先確認不是憑證遭替換 |
 | Windows base64 太長 | PFX 包含不必要 chain，超過環境變數限制 | 重新匯出或改採 cloud signing backend |
 | `UPDATE_PRIVATE_KEY does not match` | 使用了另一把私鑰 | 找回原私鑰或啟動正式 key rotation，不要覆寫 public key 假裝通過 |
-| upload HTTP `401/403` | token 無效、過期或 scope 不足 | 以最小權限重建 token，確認 PUT path policy |
-| upload HTTP `405` | endpoint 不接受 PUT | 部署 upload gateway 或修改 publish integration |
+| publish owner HTTP `401/403` | token 無效、過期或 scope 不足 | 以最小權限重建 token，確認 PUT path policy |
+| publish owner HTTP `405` | endpoint 不接受 PUT | 部署 upload gateway 或修改 publish integration |
 | app GET manifest `404` | public base URL 與 publish storage 路徑未對齊 | 對照 `beta/{platform}/{arch}/manifest.json` 實際物件路徑 |
 
 electron-builder troubleshooting：
@@ -532,7 +559,8 @@ electron-builder troubleshooting：
 
 ## 12. 專案內對應位置
 
-- `.github/workflows/release.yml`：secrets、variables、簽章、公證與發布契約。
+- `.github/workflows/release.yml`：簽章、公證、candidate artifact 與 qualification 契約；
+  Ticket 02 不包含客戶通道發布。
 - `app/package.json`：electron-builder 的 macOS hardened runtime/notarize 與 Windows NSIS 設定。
 - `app/electron/updatePublicKey.ts`：package 內建更新 public trust root。
 - `app/scripts/verify-update-signing-key.mts`：private/public key 配對檢查。

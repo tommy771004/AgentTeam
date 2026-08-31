@@ -9,10 +9,18 @@ import {
   resolveReleaseVersion,
   verifyArtifactManifest,
 } from './release-evidence.mjs'
+import {
+  customerPublishCredentialReferences,
+  packageSuccessQualificationFailureOutcome,
+  preQualificationPublicationBarrierErrors,
+  remoteUploadRequests,
+  workflowJobSource,
+} from './release-workflow-contract.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const workflowPath = path.join(repoRoot, '.github', 'workflows', 'release.yml')
 const packagePath = path.join(repoRoot, 'app', 'package.json')
+const signingSetupPath = path.join(repoRoot, 'docs', 'RELEASE_SIGNING_SETUP.md')
 
 let passed = 0
 
@@ -107,6 +115,8 @@ await test('release provenance labels local and GitHub runs truthfully', () => {
 
 await test('release workflow requires Windows and macOS packaging evidence', async () => {
   const workflow = await fs.readFile(workflowPath, 'utf8')
+  const signingSetup = await fs.readFile(signingSetupPath, 'utf8')
+  const packageJob = workflowJobSource(workflow, 'package')
   assert.match(workflow, /windows-latest/)
   assert.match(workflow, /macos-15-intel/)
   assert.match(workflow, /macos-15(?:[^-]|$)/)
@@ -121,10 +131,20 @@ await test('release workflow requires Windows and macOS packaging evidence', asy
   assert.match(workflow, /verify-update-signing-key\.mts/)
   assert.match(workflow, /secrets\.UPDATE_PRIVATE_KEY/)
   assert.match(workflow, /vars\.UPDATE_BASE_URL/)
-  assert.match(workflow, /vars\.UPDATE_PUBLISH_URL/)
-  assert.match(workflow, /secrets\.UPDATE_PUBLISH_TOKEN/)
-  assert.match(workflow, /curl --fail --retry 3/)
-  assert.match(workflow, /encodeURIComponent\(process\.argv\[1\]\)/)
+  assert.deepEqual(customerPublishCredentialReferences(packageJob), [])
+  assert.deepEqual(remoteUploadRequests(packageJob), [])
+  assert.match(packageJob, /environment: release-signing/)
+  assert.match(signingSetup, /release-publishing/)
+  assert.doesNotMatch(signingSetup, /secret set UPDATE_PUBLISH_TOKEN --env release-signing/)
+  assert.doesNotMatch(signingSetup, /variable set UPDATE_PUBLISH_URL[\s\S]{0,120}--env release-signing/)
+  assert.match(signingSetup, /UPDATE_PUBLISH_TOKEN --env release-publishing/)
+  assert.match(signingSetup, /UPDATE_PUBLISH_URL[\s\S]{0,120}--env release-publishing/)
+  assert.match(signingSetup, /secret delete UPDATE_PUBLISH_TOKEN --env release-signing/)
+  assert.match(signingSetup, /variable delete UPDATE_PUBLISH_URL --env release-signing/)
+  assert.match(packageJob, /electron-builder --win --x64 --publish never/)
+  assert.match(packageJob, /electron-builder --mac --\$\{\{ matrix\.arch \}\} --publish never/)
+  assert.match(packageJob, /path: app\/release-evidence/)
+  assert.match(packageJob, /path: app\/release/)
   assert.match(workflow, /UPDATE_PLATFORM/)
   assert.match(workflow, /name: Smoke matrix/)
   assert.match(workflow, /extraMetadata\.version/)
@@ -168,6 +188,104 @@ await test('release workflow requires Windows and macOS packaging evidence', asy
   assert.match(workflow, /hdiutil attach/)
   assert.match(workflow, /spctl --assess --type open/)
   assert.match(workflow, /mounted_app/)
+
+  const qualificationFailure = packageSuccessQualificationFailureOutcome(workflow)
+  assert.deepEqual(qualificationFailure.executedJobs, ['package', 'release-gate', 'release-qualification'])
+  assert.deepEqual(qualificationFailure.unsupportedConditions, [])
+  assert.deepEqual(qualificationFailure.customerPublishCredentialReferences, [])
+  assert.deepEqual(qualificationFailure.remoteUploadRequests, [])
+  assert.deepEqual(preQualificationPublicationBarrierErrors(workflow), [])
+
+  const earlyAlternateUpload = workflow.replace(
+    '      - name: Generate release evidence',
+    "      - name: Illicit early upload\n        run: aws s3 cp release/ s3://customer-channel/ --recursive\n\n      - name: Generate release evidence",
+  )
+  assert.match(
+    preQualificationPublicationBarrierErrors(earlyAlternateUpload).join('\n'),
+    /package contains a remote publication mechanism/,
+  )
+
+  const earlyNodeUpload = workflow.replace(
+    '      - name: Generate release evidence',
+    "      - name: Illicit scripted upload\n        run: node scripts/publish-update.mjs\n\n      - name: Generate release evidence",
+  )
+  assert.match(
+    preQualificationPublicationBarrierErrors(earlyNodeUpload).join('\n'),
+    /package contains a remote publication mechanism/,
+  )
+
+  const earlyPythonUpload = workflow.replace(
+    '      - name: Generate release evidence',
+    "      - name: Illicit Python upload\n        run: python scripts/deploy.py\n\n      - name: Generate release evidence",
+  )
+  assert.match(
+    preQualificationPublicationBarrierErrors(earlyPythonUpload).join('\n'),
+    /package contains a remote publication mechanism/,
+  )
+
+  const earlyActionUpload = workflow.replace(
+    '      - name: Generate release evidence',
+    "      - name: Illicit action upload\n        uses: vendor/customer-channel-publish@v1\n\n      - name: Generate release evidence",
+  )
+  assert.match(
+    preQualificationPublicationBarrierErrors(earlyActionUpload).join('\n'),
+    /package contains a remote publication mechanism/,
+  )
+
+  const reverseDeclaredUpload = workflow.replace(
+    'jobs:\n',
+    "jobs:\n  early-publish:\n    needs: package\n    runs-on: ubuntu-latest\n    steps:\n      - name: Illicit reverse-declared upload\n        run: aws s3 cp release/ s3://customer-channel/ --recursive\n\n",
+  )
+  assert.match(
+    preQualificationPublicationBarrierErrors(reverseDeclaredUpload).join('\n'),
+    /package success plus qualification failure can issue a customer publication request/,
+  )
+
+  const wrappedAlwaysUpload = workflow.replace(
+    '  release-ready:\n',
+    "  qualification-failure-publish:\n    needs: release-qualification\n    if: ${{ always() }}\n    runs-on: ubuntu-latest\n    steps:\n      - name: Illicit qualification-failure upload\n        run: aws s3 cp release/ s3://customer-channel/ --recursive\n\n  release-ready:\n",
+  )
+  assert.match(
+    preQualificationPublicationBarrierErrors(wrappedAlwaysUpload).join('\n'),
+    /package success plus qualification failure can issue a customer publication request/,
+  )
+
+  const unsupportedCondition = workflow.replace(
+    '  release-ready:\n',
+    "  unknown-condition-job:\n    needs: release-qualification\n    if: needs.release-qualification.result != 'success'\n    runs-on: ubuntu-latest\n    steps:\n      - name: Unknown condition\n        run: echo guarded\n\n  release-ready:\n",
+  )
+  assert.match(
+    preQualificationPublicationBarrierErrors(unsupportedCondition).join('\n'),
+    /workflow contains an unsupported job condition/,
+  )
+
+  const partiallyRecognizedCondition = workflow.replace(
+    "if: needs.release-gate.result == 'success' && needs.release-qualification.result == 'success'",
+    "if: needs.release-qualification.result == 'success' || always()",
+  )
+  assert.match(
+    preQualificationPublicationBarrierErrors(partiallyRecognizedCondition).join('\n'),
+    /workflow contains an unsupported job condition/,
+  )
+
+  const unknownFailedJobOutput = workflow.replace(
+    '  release-ready:\n',
+    "  failed-job-output-publish:\n    needs: release-qualification\n    if: needs.release-qualification.outputs.publish == 'true'\n    runs-on: ubuntu-latest\n    steps:\n      - name: Illicit output-guarded upload\n        run: aws s3 cp release/ s3://customer-channel/ --recursive\n\n  release-ready:\n",
+  )
+  assert.match(
+    preQualificationPublicationBarrierErrors(unknownFailedJobOutput).join('\n'),
+    /workflow contains an unsupported job condition/,
+  )
+
+  const bypassedQualification = workflow
+    .replace('needs: [package, release-gate, release-qualification]', 'needs: [package, release-gate]')
+    .replace(
+      "if: needs.release-gate.result == 'success' && needs.release-qualification.result == 'success'",
+      'if: always()',
+    )
+  const bypassErrors = preQualificationPublicationBarrierErrors(bypassedQualification).join('\n')
+  assert.match(bypassErrors, /release-ready does not depend on release-qualification/)
+  assert.match(bypassErrors, /release-ready does not require successful release-qualification/)
   assert.match(workflow, /github\.run_attempt/)
   assert.match(workflow, /actions\/download-artifact@v4/)
   assert.match(workflow, /verified=true/)
