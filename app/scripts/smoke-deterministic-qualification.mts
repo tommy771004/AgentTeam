@@ -18,6 +18,7 @@ const required = [
   'check:pi-contract',
   'check:no-retired-provider',
   'check:agent-collaboration-boundary',
+  'smoke:task-run-ingress',
   'smoke-pi-external-sources.mts',
   'smoke:security:logic',
   'smoke:settings-persistence',
@@ -50,6 +51,37 @@ try {
   env.WAYLAND_DISPLAY = ''
   env.SUBAGENTS_NO_APP_LAUNCH_MARKER = marker
   env.NODE_OPTIONS = [env.NODE_OPTIONS, `--import=${guard}`].filter(Boolean).join(' ')
+
+  const sentinelMarker = path.join(temporary, 'sentinel-self-test.jsonl')
+  const sentinelEnv = { ...env, SUBAGENTS_NO_APP_LAUNCH_MARKER: sentinelMarker }
+  const electronBinary = path.join(
+    appRoot,
+    'node_modules/electron/dist',
+    process.platform === 'darwin'
+      ? 'Electron.app/Contents/MacOS/Electron'
+      : process.platform === 'win32'
+        ? 'electron.exe'
+        : 'electron',
+  )
+  assert.ok(fs.existsSync(electronBinary), 'sentinel self-test requires the installed Electron binary')
+
+  const shellBypass = spawnSync(process.execPath, ['-e', [
+    "const childProcess = require('node:child_process')",
+    `childProcess.execSync(${JSON.stringify(`${JSON.stringify(electronBinary)} --version`)})`,
+  ].join(';')], { cwd: appRoot, env: sentinelEnv, encoding: 'utf8' })
+  assert.notEqual(shellBypass.status, 0, 'sentinel must reject Electron hidden inside an execSync shell command')
+  assert.equal(fs.existsSync(sentinelMarker), true, 'shell-command rejection must leave sentinel evidence')
+  fs.rmSync(sentinelMarker)
+
+  const electronProcess = spawnSync(electronBinary, ['--version'], {
+    cwd: appRoot,
+    env: sentinelEnv,
+    encoding: 'utf8',
+    timeout: 15_000,
+  })
+  assert.notEqual(electronProcess.status, 0, 'sentinel must fail immediately after an Electron process starts')
+  assert.equal(fs.existsSync(sentinelMarker), true, 'Electron-process rejection must leave sentinel evidence')
+  fs.rmSync(sentinelMarker)
 
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const result = spawnSync(npm, ['run', 'qualify:deterministic'], {
