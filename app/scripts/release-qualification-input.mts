@@ -5,6 +5,7 @@ import {
   type ReleaseQualificationInput,
   type ReleasePlatformEvidence,
 } from '../src/agent/releaseQualification.ts'
+import { validatePackagedInstallEvidence } from './packaged-install-evidence.mjs'
 
 type EvidenceBundle = {
   directory: string
@@ -112,7 +113,7 @@ export async function buildQualificationInputFromEvidence({
   for (const bundle of bundles) {
     const evidence = platformEvidence(bundle) as ReleasePlatformEvidence & { _paths: Record<string, string> }
     const install = await readJson(evidence._paths.installEvidencePath)
-    const firstTask = Boolean(install?.firstTask?.resultVisible && install?.firstTask?.diffVisible)
+    const firstTask = validatePackagedInstallEvidence(install, evidence.platform).ok
     const cleanInstall = Boolean(install?.uninstall?.removed && firstTask)
     const windowsVerified = evidence.platform === 'windows' && await fileExists(evidence._paths.windowsSignature)
     const macVerified = evidence.platform === 'macos'

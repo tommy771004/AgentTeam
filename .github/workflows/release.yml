@@ -493,21 +493,11 @@ jobs:
             test -f "$evidence_dir/sbom.cdx.json" || { echo "Missing SBOM beside $report"; exit 1; }
             test -f "$evidence_dir/release-notes.md" || { echo "Missing release notes beside $report"; exit 1; }
             test -s "$evidence_dir/install-launch-restart-uninstall.json" || { echo "Missing packaged lifecycle evidence beside $report"; exit 1; }
-            node - "$evidence_dir/install-launch-restart-uninstall.json" "$key" <<'NODE'
-            const fs = require('node:fs')
-            const [evidencePath, expectedKey] = process.argv.slice(2)
-            const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'))
-            const expectedPlatform = expectedKey.startsWith('windows-') ? 'windows' : 'macos'
-            if (evidence.platform !== expectedPlatform) throw new Error(`Lifecycle platform mismatch: ${evidence.platform}`)
-            if (!evidence.firstTask || evidence.firstTask.resultVisible !== true) throw new Error('Packaged first task result was not visible')
-            if (evidence.firstTask.diffVisible !== true || !/^(?:diff --git |--- |\+\+\+ |@@ )/m.test(evidence.firstTask.diffPreview || '')) {
-              throw new Error('Packaged first task did not show an actual Git diff')
-            }
-            if (evidence.firstTask.settingsPersisted !== true || !(evidence.firstTask.restartedThreadBytes > 0)) {
-              throw new Error('Packaged restart persistence evidence is incomplete')
-            }
-            if (!evidence.uninstall || evidence.uninstall.removed !== true) throw new Error('Packaged uninstall/removal evidence is missing')
-          NODE
+            expected_platform="macos"
+            if [[ "$key" == windows-* ]]; then expected_platform="windows"; fi
+            node app/scripts/verify-packaged-install-evidence.mjs \
+              "$evidence_dir/install-launch-restart-uninstall.json" \
+              "$expected_platform"
             platform="$(node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSync(process.argv[1], 'utf8')).platform)" "$evidence_dir/release-manifest.json")"
             manifest_arch="$(node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSync(process.argv[1], 'utf8')).arch)" "$evidence_dir/release-manifest.json")"
             test "$platform-${manifest_arch}" = "$key" || { echo "Manifest platform/arch mismatch for $report"; exit 1; }

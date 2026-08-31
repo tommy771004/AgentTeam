@@ -66,7 +66,14 @@ function RunChangedFilesCard({
   }
 
   return (
-    <section data-testid="run-summary-diff" data-summary-changes className="mt-2 overflow-hidden rounded-card border border-line bg-surface">
+    <section
+      data-testid="run-summary-diff"
+      data-summary-changes
+      data-changed-file-count={files.length}
+      data-additions={additions}
+      data-removals={removals}
+      className="mt-2 overflow-hidden rounded-card border border-line bg-surface"
+    >
       <div className="flex min-h-16 w-full items-center gap-3 border-b border-line px-3.5 py-3">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-control bg-inset text-ink-2">
           <Icon name="note_stack" size={19} />

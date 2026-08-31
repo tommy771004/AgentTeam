@@ -2,7 +2,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import {
+  PACKAGED_INSTALL_EVIDENCE_SCHEMA_VERSION,
+  buildPackagedFirstTaskEvidence,
+  validatePackagedInstallEvidence,
+} from './packaged-install-evidence.mjs'
 
 const args = process.argv.slice(2)
 function argument(name, fallback = '') {
@@ -61,9 +65,15 @@ function directoriesUnder(current) {
 }
 
 function writeEvidence(payload) {
+  const evidence = {
+    schemaVersion: PACKAGED_INSTALL_EVIDENCE_SCHEMA_VERSION,
+    ...payload,
+  }
+  const validation = validatePackagedInstallEvidence(evidence, platform)
+  if (!validation.ok) throw new Error(validation.reason)
   fs.writeFileSync(
     path.join(evidenceDir, 'install-launch-restart-uninstall.json'),
-    `${JSON.stringify(payload, null, 2)}\n`,
+    `${JSON.stringify(evidence, null, 2)}\n`,
     'utf8',
   )
 }
@@ -163,13 +173,19 @@ async function runPackagedFirstTask(executable, platform, userDataDir, smokeProj
     if (!firstTaskSession) throw new Error('First task did not settle a Pi Host session')
     await page.locator('[data-testid="run-summary-card"] > button').first().click()
     await page.waitForSelector('[data-testid="run-summary-diff"]', { state: 'attached', timeout: 120000 })
-    const changeStats = await page.locator('[data-testid="run-summary-diff"]').innerText()
+    const changeMetrics = await page.locator('[data-testid="run-summary-diff"]').evaluate((element) => ({
+      changedFileCount: Number(element.getAttribute('data-changed-file-count')),
+      additions: Number(element.getAttribute('data-additions')),
+      removals: Number(element.getAttribute('data-removals')),
+    }))
     await page.getByRole('button', { name: '查看本次執行的變更' }).click()
     const diffViewer = page.getByRole('main', { name: 'Diff viewer' })
     await diffViewer.waitFor({ state: 'visible', timeout: 120000 })
+    const changedLines = diffViewer.locator('[data-diff-line="add"], [data-diff-line="remove"]')
+    await changedLines.first().waitFor({ state: 'visible', timeout: 120000 })
+    const changedLineTexts = await changedLines.allInnerTexts()
     const resultVisible = await page.locator('[data-testid="run-summary-card"]').count() > 0
-    const diffVisible = /\+\d+/.test(changeStats) && /-\d+/.test(changeStats)
-    if (!resultVisible || !diffVisible) throw new Error('First task result or Git Diff was not visible')
+    if (!resultVisible || changedLineTexts.length === 0) throw new Error('First task result or change review was not visible')
     await app.close()
     app = undefined
 
@@ -216,16 +232,15 @@ async function runPackagedFirstTask(executable, platform, userDataDir, smokeProj
     }
     await restarted.close()
     restarted = undefined
-    return {
-      objective,
+    return buildPackagedFirstTaskEvidence({
       resultVisible,
-      diffVisible,
-      changePreview: changeStats.slice(0, 600),
+      ...changeMetrics,
+      changedLines: changedLineTexts,
       firstTaskSessionMessages: firstTaskSession.messages.length,
       settingsPersisted: Boolean(firstRun.settingsState && afterRestart.settingsState === firstRun.settingsState),
       restartedSessionMessages: restoredSession.messages.length,
       platform,
-    }
+    })
   } finally {
     await restarted?.close().catch(() => {})
     await app?.close().catch(() => {})

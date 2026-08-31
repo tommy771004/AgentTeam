@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import {
   buildReleaseQualification,
   type ReleaseQualificationInput,
 } from '../src/agent/releaseQualification.ts'
 import { buildQualificationInputFromEvidence } from './release-qualification-input.mts'
+import {
+  PACKAGED_INSTALL_EVIDENCE_SCHEMA_VERSION,
+  buildPackagedFirstTaskEvidence,
+} from './packaged-install-evidence.mjs'
 
 const incomplete: ReleaseQualificationInput = {
   releaseVersion: '1.0.0-beta',
@@ -54,4 +61,49 @@ assert.equal(missingEvidence.platforms.length, 0)
 assert.equal(missingEvidence.recovery.restart, false)
 assert.equal(missingEvidence.trust.checksums, false)
 
-console.log('release-qualification smoke: 11 assertions passed')
+const evidenceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'packaged-qualification-input-'))
+try {
+  await fs.writeFile(path.join(evidenceRoot, 'release-manifest.json'), JSON.stringify({
+    platform: 'macos',
+    arch: 'arm64',
+    artifacts: [{ name: 'AgentStudio.dmg' }],
+    checksums: 'checksums.txt',
+    provenance: { commit: 'fixture' },
+  }))
+  const currentInstall = {
+    schemaVersion: PACKAGED_INSTALL_EVIDENCE_SCHEMA_VERSION,
+    platform: 'macos',
+    firstTask: buildPackagedFirstTaskEvidence({
+      resultVisible: true,
+      changedFileCount: 1,
+      additions: 2,
+      removals: 1,
+      changedLines: ['reports/packaged-smoke-report.md', 'Packaged runtime wrote this report.'],
+      firstTaskSessionMessages: 2,
+      settingsPersisted: true,
+      restartedSessionMessages: 2,
+      platform: 'macos',
+    }),
+    uninstall: { removed: true },
+  }
+  await fs.writeFile(
+    path.join(evidenceRoot, 'install-launch-restart-uninstall.json'),
+    JSON.stringify(currentInstall),
+  )
+  const currentInput = await buildQualificationInputFromEvidence({ evidenceRoot })
+  assert.equal(currentInput.platforms[0]?.firstRunTask, true)
+  assert.equal(currentInput.platforms[0]?.cleanInstall, true)
+
+  await fs.writeFile(path.join(evidenceRoot, 'install-launch-restart-uninstall.json'), JSON.stringify({
+    platform: 'macos',
+    firstTask: { resultVisible: true, diffVisible: true, diffPreview: 'diff --git a/a b/a' },
+    uninstall: { removed: true },
+  }))
+  const legacyInput = await buildQualificationInputFromEvidence({ evidenceRoot })
+  assert.equal(legacyInput.platforms[0]?.firstRunTask, false)
+  assert.equal(legacyInput.platforms[0]?.cleanInstall, false)
+} finally {
+  await fs.rm(evidenceRoot, { recursive: true, force: true })
+}
+
+console.log('release-qualification smoke: 15 assertions passed')
