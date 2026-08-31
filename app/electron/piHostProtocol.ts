@@ -72,7 +72,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'packages/list' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'agents/spawn' | 'agents/send' | 'agents/mailbox' | 'agents/ack' | 'agents/follow-up' | 'agents/wait' | 'agents/lease/resolve' | 'agents/interrupt' | 'agents/cancel' | 'agents/close' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/update' | 'runs/reorder' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'packages/list' | 'packages/install' | 'packages/remove' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'agents/spawn' | 'agents/send' | 'agents/mailbox' | 'agents/ack' | 'agents/follow-up' | 'agents/wait' | 'agents/lease/resolve' | 'agents/interrupt' | 'agents/cancel' | 'agents/close' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/update' | 'runs/reorder' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
     | 'review/v1/finalize' | 'review/v1/read' | 'review/v1/payload-page' | 'review/v1/describe' | 'review/v1/files' | 'review/v1/file-diff' | 'review/v1/refresh' | 'review/v1/comments/list' | 'review/v1/draft/save' | 'review/v1/draft/delete' | 'review/v1/comment/transition' | 'review/v1/file-state/list' | 'review/v1/file-state/mark' | 'review/v1/state/inherit' | 'review/v1/feedback/prepare' | 'review/v1/feedback/claim' | 'review/v1/feedback/release' | 'review/v1/verification/list' | 'review/v1/verification/run' | 'review/v1/verification/output' | 'review/v1/mutation/preview' | 'review/v1/mutation/apply' | 'review/v1/delivery/preview' | 'review/v1/delivery/apply' | 'review/v1/artifact/export' | 'review/v1/artifact/import-preview' | 'review/v1/artifact/import-apply' | 'review/v1/artifact/rebind' | 'review/v1/artifact/retention' | 'review/v1/artifact/hard-delete'
   params: Record<string, unknown>
 }
@@ -130,6 +130,7 @@ export type PiHostResponse = {
     diagnostics?: Array<{ path: string; message?: unknown }>
     packages?: import('./piPackageDomain.ts').PiPackageInventoryItem[]
     packageDiagnostics?: import('./piPackageDomain.ts').PiPackageDiagnostic[]
+    packageMutation?: { action: import('./piPackageDomain.ts').PiPackageMutationAction; source: string }
     report?: { skillsDir?: string; results?: PiSkillSyncResult[] }
     /** The Host skills directory projected back out for renderer hydration (resources/read-skill-files). */
     files?: import('./piSkills.ts').PiSkillCatalogFile[]
@@ -348,7 +349,7 @@ export type PiHostMessage = PiHostResponse | PiHostEvent
 
 import { compileEffectiveAgentProfile, validatePiSettingsPatch, DEFAULT_PI_SETTINGS, type PiSettings } from './piAgentProfile.ts'
 import type { StreamingUpdate } from '../src/agent/subdesign/streamingEnvelope.ts'
-import { cancelPiTool, cancelPiTurn, compactPiSession, disposePiSession, executePiTool, getPiSessionFile, interruptPiTurn, persistPiLegacyCredential, persistPiLegacyModelConfig, piCoreRuntimeStatus, piCoreRuntimeToolCatalog, piProviderDefaultBaseUrl, readPiLegacyProviderBaseUrl, runPiTurn, steerPiTurn, type PiBuiltinToolName, type PiTurnInterruptReason } from './piCoreRuntime.ts'
+import { cancelPiTool, cancelPiTurn, compactPiSession, disposeAllPiSessions, disposePiSession, executePiTool, getPiSessionFile, interruptPiTurn, persistPiLegacyCredential, persistPiLegacyModelConfig, piCoreRuntimeStatus, piCoreRuntimeToolCatalog, piProviderDefaultBaseUrl, readPiLegacyProviderBaseUrl, runPiTurn, steerPiTurn, type PiBuiltinToolName, type PiTurnInterruptReason } from './piCoreRuntime.ts'
 import { cancelPiCodeMode, runPiCodeMode } from './piCodeMode.ts'
 import { armTurnDeadline, clampTurnTimeout, systemTurnDeadlineClock, toolExecutionDeadlineLeaseMs, type TurnDeadlineClock } from './piTurnDeadline.ts'
 import { PiRunQueue, type PiQueuedRun } from './piRunQueue.ts'
@@ -384,7 +385,7 @@ import { settlePiRunLearning, type PiRunLearningSettlement } from './piRunLearni
 import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
 import { handlePiHostCapabilityDomain } from './piHostCapabilityDomain.ts'
 import { handlePiHostResourceDomain } from './piHostResourceDomain.ts'
-import { listPiPackageInventory } from './piPackageDomain.ts'
+import { listPiPackageInventory, mutatePiPackage, PiPackageDomainError } from './piPackageDomain.ts'
 import { handlePiHostExtensionDomain } from './piHostExtensionDomain.ts'
 import { runPiOrchestration, type PiLoopPattern, type PiOrchestrationTurn } from './piOrchestrationExtension.ts'
 import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
@@ -821,6 +822,7 @@ const errorResponse = (
 
 /** A session is the serialization boundary for Pi turns. */
 const activeSessionRuns = new Map<string, { runId: string; cancelled: boolean; interrupt?: PiTurnInterruptReason }>()
+let packageMutationInFlight = false
 const PI_HOST_TOOL_UPDATE_MAX_BYTES = 16_384
 
 async function prepareHostLlmEgress(input: {
@@ -4913,10 +4915,43 @@ export function handlePiHostRequest(
   const boundedReadResponse = handleBoundedHostRead(state, input, id)
   if (boundedReadResponse) return boundedReadResponse
   if (input.method === 'packages/list') {
+    if (packageMutationInFlight) return [errorResponse(id, 'busy', 'Pi package state is changing; retry after the current operation settles')]
     return listPiPackageInventory().then((inventory) => [{
       id,
       result: { packages: inventory.packages, packageDiagnostics: inventory.diagnostics },
     }])
+  }
+  if (input.method === 'packages/install' || input.method === 'packages/remove') {
+    const action = input.method === 'packages/install' ? 'install' : 'remove'
+    if (input.params?.scope !== undefined && input.params.scope !== 'user') {
+      return [errorResponse(id, 'invalid_request', 'Only user-scope Pi package mutations are supported')]
+    }
+    if (action === 'install' && input.params?.trusted !== true) {
+      return [errorResponse(id, 'forbidden', 'Explicit trust confirmation is required before installing a Pi package')]
+    }
+    if (packageMutationInFlight) return [errorResponse(id, 'busy', 'Another Pi package mutation is already running')]
+    if (activeSessionRuns.size > 0 || activeTurnRecorders.size > 0) {
+      return [errorResponse(id, 'busy', 'Pi packages cannot change while a Pi run is active')]
+    }
+    packageMutationInFlight = true
+    return mutatePiPackage(action, input.params?.source)
+      .then(async (mutation) => {
+        await disposeAllPiSessions()
+        return [{
+          id,
+          result: {
+            packages: mutation.inventory.packages,
+            packageDiagnostics: mutation.inventory.diagnostics,
+            packageMutation: { action: mutation.action, source: mutation.source },
+          },
+        }]
+      })
+      .catch((error: unknown) => {
+        const code = error instanceof PiPackageDomainError ? error.code : 'runtime_error'
+        const message = error instanceof Error ? error.message : `Unable to ${action} Pi package`
+        return [errorResponse(id, code, message)]
+      })
+      .finally(() => { packageMutationInFlight = false })
   }
   const resourceResponse = handlePiHostResourceDomain({
     method: input.method,
@@ -4965,6 +5000,7 @@ export function handlePiHostRequest(
       : [errorResponse(id, 'invalid_request', `Unknown Pi run: ${runId}`)])
   }
   if (input.method === 'turn/submit') {
+    if (packageMutationInFlight) return [errorResponse(id, 'busy', 'A Pi package mutation is in progress')]
     const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
     const prompt = typeof input.params?.prompt === 'string' ? input.params.prompt : ''
     const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)

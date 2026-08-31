@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Icon } from '../Icon'
 import { useSettingsStore } from '../../store/settingsStore'
 import {
@@ -7,6 +7,7 @@ import {
   SettingsRow,
   SettingsStack,
   SettingsToggle,
+  settingsBtnCls,
   settingsBtnPrimaryCls,
   settingsInputCls,
 } from './SettingsChrome'
@@ -107,7 +108,29 @@ export function PiCoreSettingsSection() {
   const [packages, setPackages] = useState<PiPackageView[]>([])
   const [packageStatus, setPackageStatus] = useState<PiPackageLoadStatus>('loading')
   const [packageMessage, setPackageMessage] = useState('')
+  const [packageSource, setPackageSource] = useState('')
+  const [packageMutating, setPackageMutating] = useState(false)
+  const [packageOperationMessage, setPackageOperationMessage] = useState('')
   const [configStatus, setConfigStatus] = useState<PiConfigStatus | undefined>()
+
+  const refreshPackages = useCallback(async (showLoading = true) => {
+    const listPackages = window.subagents?.piHost?.packages?.list
+    if (!listPackages) {
+      setPackageStatus('unavailable')
+      return
+    }
+    if (showLoading) setPackageStatus('loading')
+    try {
+      const result = await listPackages()
+      setPackages(result.packages || [])
+      setPackageMessage(result.diagnostics?.[0]?.message || '')
+      setPackageStatus('ready')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '無法讀取 Pi Packages'
+      setPackageMessage(message)
+      setPackageStatus(/unknown|unsupported|protocol|not running/i.test(message) ? 'unavailable' : 'error')
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -123,24 +146,9 @@ export function PiCoreSettingsSection() {
     void window.subagents?.piHost?.extensions?.list?.().then((result) => {
       if (active) setExtensions((result.extensions || []) as PiExtensionView[])
     }).catch(() => { /* extensions are optional in older Hosts */ })
-    const listPackages = window.subagents?.piHost?.packages?.list
-    if (!listPackages) {
-      setPackageStatus('unavailable')
-    } else {
-      void listPackages().then((result) => {
-        if (!active) return
-        setPackages(result.packages || [])
-        setPackageMessage(result.diagnostics?.[0]?.message || '')
-        setPackageStatus('ready')
-      }).catch((error: unknown) => {
-        if (!active) return
-        const message = error instanceof Error ? error.message : '無法讀取 Pi Packages'
-        setPackageMessage(message)
-        setPackageStatus(/unknown|unsupported|protocol|not running/i.test(message) ? 'unavailable' : 'error')
-      })
-    }
+    void refreshPackages()
     return () => { active = false }
-  }, [syncPiHostSettings])
+  }, [refreshPackages, syncPiHostSettings])
 
   const toggleTool = (tool: string) => {
     setDraft((current) => ({
@@ -168,7 +176,54 @@ export function PiCoreSettingsSection() {
     }
   }
 
+  const installPackage = async () => {
+    const source = packageSource.trim()
+    const install = window.subagents?.piHost?.packages?.install
+    if (!source || !install) return
+    const confirmed = window.confirm(
+      `確定安裝 ${source}？\n\n此 package、npm lifecycle scripts 與 extensions 不是 sandbox，可能取得完整 filesystem、process、network、environment 與 credentials 權限。`,
+    )
+    if (!confirmed) return
+    setPackageMutating(true)
+    setPackageOperationMessage('安裝中…')
+    try {
+      const result = await install({ source, trusted: true })
+      setPackages(result.packages || [])
+      setPackageMessage(result.diagnostics?.[0]?.message || '')
+      setPackageStatus('ready')
+      setPackageSource('')
+      setPackageOperationMessage(`已安裝 ${result.mutation?.source || source}；下一輪 Pi run 會載入新 state`)
+    } catch (error) {
+      setPackageOperationMessage(error instanceof Error ? `安裝失敗：${error.message}` : '安裝失敗')
+      await refreshPackages(false)
+    } finally {
+      setPackageMutating(false)
+    }
+  }
+
+  const removePackage = async (source: string) => {
+    const remove = window.subagents?.piHost?.packages?.remove
+    if (!remove) return
+    const confirmed = window.confirm(`確定移除 ${source}？npm uninstall lifecycle scripts 也可能以完整本機權限執行。`)
+    if (!confirmed) return
+    setPackageMutating(true)
+    setPackageOperationMessage('移除中…')
+    try {
+      const result = await remove({ source })
+      setPackages(result.packages || [])
+      setPackageMessage(result.diagnostics?.[0]?.message || '')
+      setPackageStatus('ready')
+      setPackageOperationMessage(`已移除 ${result.mutation?.source || source}；下一輪 Pi run 會載入新 state`)
+    } catch (error) {
+      setPackageOperationMessage(error instanceof Error ? `移除失敗：${error.message}` : '移除失敗')
+      await refreshPackages(false)
+    } finally {
+      setPackageMutating(false)
+    }
+  }
+
   const mcpExtensions = extensions.filter((extension) => extension.kind === 'mcp')
+  const packageMutationAvailable = Boolean(window.subagents?.piHost?.packages?.install && window.subagents?.piHost?.packages?.remove)
 
   return (
     <div className="space-y-1">
@@ -248,6 +303,33 @@ export function PiCoreSettingsSection() {
         ))}
       </SettingsGroup>
       <SettingsGroup title="Pi Packages" action={<span className="text-[11px] text-outline">Pi Host 真實狀態</span>}>
+        <SettingsStack
+          title="安裝 pinned npm package"
+          description="只接受 npm:<name>@<exact-version>，安裝於 user scope；不提供 update、git、URL 或 local path。"
+        >
+          <div role="note" className="text-[11px] leading-relaxed text-danger">
+            完整信任：Package、npm lifecycle scripts 與 extensions 不是 sandbox，可能存取 filesystem、process、network、environment 與 credentials。
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              className={settingsInputCls}
+              value={packageSource}
+              disabled={packageMutating || !packageMutationAvailable}
+              placeholder="npm:@scope/package@1.2.3"
+              onChange={(event) => setPackageSource(event.target.value)}
+            />
+            <button
+              type="button"
+              className={settingsBtnPrimaryCls}
+              disabled={packageMutating || !packageMutationAvailable || !packageSource.trim()}
+              onClick={() => void installPackage()}
+            >
+              {packageMutating ? '處理中…' : '確認並安裝'}
+            </button>
+          </div>
+          {!packageMutationAvailable && packageStatus !== 'loading' && <span className="text-[11px] text-outline">目前 Pi Host 僅支援唯讀 package inventory</span>}
+          {packageOperationMessage && <span role="status" className="text-[11px] text-outline">{packageOperationMessage}</span>}
+        </SettingsStack>
         {packageStatus === 'loading' && <span className="text-[11px] text-outline">載入中…</span>}
         {packageStatus === 'unavailable' && <span className="text-[11px] text-outline">目前 Pi Host 不支援 Packages{packageMessage ? ` · ${packageMessage}` : ''}</span>}
         {packageStatus === 'error' && <span role="status" className="text-[11px] text-danger">無法讀取 Pi Packages{packageMessage ? ` · ${packageMessage}` : ''}</span>}
@@ -257,7 +339,16 @@ export function PiCoreSettingsSection() {
             key={`${item.scope}:${item.source}`}
             title={`${item.name || item.source} · ${item.version || '版本未知'}`}
             description={`${item.source} · ${item.installed ? '已安裝' : '設定存在，檔案缺失'} · ${piPackageResourcesLabel(item)}${item.filtered ? ' · 已套用 resource filters' : ''}${item.diagnostics[0]?.message ? ` · ${item.diagnostics[0].message}` : ''}`}
-            control={<span className="text-[11px] text-outline">User scope</span>}
+            control={packageMutationAvailable ? (
+              <button
+                type="button"
+                className={settingsBtnCls}
+                disabled={packageMutating}
+                onClick={() => void removePackage(item.source)}
+              >
+                移除
+              </button>
+            ) : <span className="text-[11px] text-outline">User scope</span>}
           />
         ))}
         {packageStatus === 'ready' && packages.length > 0 && packageMessage && <span role="status" className="text-[11px] text-outline">{packageMessage}</span>}

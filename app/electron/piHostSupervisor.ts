@@ -525,6 +525,26 @@ export class PiHostSupervisor {
     }
   }
 
+  async installPackage(source: string, trusted: boolean) {
+    const response = await this.request('packages/install', { source, scope: 'user', trusted })
+    if (response.error || !response.result?.packages) throw new Error(response.error?.message || 'Pi package installation failed')
+    return {
+      packages: response.result.packages,
+      diagnostics: response.result.packageDiagnostics || [],
+      mutation: response.result.packageMutation,
+    }
+  }
+
+  async removePackage(source: string) {
+    const response = await this.request('packages/remove', { source, scope: 'user' })
+    if (response.error || !response.result?.packages) throw new Error(response.error?.message || 'Pi package removal failed')
+    return {
+      packages: response.result.packages,
+      diagnostics: response.result.packageDiagnostics || [],
+      mutation: response.result.packageMutation,
+    }
+  }
+
   async reloadResources(resources: unknown[]): Promise<NonNullable<PiHostResponse['result']>['resources']> {
     const response = await this.request('resources/reload', { resources })
     if (response.error || !response.result?.resources) throw new Error(response.error?.message || 'Pi resource reload failed')
@@ -796,7 +816,9 @@ export class PiHostSupervisor {
     }
     const id = this.nextRequestId++
     return new Promise((resolve, reject) => {
-      const timeoutMs = method === 'turn/submit' || method === 'review/v1/verification/run' ? this.turnIdleTimeoutMs : this.requestTimeoutMs
+      const timeoutMs = method === 'turn/submit' || method === 'review/v1/verification/run' || method === 'packages/install' || method === 'packages/remove'
+        ? this.turnIdleTimeoutMs
+        : this.requestTimeoutMs
       const waiter: PendingRequest = {
         resolve,
         reject,

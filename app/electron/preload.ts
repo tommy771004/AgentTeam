@@ -200,6 +200,16 @@ const api = {
           packages: PiPackageInventoryItem[]
           diagnostics: PiPackageDiagnostic[]
         }>,
+        install: (input: { source: string; trusted: boolean }) => ipcRenderer.invoke('pi-host:packages:install', input) as Promise<{
+          packages: PiPackageInventoryItem[]
+          diagnostics: PiPackageDiagnostic[]
+          mutation?: { action: 'install'; source: string }
+        }>,
+        remove: (input: { source: string }) => ipcRenderer.invoke('pi-host:packages:remove', input) as Promise<{
+          packages: PiPackageInventoryItem[]
+          diagnostics: PiPackageDiagnostic[]
+          mutation?: { action: 'remove'; source: string }
+        }>,
       },
       resources: {
         list: () => ipcRenderer.invoke('pi-host:resources:list') as Promise<{ resources?: Array<{ id: string; kind: string; source: string; enabled: boolean; reason?: string }>; diagnostics?: Array<{ path: string; message?: unknown }> }>,

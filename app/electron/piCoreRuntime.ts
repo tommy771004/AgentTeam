@@ -839,13 +839,18 @@ export async function disposePiSession(sessionId: string, preservePreflightTombs
   try {
     await runtime.session.dispose?.()
   } finally {
-    // Runtime replacement passes `true` above so the next successful runtime
-    // owns this root. Final session disposal remains the terminal cleanup
-    // owner and removes it only when no replacement is taking over.
-    if (!preservePreflightTombstones && runtime.skillSnapshotRoot) {
-      await rm(runtime.skillSnapshotRoot, { recursive: true, force: true })
+    try {
+      // Runtime replacement passes `true` above so the next successful runtime
+      // owns this root. Final session disposal remains the terminal cleanup
+      // owner and removes it only when no replacement is taking over.
+      if (!preservePreflightTombstones && runtime.skillSnapshotRoot) {
+        await rm(runtime.skillSnapshotRoot, { recursive: true, force: true })
+      }
+    } finally {
+      // Package mutations must invalidate the runtime even if snapshot cleanup
+      // reports an I/O failure; the next run must never reuse stale resources.
+      sessionRuntimes.delete(sessionId)
     }
-    sessionRuntimes.delete(sessionId)
   }
 }
 
