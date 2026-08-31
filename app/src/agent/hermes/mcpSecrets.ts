@@ -32,18 +32,9 @@ export const MCP_SECRET_ENV_KEYS: Record<string, string[]> = {
 }
 
 function secretForPlugin(pluginId: string): string {
-  // On Electron, send a placeholder; mcpBridge resolves the raw token.
-  // from the main-process vault at spawn time (never through the renderer).
-  const hasVault = Boolean(
-    (globalThis as unknown as { subagents?: { secrets?: unknown } }).subagents?.secrets,
-  )
-  if (hasVault) {
-    if (hasToolCredential(pluginId)) {
-      return `{{secret:${pluginId}}}`
-    }
-    return ''
-  }
-  return ''
+  // Renderer projects availability only and always passes a reference. Electron
+  // main resolves it at process spawn; browser preview cannot execute MCP.
+  return hasToolCredential(pluginId) ? `{{secret:${pluginId}}}` : ''
 }
 
 /** Resolve which id to use for secret lookup */

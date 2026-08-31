@@ -21,6 +21,10 @@ export function createToolCredentialScope() {
   }
   const redactValue = (value: unknown): unknown => {
     if (typeof value === 'string') return redact(value)
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      const rendered = String(value)
+      return redact(rendered) === rendered ? value : '[REDACTED]'
+    }
     if (Array.isArray(value)) return value.map(redactValue)
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [redact(key), redactValue(item)]))
     return value

@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — Credential vault expand contract。
 
-**Status:** claimed
+**Status:** resolved
 
 - [x] Telegram 與 Webhook 的新 save/rotate/clear flow 全部經 vault typed intents。
 - [x] App restart 與 integration auto-start 從 vault reference 取得 credential，不再讀 legacy raw fields。

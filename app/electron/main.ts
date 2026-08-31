@@ -39,7 +39,7 @@ import { handleCredentialVaultIntent } from './integrationCredentialVault'
 import type { CredentialVaultIntent } from './credentialVaultAuthority'
 import { migrateIntegrationCredentials, migrateIntegrationSettingsFile } from './integrationCredentialMigration'
 import { credentialBash, credentialHttpRequest, createToolCredentialScope } from './customToolCredentials'
-import { legacyIntegrationCredentials, withoutIntegrationCredentials } from '../src/agent/integrationCredentials'
+import { hasLegacyCustomToolCredentials, legacyIntegrationCredentials, withoutIntegrationCredentials } from '../src/agent/integrationCredentials'
 import {
   decidePermissionRequest,
   isAllowedNavigationUrl,
@@ -4900,7 +4900,7 @@ ipcMain.handle('credentials:migrateLegacy', async (_evt, legacy: unknown) => {
   try {
     migrateIntegrationSettingsFile(settingsPath())
     migrateIntegrationCredentials(legacyIntegrationCredentials(legacy))
-    if (Object.keys(legacyIntegrationCredentials(legacy)).some((field) => field === 'customToolSecrets' || field === 'encryptedCustomToolSecrets')) mcpStdioStopAll()
+    if (hasLegacyCustomToolCredentials(legacy)) mcpStdioStopAll()
     return { ok: true }
   } catch {
     return { ok: false, error: '憑證遷移失敗：原始資料已保留，請確認安全儲存後重試。' }

@@ -21,3 +21,8 @@ export function legacyIntegrationCredentials(value: unknown): Record<string, unk
     return typeof raw === 'string' && raw.trim() && raw !== '***REDACTED***' ? [[field, raw]] : []
   }))
 }
+
+export function hasLegacyCustomToolCredentials(value: unknown): boolean {
+  const legacy = legacyIntegrationCredentials(value)
+  return Object.keys(legacy).some((field) => field === LEGACY_CREDENTIAL_FIELDS[2] || field === LEGACY_CREDENTIAL_FIELDS[3])
+}

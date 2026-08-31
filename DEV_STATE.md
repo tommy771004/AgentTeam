@@ -2,6 +2,12 @@
 
 截至 2026-08-31。
 
+## 本日進展：Release qualification credential contract
+
+`.scratch/release-qualification-hardening` #05–#07 resolved。Telegram、Webhook 與 custom-tool credentials 現在以 stable `credential:*` refs 儲存於 main-process OS-backed vault；renderer settings、localStorage、bundle、Pi catalog 與 MCP session metadata 只保留設定狀態或 placeholder。Custom-tool HTTP、bash、MCP 於 main execution seam 最後一刻解析，成功／失敗回應、結構化值與截斷輸出均不反射 raw token；credential rotate／clear／legacy import 會失效既有 MCP session 並刷新 metadata projection。
+
+舊 flat／encrypted custom-tool fields 僅由 vault-first migration ingress 接受，寫入與讀回驗證完成後才 scrub；safeStorage unavailable、disk write failure 與 parse failure 均保留唯一舊 copy 並 fail closed。`npm run build`、`smoke:credential-vault`、security/caps、Marketplace placeholder E2E、scoped oxlint（僅四個既有 main warning）與完整 `npm run smoke` 全綠；Browser 複查確認無桌面 Vault 時欄位 disabled 且顯示清楚錯誤。下一 frontier 為 #08 atomic settings persistence；Paid Beta 仍是 NO-GO（0/43）。
+
 ## 本日資格重跑：External CLI 與 release gate
 
 `app/scripts/qualify-external-cli-real.mts` 已從 shipped admission／adapter owner 重跑並保存 metadata-only evidence。Codex CLI 0.150.1 process exit 0，active checkpoint、restart projection 與 Turn Record 通過，但原生 `AGENTS.md` marker 未出現，因此仍為 `native_discovery_unproven`；Claude Code 2.1.246 實際啟動後回報 `auth_unavailable`。兩者皆維持 unqualified，未由 process success 推導 DoD。本輪依使用者指示未做 Linux bwrap，也未安裝或登入 Grok／Gemini／Cursor。

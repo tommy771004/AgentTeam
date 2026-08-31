@@ -67,6 +67,10 @@ try {
       assert.deepEqual(result, { ok: true, content: '[REDACTED]' }, 'credential redaction must preserve JSON grammar')
     } finally { api.mcpStdioStopAll() }
   }
+  api.handleCredentialVaultIntent({ action: 'rotate', ref: 'credential:custom-tool:deploy', secret: '12345' })
+  const scalarScope = api.createToolCredentialScope()
+  scalarScope.resolve('{{secret:deploy}}')
+  assert.deepEqual(scalarScope.redactValue({ number: 12345, boolean: true }), { number: '[REDACTED]', boolean: true })
   const legacy = { telegramBotToken: 'telegram-MIGRATION-CANARY', webhookToken: 'webhook-MIGRATION-CANARY', customToolSecrets: { deploy: 'custom-LOCAL-CANARY' }, webhookPort: 8787 }
   const safe = api.migrateIntegrationCredentials(legacy)
   assert.deepEqual(safe, { webhookPort: 8787 })

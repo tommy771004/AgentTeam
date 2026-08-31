@@ -23,6 +23,8 @@ export type BashResult = {
   timedOut?: boolean
   cancelled?: boolean
   runId?: string
+  /** Output was clipped; credential-bearing callers must not expose partial tokens. */
+  outputTruncated?: boolean
 }
 
 type ActiveRun = {
@@ -45,8 +47,6 @@ export function listActiveBashRuns(): Array<{ runId: string; tag?: string }> {
 /** Kill one run, all runs with a tag, or everything */
 export function cancelBash(opts?: {
   runId?: string
-  /** Output was clipped; credential-bearing callers must not expose partial tokens. */
-  outputTruncated?: boolean
   tag?: string
 }): { ok: boolean; killed: number } {
   const targets = resolveActiveRunIds(opts)

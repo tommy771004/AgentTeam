@@ -88,7 +88,7 @@ async function main() {
   assert.ok(clickupConnectorTools().some((t) => t.name === 'clickup_list_tasks'))
   console.log('✓ connector HTTP tools defined')
 
-  // MCP env injection from pluginSecrets
+  // MCP configuration carries references; main resolves them at process spawn.
   setPluginSecret('github-connector', 'ghp_test_secret_token')
   const enriched = enrichMcpServerWithSecrets({
     id: 'mcp-github',
@@ -100,8 +100,8 @@ async function main() {
     pluginId: 'github-connector',
     env: { ELECTRON_RUN_AS_NODE: '1' },
   })
-  assert.equal(enriched.env?.GITHUB_PERSONAL_ACCESS_TOKEN, 'ghp_test_secret_token')
-  assert.equal(enriched.env?.GITHUB_TOKEN, 'ghp_test_secret_token')
+  assert.equal(enriched.env?.GITHUB_PERSONAL_ACCESS_TOKEN, '{{secret:github-connector}}')
+  assert.equal(enriched.env?.GITHUB_TOKEN, '{{secret:github-connector}}')
   clearPluginSecret('github-connector')
   // Postgres-style args placeholder
   setPluginSecret('postgres-dsn', 'postgresql://readonly@localhost/db')
@@ -114,9 +114,9 @@ async function main() {
     args: ['${secret}'],
     pluginId: 'postgres-dsn',
   })
-  assert.equal(pg.args?.[0], 'postgresql://readonly@localhost/db')
+  assert.equal(pg.args?.[0], '{{secret:postgres-dsn}}')
   clearPluginSecret('postgres-dsn')
-  console.log('✓ MCP secret env injection + args ${secret}')
+  console.log('✓ MCP credential-reference env injection + args ${secret}')
 
   // Regression: package pluginId must not steal secret ownership after "sync"
   setPluginSecret('github-connector', 'ghp_sync_regression_token')
@@ -137,8 +137,8 @@ async function main() {
   }
   assert.equal(resolveMcpSecretOwnerId(afterSyncLike), 'github-connector')
   const filled = enrichMcpServerWithSecrets(afterSyncLike)
-  assert.equal(filled.env?.GITHUB_TOKEN, 'ghp_sync_regression_token')
-  assert.equal(filled.env?.GITHUB_PERSONAL_ACCESS_TOKEN, 'ghp_sync_regression_token')
+  assert.equal(filled.env?.GITHUB_TOKEN, '{{secret:github-connector}}')
+  assert.equal(filled.env?.GITHUB_PERSONAL_ACCESS_TOKEN, '{{secret:github-connector}}')
   // Legacy broken shape: only pluginId=package, no secretPluginId — guess still works
   const legacyBroken: McpServerConfig = {
     ...afterSyncLike,
