@@ -27,6 +27,7 @@ import type { ReviewTarget } from '../agent/reviewContract.ts'
 import { WorkingStateDiagnostics } from './WorkingStateView'
 import { projectRunStatusSurface, type RunStatusSurfaceInput } from '../agent/runStatusSurface.ts'
 import { RunStatusSurface } from './RunStatusSurface.tsx'
+import { RunWorktreeSummary } from './ProjectContextBar.tsx'
 
 /**
  * CloudCLI-style embedded run progress — no page navigation.
@@ -286,6 +287,7 @@ export function InlineRunPanel({
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
   const activity = useRunActivityStore((s) => s.presentations[runId]) || EMPTY_ACTIVITY
   const persistedRunPlan = useThreadStore((state) => state.threads.find((thread) => thread.id === threadId)?.runPlan)
+  const projectRoot = useThreadStore((state) => state.threads.find((thread) => thread.id === threadId)?.projectRoot)
   const workingStateProjection = useWorkingStateProjectionStore((state) => state.byRunId[runId])
   const approvalPending = usePermissionAskStore((s) =>
     Boolean(
@@ -380,6 +382,7 @@ export function InlineRunPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+        <RunWorktreeSummary projectRoot={projectRoot} />
         <RunStatusSurface projection={statusSurface} startedAt={activity.startedAt} />
 
         <PanelSection

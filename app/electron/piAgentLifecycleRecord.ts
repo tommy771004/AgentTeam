@@ -6,6 +6,21 @@ import type { SessionRecord } from './piHostProtocol.ts'
 
 type LifecycleCarrier = { kind: string; event?: unknown }
 
+/** True when this run already carries the exact Host-authored lifecycle fact. */
+export function hasRecordedAgentLifecycle(
+  sessions: readonly SessionRecord[],
+  sessionId: string,
+  state: AgentLifecycleState,
+  runId?: string,
+): boolean {
+  const session = sessions.find((candidate) => candidate.id === sessionId)
+  if (!session) return false
+  return turnRecordEntries(session.record).some((entry) => entry.kind === 'agent-lifecycle'
+    && isAgentLifecycleEvent(entry.event)
+    && entry.event.state === state
+    && entry.event.runId === runId)
+}
+
 export function agentLifecycleEventForSession(
   sessions: readonly SessionRecord[],
   sessionId: string,

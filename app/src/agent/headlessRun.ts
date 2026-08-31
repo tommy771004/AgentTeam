@@ -1,5 +1,6 @@
 /**
- * Development/evaluation-only Node seam.
+ * Development/evaluation-only Node seam; it is not a product distribution
+ * surface (ADR-0046).
  *
  * This module deliberately exposes the coordinator, not a second runner. It
  * installs only the smallest Electron-shaped globals needed by renderer-safe

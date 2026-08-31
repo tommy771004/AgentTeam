@@ -6,15 +6,11 @@ Status: needs-info / unqualified
 
 ## Evidence availability
 
-This is a reconstructed tracking summary, not the missing original qualification
-report. On 2026-08-31, the referenced report was absent from the checkout and no
-committed copy was found in the available Git history. An explicit `.gitignore`
-entry excluded it while the tracked index, tickets, DEV_STATE and ADR linked to
-it. That ignore entry has been removed so this summary can travel with the repo.
+本檔保留 implementation qualification 摘要；外部 provider 的最新真機證據由
+[`../external-cli-durable-harness/evidence/real-cli-qualification.md`](../external-cli-durable-harness/evidence/real-cli-qualification.md)
+承載。2026-08-31 已從 shipped admission／adapter owner 重跑，報告只保存 metadata、hash、lifecycle 與安全 argv，不保存 prompt／output body／credentials。
 
-The historical results below are statements recorded in the linked tickets;
-this summary does not supply missing logs, screenshots or independent proof of
-those results. It must not be treated as fresh release approval.
+此證據是 fresh NO-GO qualification，不是 release approval。
 
 ## Recorded local implementation status
 
@@ -26,17 +22,14 @@ been independently revalidated by reconstructing this document.
 
 ## External qualification remains open
 
-[Ticket 11](issues/11-external-cli-instruction-delivery-modes.md) records:
+2026-08-31 fresh real-machine result：
 
-| Provider | Recorded limitation | Qualification |
-|----------|---------------------|---------------|
-| Codex | `native_discovery_unproven` | unqualified |
-| Claude | `auth_unavailable` | unqualified |
+| Provider | Runtime result | Limitation | Qualification |
+|----------|----------------|------------|---------------|
+| Codex CLI 0.150.1 | exit 0；checkpoint、restart projection、Turn Record 通過 | native marker 未出現：`native_discovery_unproven` | unqualified |
+| Claude Code 2.1.246 | 實際啟動後 exit 1 | `auth_unavailable` | unqualified |
 
-The native-discovery acceptance remains unchecked. Do not mark the effort
-resolved or infer Definition of Done from CLI success. Completion requires real
-provider qualification with retained evidence; fixing this report's repository
-availability does not satisfy that requirement.
+Native-discovery acceptance remains unchecked。不得由 CLI process success 推導 Definition of Done；Claude 也不得在未登入時冒充已測。完整 metadata-only report 見上方連結。
 
 ## Repository-link repair verification
 

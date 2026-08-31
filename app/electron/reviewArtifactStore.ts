@@ -99,7 +99,7 @@ export interface ReviewArtifactStore {
   previewImport(bundle: unknown): Promise<ReviewArtifactImportPreview>
   importArtifact(bundle: unknown, expectedBundleHash: string): Promise<ReviewArtifactProjection>
   recoverInterrupted(): Promise<ReviewArtifactRecoveryReport>
-  applyRetention(input: { retainedSnapshotIds: string[]; reason: string; olderThan?: string }): Promise<ReviewArtifactRetentionReport>
+  applyRetention(input: { retainedSnapshotIds: string[]; retainedThreadIds?: string[]; reason: string; olderThan?: string }): Promise<ReviewArtifactRetentionReport>
   hardDeleteArtifact(snapshotId: string): Promise<void>
   rebindWorkspace(snapshotId: string, projectRoot: string, reboundAt?: string): Promise<ReviewArtifactProjection>
   close(): Promise<void>
@@ -440,15 +440,16 @@ export class InMemoryReviewArtifactStore implements ReviewArtifactStore {
     return { recovered }
   }
 
-  async applyRetention(input: { retainedSnapshotIds: string[]; reason: string; olderThan?: string }): Promise<ReviewArtifactRetentionReport> {
+  async applyRetention(input: { retainedSnapshotIds: string[]; retainedThreadIds?: string[]; reason: string; olderThan?: string }): Promise<ReviewArtifactRetentionReport> {
     this.ensureOpen()
     const protectedIds = new Set(input.retainedSnapshotIds)
+    const protectedThreads = new Set(input.retainedThreadIds || [])
     const retained: string[] = []
     const tombstoned: string[] = []
     for (const record of [...this.records.values()]) {
       const capturedAt = record.admission.baseline?.capturedAt || ''
       const referenced = record.commentRefs.length > 0 || record.reviewStateRefs.length > 0
-      if (protectedIds.has(record.snapshotId) || referenced || record.status === 'deleted' || (input.olderThan && capturedAt >= input.olderThan)) { retained.push(record.snapshotId); continue }
+      if (protectedIds.has(record.snapshotId) || protectedThreads.has(record.threadId) || referenced || record.status === 'deleted' || (input.olderThan && capturedAt >= input.olderThan)) { retained.push(record.snapshotId); continue }
       await this.deleteArtifact(record.snapshotId, input.reason)
       tombstoned.push(record.snapshotId)
     }
@@ -722,9 +723,10 @@ export class SqliteReviewArtifactStore implements ReviewArtifactStore {
     return { recovered }
   }
 
-  async applyRetention(input: { retainedSnapshotIds: string[]; reason: string; olderThan?: string }): Promise<ReviewArtifactRetentionReport> {
+  async applyRetention(input: { retainedSnapshotIds: string[]; retainedThreadIds?: string[]; reason: string; olderThan?: string }): Promise<ReviewArtifactRetentionReport> {
     this.ensureOpen()
     const protectedIds = new Set(input.retainedSnapshotIds)
+    const protectedThreads = new Set(input.retainedThreadIds || [])
     const rows = this.db.prepare('SELECT snapshot_id,metadata_json,status FROM review_snapshots').all() as Array<{ snapshot_id: string; metadata_json: string; status: ReviewSnapshotStatus }>
     const retained: string[] = []
     const tombstoned: string[] = []
@@ -732,7 +734,7 @@ export class SqliteReviewArtifactStore implements ReviewArtifactStore {
       const projection = JSON.parse(row.metadata_json) as ReviewArtifactProjection
       const capturedAt = projection.admission.baseline?.capturedAt || ''
       const referenced = projection.commentRefs.length > 0 || projection.reviewStateRefs.length > 0
-      if (protectedIds.has(row.snapshot_id) || referenced || row.status === 'deleted' || (input.olderThan && capturedAt >= input.olderThan)) { retained.push(row.snapshot_id); continue }
+      if (protectedIds.has(row.snapshot_id) || protectedThreads.has(projection.threadId) || referenced || row.status === 'deleted' || (input.olderThan && capturedAt >= input.olderThan)) { retained.push(row.snapshot_id); continue }
       await this.deleteArtifact(row.snapshot_id, input.reason)
       tombstoned.push(row.snapshot_id)
     }

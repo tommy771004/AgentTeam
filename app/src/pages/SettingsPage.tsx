@@ -52,7 +52,6 @@ import {
 import { connectionIdForBuiltinLlm } from '../agent/outbound/providerConnectionId'
 import { parsePolicySourceMode } from '../agent/outbound/policySourceMode'
 import { useProjectStore } from '../store/projectStore'
-import { getLiveSlashCommands } from '../commands/registry'
 import { applyRendererStorageSnapshot } from '../agent/updateMigration'
 import { bundleSensitivityNotice } from '../agent/settingsExport'
 import {
@@ -3903,40 +3902,5 @@ function HostToolCatalogSection() {
         )
       })()}
     </SettingsStack>
-  )
-}
-
-function StatChip({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-control border border-line bg-inset px-3 py-2">
-      <div className="text-[9px] uppercase tracking-wider text-outline font-semibold">
-        {label}
-      </div>
-      <div className="text-lg font-semibold text-primary font-[family-name:var(--font-sora)] tabular-nums">
-        {value}
-      </div>
-    </div>
-  )
-}
-
-function Row({
-  k,
-  v,
-  mono,
-}: {
-  k: string
-  v: string
-  mono?: boolean
-}) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 text-[12px]">
-      <span className="text-outline shrink-0">{k}</span>
-      <span
-        className={`text-on-surface truncate text-right ${mono ? 'font-mono text-[11px]' : ''}`}
-        title={v}
-      >
-        {v}
-      </span>
-    </div>
   )
 }

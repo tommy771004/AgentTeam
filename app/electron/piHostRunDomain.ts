@@ -16,7 +16,8 @@ type RunDomainInput = {
   isSettlement: (value: unknown) => value is PiTurnSettlement
   handleAttachment: () => PiHostMessage[] | Promise<PiHostMessage[]> | undefined
   recordLifecycle: (sessionId: string, state: AgentLifecycleState, runId?: string, reason?: string) => boolean
-  onSettled?: (run: PiQueuedRun, settlement: PiTurnSettlement) => void
+  hasRecordedLifecycle?: (sessionId: string, state: AgentLifecycleState, runId?: string) => boolean
+  onSettled?: (run: PiQueuedRun, settlement: PiTurnSettlement) => void | Promise<void>
   canClaim?: (run: PiQueuedRun) => boolean
 }
 
@@ -38,7 +39,7 @@ export function handlePiHostRunDomain(input: RunDomainInput): PiHostMessage[] | 
   return handler ? handler(input) : [errorResponse(input.id, `Unknown run method: ${input.method}`)]
 }
 
-type RunMethodHandler = (input: RunDomainInput) => PiHostMessage[]
+type RunMethodHandler = (input: RunDomainInput) => PiHostMessage[] | Promise<PiHostMessage[]>
 
 const RUN_METHODS: Record<string, RunMethodHandler> = {
   'runs/list': (input) => [{ id: input.id, result: { queue: input.snapshot.queue.map((item) => ({ ...item, profile: { ...item.profile } })) } }],
@@ -65,7 +66,7 @@ function claimRun(input: RunDomainInput): PiHostMessage[] {
   return [{ id: input.id, result: { run, queue: commitQueue(input, queue) } }]
 }
 
-function settleRun(input: RunDomainInput): PiHostMessage[] {
+async function settleRun(input: RunDomainInput): Promise<PiHostMessage[]> {
   const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
   const settlement = input.params?.settlement
   if (!runId || !input.isSettlement(settlement)) return [errorResponse(input.id, 'runId and settlement are required')]
@@ -76,11 +77,15 @@ function settleRun(input: RunDomainInput): PiHostMessage[] {
   }
   const run = queue.settle(runId)
   if (!run) return [errorResponse(input.id, 'Unknown active Pi run')]
-  if (!input.recordLifecycle(run.sessionId, agentLifecycleFromTurnSettlement(settlement), run.runId)) {
+  const lifecycle = agentLifecycleFromTurnSettlement(settlement)
+  const lifecycleRecorded = input.recordLifecycle(run.sessionId, lifecycle, run.runId)
+    || input.hasRecordedLifecycle?.(run.sessionId, lifecycle, run.runId)
+  if (!lifecycleRecorded) {
     return [errorResponse(input.id, 'Illegal agent lifecycle transition')]
   }
-  input.onSettled?.(run, settlement)
-  return [{ id: input.id, result: { run, queue: commitQueue(input, queue), settlement } }]
+  commitQueue(input, queue)
+  await input.onSettled?.(run, settlement)
+  return [{ id: input.id, result: { run, queue: input.snapshot.queue, settlement } }]
 }
 
 function enqueueRun(input: RunDomainInput): PiHostMessage[] {

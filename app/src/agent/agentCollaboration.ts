@@ -1,4 +1,5 @@
 import type { AgentLifecycleState } from './agentLifecycle.ts'
+import { isReviewSnapshotRef, type ReviewSnapshotRef } from './reviewContract.ts'
 
 export const AGENT_COLLABORATION_CAPABILITY = 'agent-collaboration-v1' as const
 export const AGENT_MESSAGE_MAX_BYTES = 8 * 1024
@@ -72,6 +73,7 @@ export type AgentTerminalResult = {
   originTurn: number
   settlement: Extract<AgentLifecycleState, 'completed' | 'failed' | 'cancelled' | 'interrupted'>
   summary: string
+  reviewSnapshotRef?: ReviewSnapshotRef
   observationOnly: true
   createdAt: number
 }
@@ -242,6 +244,7 @@ function isAgentTerminalResult(value: unknown): value is AgentTerminalResult {
     && Number.isSafeInteger(item.originTurn) && Number(item.originTurn) >= 1
     && ['completed', 'failed', 'cancelled', 'interrupted'].includes(String(item.settlement))
     && isBoundedString(item.summary, AGENT_RESULT_MAX_BYTES)
+    && (item.reviewSnapshotRef === undefined || isReviewSnapshotRef(item.reviewSnapshotRef))
     && item.observationOnly === true
     && Number.isSafeInteger(item.createdAt) && Number(item.createdAt) > 0
 }

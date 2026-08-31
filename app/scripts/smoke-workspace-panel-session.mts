@@ -54,4 +54,8 @@ const page = await readFile(new URL('../src/pages/ProtocolsPage.tsx', import.met
 assert.match(page, /<WorkspacePanelSession/)
 assert.match(page, /panel\.restore\(\)[\s\S]*tabs\.length > 0[\s\S]*setShowRunPanel\(true\)/, 'renderer reload remounts persisted workspace tabs before the panel can restore itself')
 assert.doesNotMatch(page, /<InlineRunPanel|<TerminalPanel/, 'the right rail has one browser-tab-like session owner')
+const runPanel = await readFile(new URL('../src/components/InlineRunPanel.tsx', import.meta.url), 'utf8')
+const projectContext = await readFile(new URL('../src/components/ProjectContextBar.tsx', import.meta.url), 'utf8')
+assert.match(runPanel, /<RunWorktreeSummary projectRoot=\{projectRoot\} \/>/, 'the run summary owns the worktree projection')
+assert.doesNotMatch(projectContext.slice(projectContext.indexOf('export function ProjectContextBar'), projectContext.indexOf('function pathName')), /agent-project-source|agent-project-branch/, 'the conversation project picker no longer repeats provider and branch chips')
 console.log('smoke-workspace-panel-session passed')

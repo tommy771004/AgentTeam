@@ -22,7 +22,6 @@ import {
   type RunActivityEvent,
   type RunTaskItem,
 } from '../store/runActivityStore'
-import { ExecutionStepsProgress } from './ExecutionStepsProgress'
 import { Icon } from './Icon'
 import { MarkdownBody } from './MarkdownBody'
 import { RunTimelineList } from './RunTimelineList'
@@ -513,8 +512,6 @@ export function RunProcessFeed({
           <span>{stall.label}</span>
         </div>
       ) : null}
-
-      <ExecutionStepsProgress tasks={tasks} />
 
       <LiveAgentWork entries={recordEntries} sessionId={agent.hostSessionId} />
 

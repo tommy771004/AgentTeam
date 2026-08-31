@@ -30,7 +30,7 @@ import { captureRunReviewSnapshot, type TrustedReviewMutation } from './reviewSn
 import { WorkspaceReviewProjection, type ReviewDiffHunk, type ReviewTargetDescription } from './workspaceReviewProjection.ts'
 import type { ReviewFileManifestEntry, ReviewPageEnvelope, ReviewTarget, ReviewWorkspaceBinding } from '../src/agent/reviewContract.ts'
 import { InMemoryReviewStateStore, type ReviewStateStore } from './reviewStateStore.ts'
-import { exportReviewArtifact, importReviewArtifact, previewReviewArtifactImport } from './reviewArtifactTransfer.ts'
+import { applyReviewArtifactRetention, exportReviewArtifact, hardDeleteReviewArtifact, importReviewArtifact, previewReviewArtifactImport } from './reviewArtifactTransfer.ts'
 import type { ReviewComment, ReviewFileState } from '../src/agent/reviewStateContract.ts'
 import { InMemoryReviewVerificationStore, type ReviewVerificationStore } from './reviewVerificationStore.ts'
 import { projectReviewVerification, type ReviewVerificationKind, type ReviewVerificationProjection } from '../src/agent/reviewVerificationContract.ts'
@@ -463,7 +463,7 @@ import { PiToolContractStore, schemaDigest, type PiTurnToolContract } from './pi
 import { enqueuePiHostRun, handlePiHostRunDomain } from './piHostRunDomain.ts'
 import { handlePiHostAgentDomain } from './piHostAgentDomain.ts'
 import { PiAgentCommunicationDomain, type PiAgentCommunicationState } from './piAgentCommunicationDomain.ts'
-import { agentLifecycleEventForSession, recordAgentCollaborationEvent, recordAgentLifecycle } from './piAgentLifecycleRecord.ts'
+import { agentLifecycleEventForSession, hasRecordedAgentLifecycle, recordAgentCollaborationEvent, recordAgentLifecycle } from './piAgentLifecycleRecord.ts'
 import { handlePiHostSessionDomain } from './piHostSessionDomain.ts'
 import { handlePiHostToolDomain } from './piHostToolDomain.ts'
 import { validatePiToolArguments } from './piToolArguments.ts'
@@ -3871,9 +3871,10 @@ async function rebindReviewArtifactLifecycle(state: HostState, params: Record<st
 async function retainReviewArtifactLifecycle(state: HostState, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
   const requested = Array.isArray(params.retainedSnapshotIds) ? params.retainedSnapshotIds.filter((value): value is string => typeof value === 'string') : []
   const retainedSnapshotIds = [...new Set([...requested, ...await state.reviewStateStore.referencedSnapshotIds()])]
+  const retainedThreadIds = [...new Set(state.snapshot.sessions.flatMap((session) => [session.id, session.threadId].filter((value): value is string => Boolean(value))))]
   const reason = typeof params.reason === 'string' && params.reason.trim() ? params.reason.trim() : 'Review retention policy'
-  if (!await approveReviewLifecycle({ action: 'retention', identity: `${retainedSnapshotIds.length}-refs`, detail: { retainedSnapshotIds, reason } })) return [errorResponse(id, 'forbidden', 'Review retention was denied')]
-  const reviewArtifactRetention = await state.reviewArtifactStore.applyRetention({ retainedSnapshotIds, reason, ...(typeof params.olderThan === 'string' ? { olderThan: params.olderThan } : {}) })
+  if (!await approveReviewLifecycle({ action: 'retention', identity: `${retainedSnapshotIds.length}-refs`, detail: { retainedSnapshotIds, retainedThreadIds, reason } })) return [errorResponse(id, 'forbidden', 'Review retention was denied')]
+  const reviewArtifactRetention = await applyReviewArtifactRetention(state.reviewArtifactStore, { retainedSnapshotIds, retainedThreadIds, reason, ...(typeof params.olderThan === 'string' ? { olderThan: params.olderThan } : {}) })
   return [{ id, result: { reviewArtifactRetention } }]
 }
 
@@ -3882,9 +3883,7 @@ async function hardDeleteReviewArtifactLifecycle(state: HostState, params: Recor
   if (!snapshotId) return [errorResponse(id, 'invalid_request', 'snapshotId is required')]
   const artifact = await state.reviewArtifactStore.read(snapshotId)
   if (!await approveReviewLifecycle({ action: 'hard-delete', identity: snapshotId, detail: { snapshotId, status: artifact.status, manifestHash: artifact.manifestHash } })) return [errorResponse(id, 'forbidden', 'Review hard delete was denied')]
-  await state.reviewStateStore.hardDeleteSnapshot(snapshotId)
-  await state.reviewVerificationStore.hardDeleteSnapshot(snapshotId)
-  await state.reviewArtifactStore.hardDeleteArtifact(snapshotId)
+  await hardDeleteReviewArtifact(state.reviewArtifactStore, state.reviewStateStore, state.reviewVerificationStore, snapshotId, 'Explicit Review hard delete')
   return [{ id, result: { reviewArtifactHardDeleted: true } }]
 }
 
@@ -4632,12 +4631,31 @@ function handleRunRequest(state: HostState, input: Partial<InternalPiHostRequest
       if (recorded) state.snapshot.cursor += 1
       return recorded
     },
-    onSettled: (run, settlement) => {
+    hasRecordedLifecycle: (sessionId, lifecycle, runId) => hasRecordedAgentLifecycle(
+      state.snapshot.sessions,
+      sessionId,
+      lifecycle,
+      runId,
+    ),
+    onSettled: async (run, settlement) => {
       const communicationState = agentCommunicationState(state, emit)
+      // Review evidence is optional at this boundary; a degraded Review Store
+      // must not prevent the canonical child completion or follow-up drain.
+      const reviewArtifact = await state.reviewArtifactStore.findByRunId(run.runId).catch(() => undefined)
+      const reviewSnapshotRef = reviewArtifact
+        ? {
+            snapshotId: reviewArtifact.snapshotId,
+            runId: reviewArtifact.runId,
+            status: reviewArtifact.status,
+            attributionFidelity: reviewArtifact.attributionFidelity,
+            ...(reviewArtifact.manifestHash ? { manifestHash: reviewArtifact.manifestHash } : {}),
+          }
+        : undefined
       state.agentCommunication.recordCompletion(communicationState, {
         sessionId: run.sessionId, runId: run.runId,
         settlement: agentLifecycleFromTurnSettlement(settlement) as 'completed' | 'failed' | 'cancelled' | 'interrupted',
         summary: `Child run settled as ${settlement}`,
+        reviewSnapshotRef,
       })
       state.agentCommunication.drainNextFollowUp(communicationState, run.sessionId)
     },
@@ -4803,20 +4821,6 @@ function recordTerminalAgentLifecycle(
   )
   if (event) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event })
 }
-
-function settleHostOwnedQueueItem(
-  state: HostState,
-  runId: string,
-  emit?: (message: PiHostMessage) => void,
-): void {
-  const queue = new PiRunQueue(24, state.snapshot.queue)
-  const existing = queue.snapshot().find((item) => item.runId === runId)
-  if (existing?.status !== 'running' || !queue.settle(runId)) return
-  state.snapshot.queue = queue.snapshot()
-  state.snapshot.cursor += 1
-  emit?.({ event: 'host/queue', payload: { cursor: state.snapshot.cursor, queueRevision: queue.revision() } })
-}
-
 
 function duplicateFollowUpResponse(state: HostState, request: unknown): PiHostMessage[] | undefined {
   if (!state.initialized || !request || typeof request !== 'object') return undefined
@@ -5790,7 +5794,6 @@ export function handlePiHostRequest(
       )
       recorder.step = orchestration.iterations || recorder.step
       recordTerminalAgentLifecycle(state, sessionId, runId, orchestration.settlement, recorder.entries)
-      settleHostOwnedQueueItem(state, runId, emit)
       recordTurnEntry(sessionId, {
         kind: 'turn-end',
         source: 'host',
@@ -5848,7 +5851,6 @@ export function handlePiHostRequest(
         recordTurnEntry(sessionId, { kind: 'notice', source: 'host', topic: 'host-error', text: reason })
         const failedLifecycle = agentLifecycleEventForSession(state.snapshot.sessions, sessionId, 'failed', runId, reason, recorder.entries)
         if (failedLifecycle) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event: failedLifecycle })
-        settleHostOwnedQueueItem(state, runId, emit)
         recordTurnEntry(sessionId, { kind: 'turn-end', source: 'host', settlement: 'failed' })
         session.record = appendTurnRecord(session.record, recorder.entries)
         const terminalSeq = session.record.entries.at(-1)?.seq

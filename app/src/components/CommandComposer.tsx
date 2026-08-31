@@ -27,7 +27,7 @@ import {
   useCommandHistoryStore,
 } from '../store/commandHistoryStore'
 import type { ChatAttachment } from '../agent/types'
-import type { PendingFollowUpProjection } from '../agent/interactiveFollowUp'
+import type { FollowUpAction, PendingFollowUpProjection } from '../agent/interactiveFollowUp'
 import {
   filesToAttachments,
   formatBytes,
@@ -102,6 +102,12 @@ export interface CommandComposerProps {
   /** Show the ChatGPT-style stop action while a run is active. */
   running?: boolean
   onStop?: () => void
+  /** Action used when this message is submitted while the thread is running. */
+  followUpAction?: FollowUpAction
+  /** Runner-specific immediate action offered alongside queue. */
+  followUpImmediateAction?: Extract<FollowUpAction, 'steer' | 'takeover'>
+  /** Changes only the current Composer submission mode. */
+  onFollowUpActionChange?: (action: FollowUpAction) => void
   /** Disposable projection of Host-accepted interactive follow-ups. */
   pendingFollowUps?: readonly PendingFollowUpProjection[]
   onEditPendingFollowUp?: (item: PendingFollowUpProjection, text: string) => void | Promise<void>
@@ -178,11 +184,13 @@ function ComposerActionButton({
   stopping,
   canSend,
   enterBehavior,
+  actionLabel,
   onAction,
 }: {
   stopping: boolean
   canSend: boolean
   enterBehavior: NonNullable<CommandComposerProps['enterBehavior']>
+  actionLabel?: string
   onAction: () => void
 }) {
   const title = stopping
@@ -197,7 +205,7 @@ function ComposerActionButton({
       disabled={!stopping && !canSend}
       onClick={onAction}
       className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-control ${stopping ? 'agent-composer-send agent-composer-stop' : 'agent-composer-send'}`}
-      aria-label={stopping ? '停止執行' : '送出'}
+      aria-label={stopping ? '停止執行' : actionLabel || '送出'}
       title={title}
     >
       <Icon name={stopping ? 'stop' : 'arrow_upward'} size={stopping ? 17 : 18} filled={stopping} />
@@ -223,6 +231,91 @@ function followUpActionLabel(action: PendingFollowUpProjection['action']): strin
   return '排隊'
 }
 
+function followUpSubmissionLabel(action: FollowUpAction): string {
+  if (action === 'steer') return '引導目前任務'
+  if (action === 'takeover') return '中止並接手'
+  return '排到下一個任務'
+}
+
+const FOLLOW_UP_ACTION_DESCRIPTION: Record<FollowUpAction, string> = {
+  steer: '加入目前執行，在下一個安全邊界套用',
+  takeover: '停止目前 CLI，再以這則訊息接手',
+  queue: '目前任務完成後，建立下一個 Task run',
+}
+
+function FollowUpActionMenu({
+  action,
+  immediateAction,
+  onChange,
+}: {
+  action: FollowUpAction
+  immediateAction: Extract<FollowUpAction, 'steer' | 'takeover'>
+  onChange: (action: FollowUpAction) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLSpanElement>(null)
+  const options: FollowUpAction[] = [immediateAction, 'queue']
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [open])
+
+  return (
+    <span ref={rootRef} className="relative shrink-0">
+      <button
+        type="button"
+        data-follow-up-mode={action}
+        aria-label={`送出模式：${followUpSubmissionLabel(action)}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex min-h-8 max-w-[9.5rem] items-center gap-1 rounded-control px-2 text-[11px] text-ink-2 hover:bg-hover-1 hover:text-ink focus-visible:bg-hover-1"
+      >
+        <span className="truncate">{followUpSubmissionLabel(action)}</span>
+        <Icon name="expand_more" size={14} />
+      </button>
+      {open ? (
+        <span
+          role="menu"
+          aria-label="執行中送出模式"
+          className="absolute bottom-[calc(100%+0.4rem)] right-0 z-50 w-64 overflow-hidden rounded-card border border-line bg-surface p-1 shadow-lg"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              setOpen(false)
+            }
+          }}
+        >
+          {options.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="menuitemradio"
+              aria-checked={option === action}
+              onClick={() => {
+                onChange(option)
+                setOpen(false)
+              }}
+              className="flex w-full items-start gap-2 rounded-control px-2.5 py-2 text-left hover:bg-hover-1"
+            >
+              <Icon name={option === action ? 'check' : 'blank'} size={16} className={option === action ? 'text-accent-ink' : 'opacity-0'} />
+              <span className="min-w-0">
+                <span className="block text-[13px] font-medium text-ink">{followUpSubmissionLabel(option)}</span>
+                <span className="block text-[11px] leading-relaxed text-ink-3">{FOLLOW_UP_ACTION_DESCRIPTION[option]}</span>
+              </span>
+            </button>
+          ))}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
 function FollowUpCardControls({ item, movable, movableIndex, handlers }: {
   item: PendingFollowUpProjection; movable: readonly PendingFollowUpProjection[]; movableIndex: number; handlers: FollowUpCardHandlers
 }) {
@@ -236,7 +329,7 @@ function FollowUpCardControls({ item, movable, movableIndex, handlers }: {
       <button type="button" disabled={movableIndex <= 0} onClick={() => void onMove(item, 'up')} className="flex size-8 items-center justify-center text-ink-3 hover:text-ink disabled:opacity-25" aria-label={`上移：${item.text}`} title="上移"><Icon name="keyboard_arrow_up" size={16} /></button>
       <button type="button" disabled={movableIndex < 0 || movableIndex === movable.length - 1} onClick={() => void onMove(item, 'down')} className="flex size-8 items-center justify-center text-ink-3 hover:text-ink disabled:opacity-25" aria-label={`下移：${item.text}`} title="下移"><Icon name="keyboard_arrow_down" size={16} /></button>
     </span> : null}
-    {item.state === 'rejected' && item.action === 'steer' && onQueueRejected ? <button type="button" onClick={() => void onQueueRejected(item)} className="min-h-8 shrink-0 px-2 text-[12px] text-accent-ink hover:bg-hover-1" aria-label={`改為排隊：${item.text}`} title="改為排隊">改排隊</button> : null}
+    {item.state === 'rejected' && item.action !== 'queue' && onQueueRejected ? <button type="button" onClick={() => void onQueueRejected(item)} className="min-h-8 shrink-0 px-2 text-[12px] text-accent-ink hover:bg-hover-1" aria-label={`改為排隊：${item.text}`} title="改為排隊">改排隊</button> : null}
     {item.editable && onEdit ? <button type="button" onClick={edit} className="flex size-8 shrink-0 items-center justify-center text-ink-3 hover:text-ink" aria-label={`編輯：${item.text}`} title="編輯"><Icon name="edit" size={14} /></button> : null}
     {item.cancellable && onCancel ? <button type="button" onClick={() => void onCancel(item)} className="flex size-8 shrink-0 items-center justify-center text-ink-3 hover:text-red" aria-label={`刪除：${item.text}`} title="刪除"><Icon name="delete" size={14} /></button> : null}
   </>
@@ -296,18 +389,28 @@ function ComposerActions({
   running,
   canSend,
   enterBehavior,
+  followUpAction,
+  followUpImmediateAction,
+  onFollowUpActionChange,
   onSend,
   onStop,
 }: {
   running: boolean
   canSend: boolean
   enterBehavior: NonNullable<CommandComposerProps['enterBehavior']>
+  followUpAction?: FollowUpAction
+  followUpImmediateAction?: Extract<FollowUpAction, 'steer' | 'takeover'>
+  onFollowUpActionChange?: (action: FollowUpAction) => void
   onSend: () => void
   onStop?: () => void
 }) {
+  const actionLabel = followUpAction ? followUpSubmissionLabel(followUpAction) : undefined
   return (
     <span className="flex shrink-0 items-center gap-1.5">
-      <ComposerActionButton stopping={false} canSend={canSend} enterBehavior={enterBehavior} onAction={onSend} />
+      {followUpAction && followUpImmediateAction && onFollowUpActionChange ? (
+        <FollowUpActionMenu action={followUpAction} immediateAction={followUpImmediateAction} onChange={onFollowUpActionChange} />
+      ) : null}
+      <ComposerActionButton stopping={false} canSend={canSend} enterBehavior={enterBehavior} actionLabel={actionLabel} onAction={onSend} />
       {running && onStop ? (
         <ComposerActionButton stopping canSend enterBehavior={enterBehavior} onAction={onStop} />
       ) : null}
@@ -495,6 +598,9 @@ export function CommandComposer({
   allowAttachments,
   running = false,
   onStop,
+  followUpAction,
+  followUpImmediateAction,
+  onFollowUpActionChange,
   pendingFollowUps = [],
   onEditPendingFollowUp,
   onCancelPendingFollowUp,
@@ -872,6 +978,9 @@ export function CommandComposer({
     running={running}
     canSend={canSend}
     enterBehavior={enterBehavior}
+    followUpAction={followUpAction}
+    followUpImmediateAction={followUpImmediateAction}
+    onFollowUpActionChange={onFollowUpActionChange}
     onSend={() => void submit()}
     onStop={onStop}
   />

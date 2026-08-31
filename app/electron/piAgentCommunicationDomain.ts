@@ -263,7 +263,7 @@ export class PiAgentCommunicationDomain {
     return closed
   }
 
-  recordCompletion(state: PiAgentCommunicationState, input: { sessionId: string; runId: string; settlement: AgentTerminalResult['settlement']; summary: string }): boolean {
+  recordCompletion(state: PiAgentCommunicationState, input: { sessionId: string; runId: string; settlement: AgentTerminalResult['settlement']; summary: string; reviewSnapshotRef?: AgentTerminalResult['reviewSnapshotRef'] }): boolean {
     const child = state.sessions.find((session) => session.id === input.sessionId)
     if (!child?.parentSessionId) return false
     const parent = state.sessions.find((session) => session.id === child.parentSessionId)
@@ -277,6 +277,7 @@ export class PiAgentCommunicationDomain {
       version: 1, resultId, agentId: child.id, parentAgentId: parent.id, rootAgentId: tree.rootAgentId,
       runId: input.runId, originTurn: child.agentAdmission?.originTurn || originTurn(parent),
       settlement: input.settlement, summary: boundedAgentText(input.summary || input.settlement, AGENT_RESULT_MAX_BYTES),
+      ...(input.reviewSnapshotRef ? { reviewSnapshotRef: input.reviewSnapshotRef } : {}),
       observationOnly: true, createdAt: Date.now(),
     }
     const messageId = `${resultId}:mail`

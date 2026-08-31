@@ -9,11 +9,8 @@ import { useProjectStore } from '../store/projectStore'
 export function ProjectContextBar() {
   const {
     name,
-    source,
-    branch,
     root,
     worktrees,
-    dirty,
     loaded,
     error,
     picking,
@@ -57,7 +54,6 @@ export function ProjectContextBar() {
     }
   }, [manualPathOpen, root])
 
-  const sourceLabel = source === 'github' ? 'GitHub' : '本機'
   const hasNativePick = Boolean(window.subagents?.project?.pick)
 
   const onPick = async (e?: React.MouseEvent) => {
@@ -109,36 +105,6 @@ export function ProjectContextBar() {
           <Icon name="expand_more" size={14} />
         </button>
       </div>
-
-      <span className="agent-project-source inline-flex items-center gap-1 px-2 py-1 rounded-control border border-line bg-inset text-[11px] text-ink-2">
-        <Icon
-          name={source === 'github' ? 'cloud' : 'computer'}
-          size={13}
-          className="opacity-70"
-        />
-        {sourceLabel}
-      </span>
-
-      {branch && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            setMenuOpen(true)
-          }}
-          className="agent-project-branch inline-flex items-center gap-1 px-2 py-1 rounded-control border border-line bg-inset text-[11px] text-ink-2 max-w-[140px]"
-          title="Git 工作樹 / 分支"
-        >
-          <Icon name="account_tree" size={13} className="opacity-70 shrink-0" />
-          <span className="truncate font-[family-name:var(--font-mono)]">{branch}</span>
-          {dirty && (
-            <span
-              className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"
-              title="有未提交變更"
-            />
-          )}
-        </button>
-      )}
 
       {error && !manualPathOpen && (
         <span className="text-[10px] text-red max-w-[220px] truncate" title={error}>
@@ -313,5 +279,37 @@ export function ProjectContextBar() {
         </div>
       )}
     </div>
+  )
+}
+
+function pathName(path: string): string {
+  return path.split(/[/\\]/).filter(Boolean).at(-1) || path
+}
+
+/**
+ * The run summary shows only the workspace identity that affects execution.
+ * Provider provenance and repository controls stay in ProjectContextBar.
+ */
+export function RunWorktreeSummary({ projectRoot }: { projectRoot?: string }) {
+  const currentRoot = useProjectStore((state) => state.root)
+  const currentBranch = useProjectStore((state) => state.branch)
+  const currentDirty = useProjectStore((state) => state.dirty)
+  const worktrees = useProjectStore((state) => state.worktrees)
+  const root = projectRoot || currentRoot
+  const matchingWorktree = worktrees.find((worktree) => worktree.path === root)
+  const current = Boolean(root && root === currentRoot)
+  const label = (current ? currentBranch : matchingWorktree?.branch) || (root ? pathName(root) : '尚未選擇')
+
+  return (
+    <section className="border-b border-line px-4 py-3" aria-labelledby="run-worktree-title">
+      <h2 id="run-worktree-title" className="text-[10px] font-semibold text-ink-3">Worktree</h2>
+      <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[12px] text-ink-2" title={root || '尚未選擇專案工作樹'}>
+        <Icon name="account_tree" size={14} className="shrink-0 text-ink-3" />
+        <span className="min-w-0 truncate font-[family-name:var(--font-mono)]">{label}</span>
+        {current && currentDirty ? (
+          <span className="size-1.5 shrink-0 rounded-full bg-amber-400" title="有未提交變更" />
+        ) : null}
+      </div>
+    </section>
   )
 }

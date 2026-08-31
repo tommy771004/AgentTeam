@@ -42,11 +42,11 @@ Chat.md 的 tab＋composer 結構由 01（composer）與 07（訊息流）共同
 
 ## 實作檢查表（後續工程）
 
-- [ ] Composer：把 `SubDesignConversationPane` 的 textarea 升級為 Prompt Bar 結構（`@` sources = references/storybook/DESIGN.md/project files/web；`/` commands = `/direction` `/critique` `/tweak` `/deliver`）。
+- [x] Composer：`SubDesignConversationPane` 已升級為 Prompt Bar 結構（真實 brief references／provenance chips、`@` sources、`/direction`／`/critique`／`/tweak`／`/deliver`，沿用 follow-up 的 `runTask` ingress）。
 - [ ] Run feed：`RunProcessFeed` 在 SubDesign context 改用 Thinking（Steps）+ Tool Chips 文法；plugin 執行列已有真實事件，只需換殼。
 - [ ] 方向選擇：direction grid fallback 換成 approve 卡（保留 `McpAppSurface` 優先路徑與 `onChoice` 回寫 brief 不變）。
 - [ ] Context Cards：`ReferenceImportPanel` 輸出改為 chunk 卡文法。
-- [ ] Deliver：`ArtifactDeliveryPanel` 加 Recommendation Card（信號 meter + alternatives）；revision 切換加 Diff Table。
+- [x] Deliver：`ArtifactDeliveryPanel` 已加入由 critique 分數與 artifact exports 推導的 Recommendation Card（信號 meter + alternatives），並直接重用 `ArtifactRevisionDiff` 的真實 snapshot Diff Table。
 - [ ] 全部遵守：一個 run 一個狀態來源（`runId`）、live → terminal 只走一次、等待不是運算、動畫可中斷但內容不可消失。
 
 ## 視覺證據
@@ -67,4 +67,4 @@ Chat.md 的 tab＋composer 結構由 01（composer）與 07（訊息流）共同
 
 ## 驗證限制
 
-Prototype 為 DEV-only visual QA fixture，使用 deterministic 假資料呈現 settled 狀態，未接真實 run 事件。`npm run build`、`npx oxlint src` 通過；互動行為（@ 搜尋、pager、drawer 展開）在整合進 production 元件時需另以 smoke 驗證。
+Prototype 仍是 DEV-only visual QA fixture，使用 deterministic 假資料呈現 settled 狀態；production 的 Composer／Deliver 已接真實 brief、thread、critique、snapshot、export 與 `runTask` 路徑。其餘 Run feed、方向卡與 Context Cards 仍依上方未勾選項追蹤，不得由本次兩個 surface 推導整份 docs/ui 已完成。

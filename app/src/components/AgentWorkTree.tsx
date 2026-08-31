@@ -78,17 +78,13 @@ function ConflictActions({ api, conflictId, parentAgentId, invoke }: { api: Agen
   </>
 }
 
-function IsolatedWorktreeActions({ row, parentAgentId, terminal, invoke }: { row: AgentWorkRow; parentAgentId: string; terminal: boolean; invoke: InvokeAgentAction }) {
+function IsolatedWorktreeActions({ row, terminal, invoke }: { row: AgentWorkRow; terminal: boolean; invoke: InvokeAgentAction }) {
   const workspace = row.workspace
   const isolated = workspace?.mode === 'isolated-worktree' && workspace.verified && workspace.projectRoot && workspace.worktreePath
   if (!isolated) return null
   const review = async () => {
-    const api = window.subagents?.piHost?.review
-    if (!api) throw new Error('Review workspace unavailable')
-    const runId = `agent-review:${row.agentId}:${Date.now()}`
-    await api.admit({ runId, threadId: parentAgentId, projectRoot: workspace.worktreePath!, runnerKind: 'builtin' })
-    const finalized = await api.finalize({ runId, settlementKind: 'completed', activeWorkspaceRuns: 0 })
-    useWorkspacePanelSessionStore.getState().openTab({ kind: 'review', target: { kind: 'run-snapshot', snapshotId: finalized.reviewSnapshotRef.snapshotId } }, `審查 · ${row.title}`)
+    if (!row.reviewSnapshotRef) throw new Error('Host 尚未產生此 Agent 的結算快照')
+    useWorkspacePanelSessionStore.getState().openTab({ kind: 'review', target: { kind: 'run-snapshot', snapshotId: row.reviewSnapshotRef.snapshotId } }, `審查 · ${row.title}`)
   }
   const apply = async () => {
     const result = await window.subagents!.project!.worktreeApply(workspace.projectRoot!, workspace.worktreePath!)
@@ -99,7 +95,7 @@ function IsolatedWorktreeActions({ row, parentAgentId, terminal, invoke }: { row
     if (!result.ok) throw new Error(result.error || '移除隔離 worktree 失敗')
   }
   return <>
-    <button type="button" className="agent-process-link" onClick={() => void invoke(review, '已建立隔離結果審查快照')}>審查隔離結果</button>
+    {row.reviewSnapshotRef ? <button type="button" className="agent-process-link" onClick={() => void invoke(review, '已開啟 Host 結算快照')}>審查隔離結果</button> : terminal ? <span className="text-[10px] text-ink-3">尚無 Host 結算快照</span> : null}
     {terminal ? <button type="button" className="agent-process-link" onClick={() => {
       if (window.confirm(`確定把「${row.title}」的隔離變更套回主工作區？衝突時會停止，不會覆蓋。`)) void invoke(apply, '隔離變更已套回主工作區')
     }}>套用變更</button> : null}
@@ -125,7 +121,7 @@ function AgentWorkActions({ row, parentAgentId, onStatus }: { row: AgentWorkRow;
       {row.lifecycle === 'blocked' ? <ConflictActions api={api} conflictId={conflict?.conflictId} parentAgentId={parentAgentId} invoke={invoke} /> : null}
       {completionMessage?.messageId ? <button type="button" className="agent-process-link" onClick={() => void invoke(() => api.ack({ agentId: parentAgentId, messageId: completionMessage.messageId }), '已確認結果')}>確認結果</button> : null}
       {terminal ? <button type="button" className="agent-process-link" onClick={() => void invoke(() => api.close({ requestedBy: parentAgentId, agentId: row.agentId }), '已關閉 Agent')}>關閉</button> : null}
-      <IsolatedWorktreeActions row={row} parentAgentId={parentAgentId} terminal={terminal} invoke={invoke} />
+      <IsolatedWorktreeActions row={row} terminal={terminal} invoke={invoke} />
       <label className="flex min-w-52 flex-1 items-center gap-2">
         <span className="sr-only">派送後續任務給 {row.title}</span>
         <input value={followUp} onChange={(event) => setFollowUp(event.target.value)} className="h-7 min-w-0 flex-1 border-b border-line bg-transparent px-1 text-[11px] text-ink outline-none focus:border-accent" placeholder="新增後續任務" />

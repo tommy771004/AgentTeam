@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
   "qualificationMode": "real",
-  "evidenceRoot": "/Users/tommy/Documents/Proj/AgentTeam/.scratch/external-cli-durable-harness/evidence",
-  "qualifiedAt": "2026-08-29T11:37:51.658Z",
+  "evidenceRoot": "/Users/xieyuanyou/Documents/AgentTeam/.scratch/external-cli-durable-harness/evidence",
+  "qualifiedAt": "2026-08-31T04:00:12.495Z",
   "platform": "darwin",
   "architecture": "arm64",
   "providers": [
@@ -21,11 +21,12 @@
       "exitCode": 0,
       "diagnostic": "unknown",
       "terminalClassification": "success",
-      "eventCount": 24,
+      "eventCount": 23,
       "eventKinds": [
         "status",
         "chunk",
         "log",
+        "error",
         "text",
         "done"
       ],
@@ -57,7 +58,7 @@
             "id": "project-codex",
             "kind": "agents",
             "scope": "project",
-            "path": "/var/folders/05/x61j217d49g9k0_kccntyzsr0000gn/T/agentteam-real-codex-ZYxsXG/project-VXYt5A/AGENTS.md",
+            "path": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-codex-XllDZ1/project-1B6g7F/AGENTS.md",
             "bytes": 19,
             "hashAvailable": true,
             "status": "applied",
@@ -67,9 +68,9 @@
         "limitationReason": "provider-owned native discovery; exact effective text cannot be proven by Host",
         "declaredDeliveryMode": "native"
       },
-      "cwd": "/var/folders/05/x61j217d49g9k0_kccntyzsr0000gn/T/agentteam-real-codex-ZYxsXG/project-VXYt5A",
+      "cwd": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-codex-XllDZ1/project-1B6g7F",
       "argv": {
-        "command": "/opt/homebrew/bin/codex",
+        "command": "/Users/xieyuanyou/.local/bin/codex",
         "args": [
           "exec",
           "--json",
@@ -105,17 +106,90 @@
       "status": "blocked",
       "code": "auth_unavailable",
       "installed": true,
-      "attempted": false,
-      "stage": "auth",
+      "attempted": true,
+      "stage": "complete",
       "authUsable": false,
       "unqualified": true,
       "qualification": "blocked-auth",
       "version": "2.1.246 (Claude Code)",
-      "exitCode": null,
+      "ok": false,
+      "exitCode": 1,
       "diagnostic": "auth/login",
+      "terminalClassification": "process-exit-failure",
+      "eventCount": 25,
+      "eventKinds": [
+        "status",
+        "chunk",
+        "log",
+        "text",
+        "error"
+      ],
+      "outputBytes": 145,
+      "outputSha256": "72a24715527daca318fcf9e73de9f838c7b466e5f43bffe24465f172872ce780",
+      "markerMatched": false,
+      "nativeDiscoveryMatched": false,
+      "markerCounts": {
+        "expected": 0,
+        "forbidden": 0,
+        "qualification": 0
+      },
+      "instructionDelivery": {
+        "mode": "native",
+        "exactSnapshot": false,
+        "effectiveHash": "833414dd15c50f0213bf649a04da193870b2e13146d88e6e16524c835ab41ff7",
+        "hashAvailable": true,
+        "sourceSummary": [
+          {
+            "id": "global-claude",
+            "kind": "global-custom",
+            "scope": "global",
+            "bytes": 0,
+            "hashAvailable": true,
+            "status": "degraded",
+            "effectiveOrder": null
+          },
+          {
+            "id": "project-claude",
+            "kind": "claude",
+            "scope": "project",
+            "path": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-claude-FSSTaC/project-BBUlHi/CLAUDE.md",
+            "bytes": 20,
+            "hashAvailable": true,
+            "status": "applied",
+            "effectiveOrder": null
+          }
+        ],
+        "limitationReason": "provider-owned native discovery; exact effective text cannot be proven by Host",
+        "declaredDeliveryMode": "native"
+      },
+      "cwd": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-claude-FSSTaC/project-BBUlHi",
+      "argv": {
+        "command": "/Users/xieyuanyou/.local/bin/claude",
+        "args": [
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--permission-mode",
+          "plan",
+          "[prompt omitted]"
+        ]
+      },
+      "checkpointCaptured": true,
+      "restartClassification": "interrupted",
+      "automaticRetry": false,
+      "recordKinds": [
+        "turn-start",
+        "step-start",
+        "instruction-snapshot",
+        "user-text",
+        "assistant-text",
+        "step-end",
+        "turn-end"
+      ],
       "reason": {
         "code": "auth_unavailable",
-        "stage": "auth"
+        "stage": "record"
       }
     }
   ]

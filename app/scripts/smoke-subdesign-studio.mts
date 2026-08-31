@@ -9,6 +9,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { deriveSubDesignWorkspace } from '../src/agent/subdesign/workspace.ts'
+import { buildSubDesignPrompt } from '../src/agent/subdesign/prompt.ts'
+import { findLatestPassedSubDesignPreference, subDesignProjectMemoryKey } from '../src/agent/subdesign/preference.ts'
+import { SUBDESIGN_CAPABILITY, SUBDESIGN_CRITIQUE_CAPABILITY } from '../src/agent/capabilities/subDesign.ts'
 import { critiqueAllowsDeliver } from '../src/agent/subdesign/critique.ts'
 import { parseOpenDesignInventory } from '../src/agent/openDesign/catalog.ts'
 import {
@@ -93,6 +96,31 @@ await test('workspace: deliver locked until critique pass', () => {
   const deliverOpen = open.stages.find((s) => s.id === 'deliver')
   assert.ok(deliverOpen)
   assert.notEqual(deliverOpen!.state, 'locked')
+})
+
+await test('live SubDesign prompts treat project DESIGN.md as optional read-only reference', () => {
+  const prompt = buildSubDesignPrompt(brief({ id: 'b-design-reference', stage: 'build', selectedDirectionId: 'd1' }))
+  assert.doesNotMatch(prompt, /design system|選定的 DESIGN\.md/i)
+  assert.match(prompt, /可選的唯讀設計參考/)
+  assert.match(SUBDESIGN_CAPABILITY.instructions, /optional read-only design reference/)
+  assert.doesNotMatch(SUBDESIGN_CRITIQUE_CAPABILITY.instructions, /design system summary/i)
+  const theater = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/CritiqueTheater.tsx'), 'utf8')
+  assert.match(theater, /DESIGN\.md，它也只是可選的唯讀參考/)
+})
+
+await test('memory fallback accepts the canonical video surface', () => {
+  const projectRoot = '/project/video-memory'
+  const preference = findLatestPassedSubDesignPreference([], [], [], {
+    projectRoot,
+    memoryEntries: [{
+      id: 'memory-video',
+      kind: 'memory',
+      text: 'SubDesign 偏好(video)：surface=video, platform=responsive。這是已通過 Critique 的偏好。',
+      createdAt: '2026-08-31T00:00:00.000Z',
+      tags: ['subdesign-preference', subDesignProjectMemoryKey(projectRoot)],
+    }],
+  })
+  assert.equal(preference?.surface, 'video')
 })
 
 await test('critiqueAllowsDeliver gates delivery', () => {
@@ -222,6 +250,9 @@ await test('studio components: nav, inspector, delivery lock surface', () => {
     'utf8',
   )
   assert.match(delivery, /critiquePassed/)
+  assert.match(delivery, /Recommendation Card/)
+  assert.match(delivery, /ArtifactRevisionDiff/)
+  assert.match(delivery, /alternativesOpen/)
   const nav = fs.readFileSync(
     path.join(appRoot, 'src/components/subdesign/SubDesignStudioNav.tsx'),
     'utf8',
@@ -239,6 +270,9 @@ await test('conversation lifecycle keeps steer/queue, reply, and Stop available'
   assert.match(conversation, /runIsLive \? \(/)
   assert.match(conversation, /onClick=\{onStopRun\}/)
   assert.match(conversation, /輸入可轉向或排隊的後續指令/)
+  assert.match(conversation, /SUBDESIGN_COMMANDS/)
+  assert.match(conversation, /sourceChoices/)
+  assert.match(conversation, /SubDesign sources/)
   const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
   assert.doesNotMatch(page, /if \(runIsLive && !awaitingUser\) return/)
 })

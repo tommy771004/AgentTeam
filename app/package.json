@@ -13,7 +13,7 @@
     "build:pi-host:actual": "npm run build:pi-vendor && node --experimental-strip-types scripts/build-pi-host-bundle.mts",
     "open-design:index": "node --experimental-strip-types scripts/open-design-inventory.mts",
     "prototype:task-run-trust": "node --experimental-strip-types scripts/task-run-trust-prototype.mts",
-    "build": "npm run build:compile",
+    "build": "npm run check:build-flavor && npm run build:compile",
     "build:compile": "npm run build:pi-host && tsc -b && vite build",
     "check": "npm run check:build-flavor && npm run check:complexity && npm run check:release-build-once && npm run check:pi-production-owners && npm run check:pi-contract && npm run check:no-retired-provider && npm run check:agent-collaboration-boundary && npm run smoke:pi-build-contract && npm run smoke:skill-catalog && npm run smoke:model-menu-search && npm run smoke:usage-ledger && npm run smoke:knowledge-page-layout && npm run smoke:cli-approval && npm run smoke:pi-plan-gate && npm run smoke:pi-continuation && npm run smoke:cli-capabilities && npm run smoke:external-cli-orchestration && npm run icons && npm run build && npm run smoke:built",
     "smoke:pi-build-contract": "node --experimental-strip-types scripts/smoke-build-pi-vendor-invocation.mts && node --experimental-strip-types scripts/smoke-pi-build-workspace-links.mts && node --experimental-strip-types scripts/smoke-codegraph-pack.mts",

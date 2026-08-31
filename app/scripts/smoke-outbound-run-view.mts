@@ -16,6 +16,7 @@ assert.doesNotMatch(opsSource, /activeRuns\[0\].*OutboundRunView/)
 assert.match(opsSource, /selectedOutboundRunId/)
 assert.match(opsSource, /outboundRunIds\.map/)
 assert.match(viewSource, /遮罩類別/)
+assert.match(viewSource, /required: '必須通過 outbound policy/)
 
 const taxonomy = summarizeRedactions([
   { detectorId: 'baseline.api-key' },
@@ -67,6 +68,7 @@ try {
   assert.equal(view.sealedRecords, 1)
   assert.equal(view.records[0]?.filesystemIsolation, 'verified')
   assert.deepEqual(view.redactionSummary, [{ category: 'credential', count: 1 }])
+  assert.doesNotMatch(JSON.stringify(view), /outbound-view-smoke-key/)
   console.log('outbound-run-view smoke: taxonomy, evidence, and UX assertions passed')
 } finally {
   fs.rmSync(dir, { recursive: true, force: true })

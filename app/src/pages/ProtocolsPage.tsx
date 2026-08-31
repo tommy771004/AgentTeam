@@ -7,6 +7,7 @@ import { ThreadCapabilityDiagnostics } from '../components/ThreadCapabilityDiagn
 import { ModelDepthMenu } from '../components/ModelDepthMenu'
 import { ApprovalModeMenu } from '../components/ApprovalModeMenu'
 import { ProjectContextBar } from '../components/ProjectContextBar'
+import { ExecutionStepsProgress } from '../components/ExecutionStepsProgress'
 import { WorkspacePanelSession } from '../components/WorkspacePanelSession'
 import { RunProcessFeed } from '../components/RunProcessFeed'
 import { ComposerQuickActions } from '../components/ComposerQuickActions'
@@ -51,7 +52,15 @@ import {
   beginComposerApprovalHandoff,
   finishComposerApprovalHandoff,
 } from '../agent/composerApprovalHandoff'
-import { followUpActionForRunner, projectPendingFollowUps, projectRendererQueuedFollowUps, type PendingFollowUpProjection } from '../agent/interactiveFollowUp'
+import {
+  createFollowUpClientMessageId,
+  createSubmittingFollowUpProjection,
+  followUpActionForRunner,
+  projectPendingFollowUps,
+  projectRendererQueuedFollowUps,
+  type FollowUpAction,
+  type PendingFollowUpProjection,
+} from '../agent/interactiveFollowUp'
 import type { ExternalRunOpts, ExternalRunResult } from '../agent/taskRunTypes'
 
 type RejectedFollowUp = {
@@ -59,12 +68,23 @@ type RejectedFollowUp = {
   input: ExternalRunOpts
 }
 
-function visibleFollowUps(hostItems: readonly PendingFollowUpProjection[], rejected: Record<string, RejectedFollowUp>, threadId: string | null) {
-  return [...hostItems, ...Object.values(rejected).map((item) => item.projection).filter((item) => item.threadId === threadId)]
-}
-
-function composerFollowUpAction(runner: ThreadRunner, mode: FollowUpMode | undefined) {
-  return followUpActionForRunner(runner, mode === 'queue' ? 'queue' : 'steer')
+function visibleFollowUps(
+  hostItems: readonly PendingFollowUpProjection[],
+  submitting: Record<string, PendingFollowUpProjection>,
+  rejected: Record<string, RejectedFollowUp>,
+  threadId: string | null,
+) {
+  const merged = new Map<string, PendingFollowUpProjection>()
+  for (const item of Object.values(submitting)) {
+    if (item.threadId === threadId) merged.set(item.id, item)
+  }
+  for (const item of Object.values(rejected)) {
+    if (item.projection.threadId === threadId) merged.set(item.projection.id, item.projection)
+  }
+  // Host acknowledgement wins over the optimistic renderer projection with
+  // the same client message identity.
+  for (const item of hostItems) merged.set(item.id, item)
+  return [...merged.values()]
 }
 
 function busyComposerPlaceholder(runner: ThreadRunner, mode: FollowUpMode | undefined): string {
@@ -160,7 +180,9 @@ export function ProtocolsPage() {
   const [submittingByThread, setSubmittingByThread] = useState<Record<string, number>>({})
   const [showTerminal, setShowTerminal] = useState(false)
   const [composerApprovalModes, setComposerApprovalModes] = useState<Record<string, ApprovalMode>>({})
+  const [composerFollowUpModes, setComposerFollowUpModes] = useState<Record<string, FollowUpMode>>({})
   const [pendingFollowUps, setPendingFollowUps] = useState<PendingFollowUpProjection[]>([])
+  const [submittingFollowUps, setSubmittingFollowUps] = useState<Record<string, PendingFollowUpProjection>>({})
   const [rejectedFollowUps, setRejectedFollowUps] = useState<Record<string, RejectedFollowUp>>({})
   const { run: runSlash } = useSlashExecutor()
   const settings = useSettingsStore((s) => s.settings)
@@ -278,7 +300,7 @@ export function ProtocolsPage() {
   })
   const composerApprovalMode = activeId ? composerApprovalModes[activeId] : undefined
   const composerBusy = isConversationComposerBusy(submittingByThread, activeId, lifecycle.live)
-  const visiblePendingFollowUps = visibleFollowUps(pendingFollowUps, rejectedFollowUps, activeId)
+  const visiblePendingFollowUps = visibleFollowUps(pendingFollowUps, submittingFollowUps, rejectedFollowUps, activeId)
   const refreshPendingFollowUps = useCallback(async () => {
     const api = window.subagents?.piHost?.runs
     if (!activeId) {
@@ -450,6 +472,11 @@ export function ProtocolsPage() {
   const agentMode: AgentMode = thread?.agentMode || 'build'
   const threadModel = thread?.model || ''
   const runner: ThreadRunner = thread?.runner || 'builtin'
+  const composerFollowUpMode = activeId
+    ? composerFollowUpModes[activeId] || settings.followUpMode || 'steer'
+    : settings.followUpMode || 'steer'
+  const immediateFollowUpAction = followUpActionForRunner(runner, 'steer') as Extract<FollowUpAction, 'steer' | 'takeover'>
+  const selectedFollowUpAction = followUpActionForRunner(runner, composerFollowUpMode)
   const live = lifecycle.live
   const empty = !thread?.bubbles.length && !live
 
@@ -518,24 +545,42 @@ export function ProtocolsPage() {
     const { subagents } = parseSubagentMentions(raw)
     const conversationSuggestion =
       !pinnedLoopType && detectAutomationSuggestion(raw)
-    const runInput = buildComposerRunInput({
-      objective: raw,
-      threadId: activeId,
-      runner,
-      followUpAction: composerFollowUpAction(runner, settings.followUpMode),
-      loopType: pinnedLoopType,
-      attachments,
-      projectRoot: projectRoot || undefined,
-      settingsApprovalMode: settings.approvalMode || 'auto',
-      selectedApprovalMode: composerApprovalMode,
-      agentMode,
-      model: threadModel || settings.model,
-      thinkingDepth: depth,
-      speed,
-      temporary: settings.temporaryChatDefault === true,
-    })
+    const isFollowUpSubmission = lifecycle.live
+    const submissionFollowUpAction = selectedFollowUpAction
+    const followUpClientMessageId = isFollowUpSubmission ? createFollowUpClientMessageId() : undefined
+    const runInput: ExternalRunOpts = {
+      ...buildComposerRunInput({
+        objective: raw,
+        threadId: activeId,
+        runner,
+        followUpAction: submissionFollowUpAction,
+        loopType: pinnedLoopType,
+        attachments,
+        projectRoot: projectRoot || undefined,
+        settingsApprovalMode: settings.approvalMode || 'auto',
+        selectedApprovalMode: composerApprovalMode,
+        agentMode,
+        model: threadModel || settings.model,
+        thinkingDepth: depth,
+        speed,
+        temporary: settings.temporaryChatDefault === true,
+      }),
+      ...(followUpClientMessageId ? { runId: followUpClientMessageId } : {}),
+    }
 
     const submissionThreadId = activeId
+    if (followUpClientMessageId) {
+      setSubmittingFollowUps((current) => ({
+        ...current,
+        [followUpClientMessageId]: createSubmittingFollowUpProjection({
+          id: followUpClientMessageId,
+          threadId: submissionThreadId,
+          text: raw,
+          action: submissionFollowUpAction,
+          attachmentCount: attachments.length,
+        }),
+      }))
+    }
     setSubmittingByThread((current) => ({
       ...current,
       [submissionThreadId]: (current[submissionThreadId] || 0) + 1,
@@ -597,14 +642,46 @@ export function ProtocolsPage() {
         pushBubble(activeId, 'system', r.error || '全域執行中')
       }
     } catch (e) {
-      setThreadStatus(activeId, 'failed')
-      pushBubble(
-        activeId,
-        'system',
-        `執行失敗：${e instanceof Error ? e.message : String(e)}`,
-      )
+      const reason = e instanceof Error ? e.message : String(e)
+      if (followUpClientMessageId) {
+        setRejectedFollowUps((current) => ({
+          ...current,
+          [followUpClientMessageId]: {
+            input: runInput,
+            projection: {
+              id: followUpClientMessageId,
+              runId: followUpClientMessageId,
+              sessionId: 'renderer-rejected',
+              threadId: submissionThreadId,
+              text: raw,
+              action: submissionFollowUpAction,
+              state: 'rejected',
+              revision: 0,
+              queueRevision: 0,
+              editable: true,
+              cancellable: true,
+              reorderable: false,
+              reason,
+              attachmentCount: attachments.length,
+            },
+          },
+        }))
+      } else {
+        setThreadStatus(activeId, 'failed')
+        pushBubble(activeId, 'system', `執行失敗：${reason}`)
+      }
     } finally {
-      void refreshPendingFollowUps()
+      await refreshPendingFollowUps()
+      if (followUpClientMessageId) {
+        setSubmittingFollowUps((current) => {
+          const { [followUpClientMessageId]: _acknowledged, ...rest } = current
+          return rest
+        })
+      }
+      setComposerFollowUpModes((current) => {
+        const { [submissionThreadId]: _consumed, ...rest } = current
+        return rest
+      })
       setSubmittingByThread((current) => {
         const nextCount = Math.max(0, (current[submissionThreadId] || 0) - 1)
         if (nextCount > 0) return { ...current, [submissionThreadId]: nextCount }
@@ -814,6 +891,9 @@ export function ProtocolsPage() {
             {/* 專案 pill 置於輸入上方；其餘次要控制集中在左下＋選單。 */}
             <div className="shrink-0 w-full pt-3 pb-4 space-y-2">
               <ProjectContextBar />
+              {lifecycle.live ? (
+                <ExecutionStepsProgress tasks={activity?.tasks.length ? activity.tasks : thread?.runPlan || []} />
+              ) : null}
               <CommandComposer
                 scopeKey={activeId || 'no-thread'}
                 value={activeId ? threadDraft : draftInput}
@@ -824,7 +904,7 @@ export function ProtocolsPage() {
                 disabled={false}
                 placeholder={
                   composerBusy
-                    ? busyComposerPlaceholder(runner, settings.followUpMode)
+                    ? busyComposerPlaceholder(runner, composerFollowUpMode)
                     : thread?.awaitingReply
                       ? '回覆以繼續…'
                       : '什麼都能做'
@@ -909,6 +989,15 @@ export function ProtocolsPage() {
                 )}
                 onSubmitLine={(line, atts) => void runEmbedded(line, atts)}
                 running={lifecycle.canStop}
+                followUpAction={lifecycle.live ? selectedFollowUpAction : undefined}
+                followUpImmediateAction={lifecycle.live ? immediateFollowUpAction : undefined}
+                onFollowUpActionChange={(action) => {
+                  if (!activeId) return
+                  setComposerFollowUpModes((current) => ({
+                    ...current,
+                    [activeId]: action === 'queue' ? 'queue' : 'steer',
+                  }))
+                }}
                 pendingFollowUps={visiblePendingFollowUps}
                 onEditPendingFollowUp={editPendingFollowUp}
                 onCancelPendingFollowUp={cancelPendingFollowUp}

@@ -19,6 +19,7 @@ import {
   normalizeSubDesignCritique,
 } from '../src/agent/subdesign/critique.ts'
 import type { SubDesignCritiqueEvidence } from '../src/agent/subdesign/types.ts'
+import { useSubDesignCritiqueStore } from '../src/store/subDesignCritiqueStore.ts'
 
 function baseCritiqueInput(overrides: Record<string, unknown> = {}) {
   return {
@@ -44,6 +45,7 @@ await test('contrast gate is registered and drives default required gates', () =
 
 await test('gate evidence kind is accepted only with a known registered gateId', () => {
   const result = normalizeSubDesignCritique(baseCritiqueInput({
+    verdict: 'needs-revision',
     evidence: [
       ...baseCritiqueInput().evidence as unknown[],
       { kind: 'gate', gateId: 'not-a-real-gate', passed: true, summary: 'forged measurement' },
@@ -55,12 +57,13 @@ await test('gate evidence kind is accepted only with a known registered gateId',
   assert.equal(gateEvidence.length, 0)
 })
 
-await test('pass without contrast gate evidence is downgraded fail-closed by the registry default', () => {
-  const result = normalizeSubDesignCritique(baseCritiqueInput())
-  assert.equal(result.ok, true)
-  if (!result.ok) return
-  assert.equal(result.critique.verdict, 'needs-revision')
-  assert.ok(result.critique.findings.some((finding) => finding.severity === 'blocker' && finding.message.includes('contrast')))
+await test('store rejects an entire requested pass when required gate evidence is missing', () => {
+  useSubDesignCritiqueStore.setState({ critiques: [] })
+  const result = useSubDesignCritiqueStore.getState().record(baseCritiqueInput())
+  assert.equal(result.ok, false)
+  if (result.ok) return
+  assert.ok(result.errors.some((error) => error.includes('contrast') && error.includes('Gate 沒跑不得宣稱分數')))
+  assert.equal(useSubDesignCritiqueStore.getState().critiques.length, 0)
 })
 
 const ATTESTED_FIELDS = (gateId: string, index: number) => ({
@@ -69,7 +72,8 @@ const ATTESTED_FIELDS = (gateId: string, index: number) => ({
   evidenceId: `evidence_gate${String(index).padStart(12, '0')}`,
 })
 
-await test('pass with all required gates passed keeps verdict pass', () => {
+await test('store records a requested pass when all required gates passed', () => {
+  useSubDesignCritiqueStore.setState({ critiques: [] })
   const allGateEvidence = SUBDESIGN_CRITIQUE_GATE_REGISTRY.map((gate, index) => ({
     kind: 'gate',
     gateId: gate.id,
@@ -77,12 +81,13 @@ await test('pass with all required gates passed keeps verdict pass', () => {
     summary: `${gate.id} 通過。`,
     ...ATTESTED_FIELDS(gate.id, index),
   }))
-  const result = normalizeSubDesignCritique(baseCritiqueInput({
+  const result = useSubDesignCritiqueStore.getState().record(baseCritiqueInput({
     evidence: [...baseCritiqueInput().evidence as unknown[], ...allGateEvidence],
   }))
   assert.equal(result.ok, true)
   if (!result.ok) return
   assert.equal(result.critique.verdict, 'pass')
+  assert.equal(useSubDesignCritiqueStore.getState().critiques.length, 1)
   const contrast = result.critique.evidence.find((item) => item.kind === 'gate' && item.gateId === 'contrast')
   assert.equal(contrast?.passed, true)
 })
@@ -113,12 +118,16 @@ await test('critiqueGateStatus reports missing, failed, and unbacked scores for 
 })
 
 await test('pass verdict is downgraded when a required gate ran but failed', () => {
+  const gateEvidence = SUBDESIGN_CRITIQUE_GATE_REGISTRY.map((gate, index) => ({
+    kind: 'gate',
+    gateId: gate.id,
+    passed: gate.id !== 'contrast',
+    summary: gate.id === 'contrast' ? 'ratio 2.1 < 4.5 on .cta:hover' : `${gate.id} 通過。`,
+    ...ATTESTED_FIELDS(gate.id, index),
+  }))
   const result = normalizeSubDesignCritique(baseCritiqueInput({
-    evidence: [
-      ...baseCritiqueInput().evidence as unknown[],
-      { kind: 'gate', gateId: 'contrast', passed: false, summary: 'ratio 2.1 < 4.5 on .cta:hover' },
-    ],
-  }), undefined, { requiredGates: ['contrast'] })
+    evidence: [...baseCritiqueInput().evidence as unknown[], ...gateEvidence],
+  }))
   assert.equal(result.ok, true)
   if (!result.ok) return
   assert.equal(result.critique.verdict, 'needs-revision')
@@ -134,6 +143,7 @@ await test('score-gate map covers every score dimension deterministically', () =
 
 await test('self-asserted gate evidence without attested fields is dropped fail-closed', () => {
   const result = normalizeSubDesignCritique(baseCritiqueInput({
+    verdict: 'needs-revision',
     evidence: [
       ...(baseCritiqueInput().evidence as unknown[]),
       { kind: 'gate', gateId: 'contrast', passed: true, summary: '模型自己宣稱的對比度通過' },
@@ -251,4 +261,18 @@ await test('design_critique rejects model evidence and requires Host verificatio
   )
   assert.equal((forgedDraft.details as { ok?: boolean }).ok, false)
   assert.match(String((forgedDraft.details as { error?: string }).error), /attestation signature 不正確/)
+
+  configurePiHostServiceTransport((request) => {
+    assert.equal(request.payload.service, 'subdesign/verify-critique-evidence')
+    queueMicrotask(() => resolvePiHostServiceResponse({
+      event: 'host/service-response',
+      payload: { id: request.payload.id, result: { ok: true, verifiedEvidence: [] } },
+    }))
+  })
+  const missingGateDraft = await critique.execute(
+    { artifactId, requestedVerdict: 'pass', briefCoverage: 100, brandConformance: 100, accessibility: 100, implementationReadiness: 100 },
+    { sessionId: 'session_attestation_qa', cwd: root },
+  )
+  assert.equal((missingGateDraft.details as { ok?: boolean }).ok, false)
+  assert.match(String((missingGateDraft.details as { error?: string }).error), /Gate 沒跑不得宣稱分數/)
 })

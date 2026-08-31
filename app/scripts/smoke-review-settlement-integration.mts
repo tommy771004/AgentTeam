@@ -107,7 +107,12 @@ try {
 
   const coordinator = await readFile(new URL('../src/agent/taskRunCoordinator.ts', import.meta.url), 'utf8')
   const finalization = coordinator.slice(coordinator.indexOf('async function runFinalizationSequence'), coordinator.indexOf('function buildResumeSummary'))
+  assert.match(finalization, /await disposeRestrictedProjectView\(runId, false\)[\s\S]*finalizeRunReviewSnapshot\(input\.reviewAdmission, runId, 'failed'\)/, 'early failure disposes its restricted view before review capture')
+  assert.match(finalization, /const writeback = await disposeRestrictedProjectView[\s\S]*const reviewSnapshotRef = await finalizeRunReviewSnapshot/, 'successful safe writeback completes before immutable review capture')
   assert.match(finalization, /finalizeRunReviewSnapshot[\s\S]*pushRunProcessSummary/, 'Host snapshot finalizes before summary projection')
+  assert.match(coordinator, /reviewSummaryFiles\(args\.reviewSnapshotRef, producedFiles\)/, 'the archived changed-file card reads the canonical snapshot manifest')
+  assert.match(coordinator, /file\.additions[\s\S]*added: file\.additions/, 'snapshot additions reach the archived changed-file card')
+  assert.match(coordinator, /file\.removals[\s\S]*removed: file\.removals/, 'snapshot removals reach the archived changed-file card')
   assert.match(coordinator, /async function legacySummaryDiff[\s\S]*input\.reviewAdmission\?\.canonical !== false[\s\S]*input\.reviewSnapshotRef/, 'legacy workspaceDiff is restricted to explicit non-canonical browser runs')
   assert.doesNotMatch(finalization, /workspaceDiff/, 'canonical finalization does not reread workspace diff in the lifecycle owner')
   const threadStore = await readFile(new URL('../src/store/threadStore.ts', import.meta.url), 'utf8')

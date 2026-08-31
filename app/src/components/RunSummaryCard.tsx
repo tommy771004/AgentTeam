@@ -7,8 +7,9 @@ import { RunTimelineList, type TimelineItem } from './RunTimelineList'
 import { RunTaskRow } from './RunTaskRow'
 import { contextSummary, groupProcessOperations } from '../lib/runPresentation'
 import { formatTokensCompact, formatUsd } from '../agent/contextUsageView'
-import { UnifiedDiffView } from './UnifiedDiffView'
 import { AgentWorkTree } from './AgentWorkTree.tsx'
+import { useWorkspacePanelSessionStore } from '../store/workspacePanelSessionStore.ts'
+import { useThreadStore } from '../store/threadStore.ts'
 
 /**
  * The persisted operations replay through the SAME timeline renderer the live
@@ -46,61 +47,78 @@ function timelineItems(operations: ThreadRunSummary['operations']): TimelineItem
 
 function RunChangedFilesCard({
   files,
-  diff,
+  reviewSnapshotRef,
   additions,
   removals,
-}: Pick<ThreadRunSummary, 'files' | 'diff'> & { additions: number; removals: number }) {
-  const [diffOpen, setDiffOpen] = useState(false)
+}: Pick<ThreadRunSummary, 'files' | 'reviewSnapshotRef'> & { additions: number; removals: number }) {
   const [allFilesOpen, setAllFilesOpen] = useState(false)
-  if (!files.length && diff === undefined) return null
+  if (!files.length) return null
   const visibleFiles = files.slice(0, allFilesOpen ? files.length : 3)
+  const openReview = (path?: string) => {
+    if (!reviewSnapshotRef) return
+    const panel = useWorkspacePanelSessionStore.getState()
+    const tabId = panel.openTab(
+      { kind: 'review', target: { kind: 'run-snapshot', snapshotId: reviewSnapshotRef.snapshotId } },
+      '變更檢視',
+    )
+    if (path) panel.selectPath(tabId, path)
+    useThreadStore.getState().setShowRunPanel(true)
+  }
 
   return (
-    <section data-testid="run-summary-diff" data-summary-changes className="mt-2 overflow-hidden rounded-card border border-line bg-surface shadow-card">
-      <button
-        type="button"
-        aria-expanded={diffOpen}
-        onClick={() => setDiffOpen((value) => !value)}
-        className="flex w-full items-center gap-3 border-b border-line px-3 py-2.5 text-left"
-      >
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-control bg-surface text-ink-2">
-          <Icon name="note_stack" size={18} />
+    <section data-testid="run-summary-diff" data-summary-changes className="mt-2 overflow-hidden rounded-card border border-line bg-surface">
+      <div className="flex min-h-16 w-full items-center gap-3 border-b border-line px-3.5 py-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-control bg-inset text-ink-2">
+          <Icon name="note_stack" size={19} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[12px] font-semibold text-ink">已編輯 {files.length} 個檔案</span>
+          <span className="block text-[13px] font-semibold text-ink">已編輯 {files.length} 個檔案</span>
           {(additions > 0 || removals > 0) ? (
-            <span className="mt-0.5 block text-[11px] font-[family-name:var(--font-mono)] tabular-nums">
+            <span className="mt-0.5 block text-[12px] font-[family-name:var(--font-mono)] tabular-nums">
               {additions > 0 ? <span className="text-green">+{additions}</span> : null}
               {removals > 0 ? <span className="ml-1 text-red">−{removals}</span> : null}
             </span>
           ) : null}
         </span>
-        <span className="text-[11px] font-medium text-ink-2">{diffOpen ? '收合' : '查看 diff'}</span>
-        {diff === undefined ? <span data-testid="run-summary-diff-empty" className="sr-only">沒有偵測到工作樹變更</span> : null}
-        <Icon name={diffOpen ? 'expand_less' : 'expand_more'} size={16} className="shrink-0 text-ink-3" />
-      </button>
-      {visibleFiles.map((file) => (
-        <div key={file.path} className="flex items-center gap-2 border-b border-line px-2.5 py-1.5 last:border-0">
+        {reviewSnapshotRef ? (
+          <button
+            type="button"
+            onClick={() => openReview()}
+            className="shrink-0 rounded-control border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:bg-hover-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            aria-label="查看本次執行的變更"
+          >
+            查看
+          </button>
+        ) : null}
+      </div>
+      {visibleFiles.map((file) => {
+        const content = <>
           <Icon name={file.action === 'create' ? 'note_add' : 'edit'} size={14} className="shrink-0 text-ink-3" />
-          <span className="min-w-0 flex-1 truncate text-[12px] text-ink font-[family-name:var(--font-mono)]" title={file.path}>{file.path.replace(/\\/g, '/')}</span>
-          <span className="shrink-0 text-[11px] font-[family-name:var(--font-mono)]">
+          <span className="min-w-0 flex-1 truncate text-[12px] text-ink" title={file.path}>{file.path.replace(/\\/g, '/')}</span>
+          <span className="shrink-0 text-[12px] font-[family-name:var(--font-mono)] tabular-nums">
             {file.added != null ? <span className="text-green">+{file.added}</span> : null}
             {file.removed != null ? <span className="ml-1 text-red">-{file.removed}</span> : null}
           </span>
-        </div>
-      ))}
+        </>
+        return reviewSnapshotRef ? (
+          <button key={file.path} type="button" onClick={() => openReview(file.path)} className="flex w-full items-center gap-2 border-b border-line px-3.5 py-2 text-left transition-colors hover:bg-hover-1 focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-accent">
+            {content}
+          </button>
+        ) : (
+          <div key={file.path} className="flex items-center gap-2 border-b border-line px-3.5 py-2">{content}</div>
+        )
+      })}
       {files.length > 3 ? (
         <button
           type="button"
           aria-expanded={allFilesOpen}
           onClick={() => setAllFilesOpen((value) => !value)}
-          className="flex w-full items-center gap-2 border-b border-line px-3 py-2 text-left text-[11px] text-ink-2 hover:bg-hover-1"
+          className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[12px] text-ink-2 hover:bg-hover-1 focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-accent"
         >
           <span className="flex-1">{allFilesOpen ? '只顯示前 3 個檔案' : `顯示另外 ${files.length - 3} 個檔案`}</span>
           <Icon name={allFilesOpen ? 'expand_less' : 'expand_more'} size={15} className="text-ink-3" />
         </button>
       ) : null}
-      {diffOpen ? <UnifiedDiffView diff={diff || ''} testId="run-summary-diff-content" /> : null}
     </section>
   )
 }
@@ -264,7 +282,7 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
           ) : null}
         </section>
       ) : null}
-      <RunChangedFilesCard files={summary.files} diff={summary.diff} additions={additions} removals={removals} />
+      <RunChangedFilesCard files={summary.files} reviewSnapshotRef={summary.reviewSnapshotRef} additions={additions} removals={removals} />
     </>
   )
 }

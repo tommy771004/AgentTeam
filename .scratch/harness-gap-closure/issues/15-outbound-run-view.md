@@ -4,7 +4,7 @@
 
 **Blocked by:** None.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 `agent/outbound/` is 21 modules backed by ADR-0004 through ADR-0022 — a four-stage gate (`off` / `demo` / `optional` / `required`), text and image sanitisation, sanitized workspace, evidence ledger and upload, policy store/merge/schema/admin, device enrollment. Even LLM calls pass through it, with `window.subagents.llm.chat` recording metadata-only egress evidence in main.
 
@@ -12,17 +12,17 @@ The compared harness has sandboxing, which governs what a process may touch, and
 
 Right now it is entirely backend policy. Nobody can see it working.
 
-- [ ] A run detail view shows what was sent outbound during that run, what was redacted, and to which provider.
-- [ ] LLM egress appears alongside tool egress, since both pass the same gate.
-- [ ] The active guard mode is shown, and the view explains what that mode permitted or blocked for this run.
-- [ ] Redactions show what class of content was removed, not the removed content itself.
-- [ ] The view is a projection of metadata already recorded at the gate — no new collection.
-- [ ] Raw credentials are never surfaced; no renderer path is added that could read them from the vault.
-- [ ] Runs under `off` or `demo` mode are distinguishable from runs that were genuinely gated.
-- [ ] A smoke asserts the projection contains the expected egress entries and no raw secret material.
+- [x] A run detail view shows what was sent outbound during that run, what was redacted, and to which provider.
+- [x] LLM egress appears alongside tool egress, since both pass the same gate.
+- [x] The active guard mode is shown, and the view explains what that mode permitted or blocked for this run.
+- [x] Redactions show what class of content was removed, not the removed content itself.
+- [x] The view is a projection of metadata already recorded at the gate — no new collection.
+- [x] Raw credentials are never surfaced; no renderer path is added that could read them from the vault.
+- [x] Runs under `off` or `demo` mode are distinguishable from runs that were genuinely gated.
+- [x] A smoke asserts the projection contains the expected egress entries and no raw secret material.
 
 Files: `app/src/agent/outbound/outboundGate.ts`, `app/src/agent/outbound/evidenceLedger.ts`, `app/src/agent/outbound/textSanitize.ts`, `app/src/agent/outbound/imageSanitize.ts`, run detail view.
 
-## Implementation note (2026-08-27)
+## Resolution evidence (2026-08-31)
 
-Ops 現在以 active + retained run registry 建立 selector，切換後把所選 `runId` 傳給 `OutboundRunView`；不再固定顯示 `activeRuns[0]`。`smoke-outbound-run-view.mts` 釘住多 run 選擇與按 run 過濾 evidence。此票其餘 UX 驗收（例如顯示 redaction 類別而非只顯示數量）仍未全部完成，因此不標 resolved。
+Ops 以 active + retained run registry 建立 selector，切換後把所選 `runId` 傳給 `OutboundRunView`；view 只投影既有 gate metadata，顯示 provider、action、effective guard mode、mode 說明與 redaction taxonomy，不顯示命中內容或 vault secret。`smoke-outbound-run-view.mts` 釘住多 run 選擇、按 run 過濾、guard 說明、分類摘要與 secret exclusion。

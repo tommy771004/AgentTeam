@@ -28,7 +28,7 @@ async function test(name: string, fn: () => void) {
 
 console.log('smoke-outbound-shell-evidence')
 
-await test('ticket21: required denies unisolated bash', () => {
+await test('ticket21: policy helper denies required bash without Host-issued evidence', () => {
   const r = decideBuiltinShellUnderProtection({
     effectiveMode: 'required',
     command: 'ls',
@@ -97,7 +97,7 @@ await test('ADR-0047: the run policy carries the admitted shell posture', () => 
   )
 })
 
-await test('ADR-0047: an unbound view leaves viewRoot absent, so required still denies', () => {
+await test('ADR-0047: an unbound view leaves viewRoot absent, so unverified required still denies', () => {
   const policy = withRunShellPolicy(
     buildRunContextPolicy(baseSettings, { temporary: false }),
     { effectiveMode: 'required' },

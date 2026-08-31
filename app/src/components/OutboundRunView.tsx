@@ -2,6 +2,13 @@ import { useEffect, useState } from 'react'
 import { Icon } from './Icon'
 import { projectOutboundRunEvidence, type OutboundRunView as OutboundView } from '../agent/outbound/runEvidence'
 
+const GUARD_MODE_COPY: Record<string, string> = {
+  off: '未啟用 outbound gate；僅顯示可用的 metadata。',
+  demo: '僅記錄判斷，不阻擋 outbound。',
+  optional: '依目前政策允許或限制 outbound。',
+  required: '必須通過 outbound policy 與必要證據才允許送出。',
+}
+
 const REDACTION_LABELS: Record<string, string> = {
   credential: '憑證與金鑰',
   'personal-data': '個人資料',
@@ -30,6 +37,9 @@ export function OutboundRunView({ runId }: { runId?: string | null }) {
   }, [runId])
 
   if (!runId) return null
+  const guardModes = view
+    ? [...new Set(view.records.map((record) => record.effectiveGuardMode).filter(Boolean) as string[])]
+    : []
   return (
     <section className="glass-panel rounded-xl p-5">
       <h2 className="font-semibold flex items-center gap-2 mb-3">
@@ -43,6 +53,11 @@ export function OutboundRunView({ runId }: { runId?: string | null }) {
             <Stat label="provider" value={view.providerIds.join(', ') || '—'} />
             <Stat label="redaction" value={String(view.redactionEvents)} />
             <Stat label="sealed" value={String(view.sealedRecords)} />
+          </div>
+          <div className="mb-3 rounded-lg border border-line/40 bg-surface-container-high/45 px-3 py-2 text-[10px] text-on-surface-variant">
+            {guardModes.length ? guardModes.map((mode) => (
+              <p key={mode}><span className="font-semibold text-on-surface">{mode}</span>：{GUARD_MODE_COPY[mode] || '依該次 evidence 記錄判定 outbound。'}</p>
+            )) : <p>本次沒有 guard mode evidence。</p>}
           </div>
           <div className="mb-3 rounded-lg border border-line/40 bg-surface-container-high/45 px-3 py-2">
             <p className="text-[10px] font-semibold text-on-surface">遮罩類別</p>

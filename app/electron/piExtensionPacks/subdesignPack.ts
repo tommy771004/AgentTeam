@@ -512,8 +512,8 @@ const designCritique: PiPackTool = {
       implementationReadiness: typeof args.implementationReadiness === 'number' ? clampScore(args.implementationReadiness) : undefined,
       verdict: args.requestedVerdict === 'pass' ? 'pass' : 'needs-revision',
     }
-    // THE shared normalizer computes the verdict: blockers, missing required
-    // evidence kinds, unexecuted gates, and unbacked scores each force
+    // THE shared normalizer computes the verdict: a requested pass with
+    // unexecuted gates is rejected; other unmet evidence downgrades to
     // needs-revision regardless of what was requested.
     const normalized = normalizeSubDesignCritique(input)
     if (!normalized.ok) return structuredFailure(normalized.errors.join('；'))

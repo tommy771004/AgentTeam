@@ -52,7 +52,7 @@ export function DevTrajectoryMeasurement() {
               <article className="px-1 text-[13px] leading-relaxed text-ink-2">
                 已完成品牌相容性調整，並補上跨版本更新驗證。
               </article>
-              <RunSummaryCard summary={{ status: 'success', durationMs: 8_000, operations: [], files, diff: fixtureDiff }} />
+              <RunSummaryCard summary={{ status: 'success', durationMs: 8_000, operations: [], files, diff: fixtureDiff, reviewSnapshotRef: { snapshotId: 'fixture-review-snapshot', runId: 'fixture-run', status: 'ready', attributionFidelity: 'exact' } }} />
             </div>
           </div>
         </main>

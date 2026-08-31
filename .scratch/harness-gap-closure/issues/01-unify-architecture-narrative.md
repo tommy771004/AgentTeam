@@ -4,17 +4,21 @@
 
 **Blocked by:** None.
 
-**Status:** 可交給代理
+**Status:** resolved
 
 Take this ticket first. It determines where the code from every other ticket belongs.
 
 The two documents currently disagree. `CLAUDE.md` describes `agent/loop` + `agent/engine.ts` + a renderer tool loop; `CONTEXT.md` describes Pi Core as the sole tool-loop owner with SubAgents as an Orchestration Extension. Both paths exist in code — `registry.ts` `selectToolsForStep` branches on `electronPiHostOwnsTools` to skip `bash` with a comment naming Pi Host as the canonical Bash owner, alongside 30+ `electron/pi*.ts` files and 40+ `smoke-pi-*` scripts. ADR-0045 already chose removable compatibility seams; what is missing is the exit timetable and document alignment.
 
-- [ ] `CLAUDE.md` and `CONTEXT.md` describe the same target runtime, with the legacy loop named as a transitional path rather than the architecture.
-- [ ] Each surviving compatibility seam names its deletion gate, per ADR-0045.
-- [ ] Behavioural divergence between the two `bash` paths (browser fallback versus Pi Host) is documented or removed, not left implicit.
-- [ ] A drift guard fails the build when a new source file adds a reference to `agent/loop/*` beyond the existing allowlist.
-- [ ] Deliberately introducing one new `agent/loop/*` reference makes `npm run smoke` fail.
-- [ ] The existing "`agent/loop` is only imported by `engine.ts`" guard in `smoke-caps.mjs` still passes against both the fixture and the real file tree.
+- [x] `CLAUDE.md`, `CONTEXT.md` and the conversation-flow document describe Pi Core Host as the sole builtin tool-loop owner.
+- [x] The transitional `agent/loop/` and `agent/engine.ts` seams reached their ADR-0045 deletion gate and were removed.
+- [x] The browser fallback `bash` path was removed; Pi Host adapters are the single builtin shell owner.
+- [x] A drift guard fails the build when a new source file references or imports the deleted `agent/loop/*`／`agent/engine.ts` path.
+- [x] Deliberately introducing one new legacy reference makes the guard fail.
+- [x] The old allowlist guard was replaced by the stronger zero-reference fixture + real-tree guard in `smoke-caps.mjs`.
 
-Files: `CLAUDE.md`, `CONTEXT.md`, `app/scripts/smoke-loop-parity.mts`, `app/scripts/smoke-caps.mjs`, `app/src/agent/tools/registry.ts`.
+Files: `CLAUDE.md`, `CONTEXT.md`, `docs/CONVERSATION_LOOP_HERMES_FLOW.md`, `app/scripts/smoke-caps.mjs`, `app/scripts/smoke-runner-contract.mts`.
+
+## Resolution evidence (2026-08-31)
+
+The migration advanced beyond this ticket's transitional target: the legacy engine and loop no longer exist. `smoke-caps.mjs` checks both hostile fixtures and the real tree, while runner-era assertions were repointed to current owners in `smoke-runner-contract.mts`. The conversation architecture document now names `runTask`, `runDispatch` and Pi Host rather than deleted owners or forced-Goal semantics.

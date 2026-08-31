@@ -46,6 +46,7 @@ import { followUpActionForRunner, submitHostInteractiveFollowUp } from './intera
 import {
   nonCanonicalReviewAdmission,
   type ReviewAdmissionSnapshot,
+  type ReviewFileManifestEntry,
   type ReviewRunnerKind,
   type ReviewSnapshotRef,
 } from './reviewContract.ts'
@@ -510,6 +511,29 @@ async function finalizeRunReviewSnapshot(
     return admission?.canonical && admission.snapshotId
       ? { snapshotId: admission.snapshotId, runId: admission.runId, status: 'failed', attributionFidelity: 'partial' }
       : undefined
+  }
+}
+
+async function disposeRestrictedProjectView(
+  runId: string,
+  writeback: boolean,
+): Promise<{ filesWritten: number; withheldRanges: number } | undefined> {
+  try {
+    const disp = await window.subagents?.outbound?.disposeRunView?.(runId, { writeback })
+    if (!writeback || !disp || typeof disp !== 'object' || !('writeback' in disp) || !disp.writeback) return undefined
+    return {
+      filesWritten: disp.writeback.filesWritten,
+      withheldRanges: disp.writeback.withheldRanges,
+    }
+  } catch {
+    return undefined
+  } finally {
+    try {
+      const { unpinRestrictedViewRootForRun } = await import('./outbound/sanitizedWorkspace.ts')
+      unpinRestrictedViewRootForRun(runId)
+    } catch {
+      /* non-fatal */
+    }
   }
 }
 
@@ -1028,6 +1052,7 @@ async function runFinalizationSequence(
       threadId: tid,
       runId,
     }
+    await disposeRestrictedProjectView(runId, false)
     const reviewSnapshotRef = await finalizeRunReviewSnapshot(input.reviewAdmission, runId, 'failed')
     await pushEarlyFailureSummary({
       thr,
@@ -1112,6 +1137,22 @@ async function runFinalizationSequence(
       : storedAgent
   const postState = finalAgent.postState
 
+  const status =
+    result.status === 'failed' || result.error
+      ? result.status === 'failed'
+        ? 'failed'
+        : finalAgent.status
+      : finalAgent.status || result.status
+
+  const writeback = await disposeRestrictedProjectView(runId, String(status) === 'success')
+  if (writeback && writeback.filesWritten > 0) {
+    thr.pushBubble(
+      tid,
+      'system',
+      `出站資料閘門：安全回寫 ${writeback.filesWritten} 檔（withheld ranges=${writeback.withheldRanges}）`,
+    )
+  }
+
   const reviewSnapshotRef = await finalizeRunReviewSnapshot(
     input.reviewAdmission,
     runId,
@@ -1151,12 +1192,6 @@ async function runFinalizationSequence(
     )
   }
 
-  const status =
-    result.status === 'failed' || result.error
-      ? result.status === 'failed'
-        ? 'failed'
-        : finalAgent.status
-      : finalAgent.status || result.status
   thr.setThreadStatus(
     tid,
     (status === 'success' ||
@@ -1332,35 +1367,6 @@ async function runFinalizationSequence(
 
   // 4) onSettled
   await settle(finalResult)
-
-  // 4b) dispose Restricted Project View (Outbound Data Gate) — never block release.
-  // Ticket 25 / ADR-0008: on success, safe-writeback mapped text files before dispose.
-  try {
-    const writeback = String(status) === 'success'
-    const disp = await window.subagents?.outbound?.disposeRunView?.(runId, { writeback })
-    if (
-      writeback &&
-      disp &&
-      typeof disp === 'object' &&
-      'writeback' in disp &&
-      disp.writeback &&
-      disp.writeback.filesWritten > 0
-    ) {
-      thr.pushBubble(
-        tid,
-        'system',
-        `出站資料閘門：安全回寫 ${disp.writeback.filesWritten} 檔（withheld ranges=${disp.writeback.withheldRanges}）`,
-      )
-    }
-  } catch {
-    /* non-fatal */
-  }
-  try {
-    const { unpinRestrictedViewRootForRun } = await import('./outbound/sanitizedWorkspace.ts')
-    unpinRestrictedViewRootForRun(runId)
-  } catch {
-    /* non-fatal */
-  }
 
   // Steps 5 (release capacity) and 6 (queue drain) are not steps of this
   // sequence: they are obligations of holding the finalization claim, and run
@@ -1644,6 +1650,59 @@ function archivedAgentWorkPayload(finalAgent: AgentState) {
   return agentWork ? { agentWork } : {}
 }
 
+type RunSummaryChangedFile = {
+  path: string
+  action: string
+  added?: number
+  removed?: number
+}
+
+function reviewFileAction(file: ReviewFileManifestEntry): string {
+  if (file.status === 'added' || file.status === 'untracked' || file.status === 'copied') return 'create'
+  if (file.status === 'deleted') return 'delete'
+  if (file.status === 'renamed') return 'rename'
+  return 'edit'
+}
+
+/**
+ * Archive the Host snapshot's per-file numstat next to the summary bubble.
+ * The Turn Record remains the fallback for old/degraded runners, while a
+ * canonical snapshot supplies deletions, renames, and exact +/− counts.
+ */
+async function reviewSummaryFiles(
+  ref: ReviewSnapshotRef | undefined,
+  producedFiles: Array<{ path: string; action: string }>,
+): Promise<RunSummaryChangedFile[]> {
+  const fallback = producedFiles.map((file) => ({ path: file.path, action: file.action }))
+  const listFiles = typeof window === 'undefined' ? undefined : window.subagents?.piHost?.review?.listFiles
+  if (!ref || typeof listFiles !== 'function') return fallback
+  try {
+    const items: ReviewFileManifestEntry[] = []
+    let cursor: string | undefined
+    for (let pageNumber = 0; pageNumber < 25; pageNumber += 1) {
+      const response = await listFiles({
+        target: { kind: 'run-snapshot', snapshotId: ref.snapshotId },
+        ...(cursor ? { cursor } : {}),
+        limit: 200,
+      })
+      items.push(...response.reviewFiles.items)
+      cursor = response.reviewFiles.nextCursor
+      if (!cursor) break
+    }
+    if (!items.length) return fallback
+    const files = items.map((file) => ({
+      path: file.path,
+      action: reviewFileAction(file),
+      ...(file.additions === undefined ? {} : { added: file.additions }),
+      ...(file.removals === undefined ? {} : { removed: file.removals }),
+    }))
+    const known = new Set(files.map((file) => file.path))
+    return [...files, ...fallback.filter((file) => !known.has(file.path))]
+  } catch {
+    return fallback
+  }
+}
+
 async function pushRunProcessSummary(args: {
   thr: ReturnType<typeof import('../store/threadStore.ts').useThreadStore.getState>
   tid: string
@@ -1687,6 +1746,7 @@ async function pushRunProcessSummary(args: {
     removed: row.removed,
   }))
   const producedFiles = projectProducedFiles(finalAgent.turnRecord)
+  const summaryFiles = await reviewSummaryFiles(args.reviewSnapshotRef, producedFiles)
   const diff = await legacySummaryDiff({
     reviewAdmission: args.reviewAdmission,
     reviewSnapshotRef: args.reviewSnapshotRef,
@@ -1787,7 +1847,7 @@ async function pushRunProcessSummary(args: {
               ok: status === 'success',
             },
           ],
-    files: producedFiles.map((file) => ({ path: file.path, action: file.action })),
+    files: summaryFiles,
   })
 
   await persistArtifactIndexForRun({

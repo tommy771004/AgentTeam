@@ -46,6 +46,30 @@ export function createFollowUpClientMessageId(): string {
   return globalThis.crypto?.randomUUID?.() || `follow-up-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+export function createSubmittingFollowUpProjection(input: {
+  id: string
+  threadId: string
+  text: string
+  action: FollowUpAction
+  attachmentCount?: number
+}): PendingFollowUpProjection {
+  return {
+    id: input.id,
+    runId: input.id,
+    sessionId: 'renderer-submitting',
+    threadId: input.threadId,
+    text: input.text,
+    action: input.action,
+    state: 'submitting',
+    revision: 0,
+    queueRevision: 0,
+    editable: false,
+    cancellable: false,
+    reorderable: false,
+    attachmentCount: input.attachmentCount || 0,
+  }
+}
+
 export type HostFollowUpSubmission = {
   action: 'steer' | 'queue'
   threadId: string

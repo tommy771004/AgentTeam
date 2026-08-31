@@ -1,8 +1,15 @@
 import { parseReviewArtifactImportBundle, reviewArtifactBundleHash, ReviewArtifactStoreError, type ReviewArtifactExportBundle, type ReviewArtifactStore } from './reviewArtifactStore.ts'
 import type { ReviewStateStore } from './reviewStateStore.ts'
+import type { ReviewVerificationStore } from './reviewVerificationStore.ts'
 import { parseReviewStateSnapshot } from './reviewStateSnapshot.ts'
 
-const importTails = new WeakMap<ReviewArtifactStore, Promise<void>>()
+const lifecycleTails = new WeakMap<ReviewArtifactStore, Promise<void>>()
+
+function serializeReviewArtifactLifecycle<T>(artifacts: ReviewArtifactStore, operation: () => Promise<T>): Promise<T> {
+  const queued = (lifecycleTails.get(artifacts) || Promise.resolve()).then(operation)
+  lifecycleTails.set(artifacts, queued.then(() => undefined, () => undefined))
+  return queued
+}
 
 export async function exportReviewArtifact(artifacts: ReviewArtifactStore, states: ReviewStateStore, snapshotId: string): Promise<ReviewArtifactExportBundle> {
   const { bundleHash: _hash, ...artifactBundle } = await artifacts.exportArtifact(snapshotId)
@@ -16,9 +23,7 @@ export async function exportReviewArtifact(artifacts: ReviewArtifactStore, state
 
 export function importReviewArtifact(artifacts: ReviewArtifactStore, states: ReviewStateStore, value: unknown, expectedBundleHash: string) {
   const frozen = structuredClone(value)
-  const operation = (importTails.get(artifacts) || Promise.resolve()).then(() => importExclusive(artifacts, states, frozen, expectedBundleHash))
-  importTails.set(artifacts, operation.then(() => undefined, () => undefined))
-  return operation
+  return serializeReviewArtifactLifecycle(artifacts, () => importExclusive(artifacts, states, frozen, expectedBundleHash))
 }
 
 async function importExclusive(artifacts: ReviewArtifactStore, states: ReviewStateStore, value: unknown, expectedBundleHash: string) {
@@ -26,13 +31,44 @@ async function importExclusive(artifacts: ReviewArtifactStore, states: ReviewSta
   if (bundle.bundleHash !== expectedBundleHash) throw new ReviewArtifactStoreError('conflict', 'Review import changed after preview')
   const preview = await previewReviewArtifactImport(artifacts, bundle)
   if (preview.status !== 'ready') throw new ReviewArtifactStoreError('conflict', `Review import is ${preview.status}`)
-  if (bundle.schemaVersion === 2) {
-    // Restore state atomically before publishing the artifact. An interruption
-    // here leaves no readable artifact; exact state retries are idempotent.
-    // Never roll back via hardDeleteSnapshot: that could erase existing state.
-    await states.importSnapshot(parseReviewStateSnapshot(bundle.reviewState, bundle.artifact.snapshotId))
+  const snapshotId = bundle.artifact.snapshotId
+  let stateRestored = false
+  try {
+    if (bundle.schemaVersion === 2) {
+      // State stays unpublished until the artifact commit. If the artifact
+      // commit fails, remove only this still-unpublished snapshot's state.
+      await states.importSnapshot(parseReviewStateSnapshot(bundle.reviewState, snapshotId))
+      stateRestored = true
+    }
+    return await artifacts.importArtifact(bundle, expectedBundleHash)
+  } catch (error) {
+    const published = await artifacts.findByRunId(bundle.artifact.runId).catch(() => undefined)
+    if (stateRestored && published?.snapshotId !== snapshotId) await states.hardDeleteSnapshot(snapshotId)
+    throw error
   }
-  return artifacts.importArtifact(bundle, expectedBundleHash)
+}
+
+/** Logical hard delete: hide the artifact first, then remove dependent owners. */
+export async function hardDeleteReviewArtifact(
+  artifacts: ReviewArtifactStore,
+  states: ReviewStateStore,
+  verification: ReviewVerificationStore,
+  snapshotId: string,
+  reason: string,
+): Promise<void> {
+  await serializeReviewArtifactLifecycle(artifacts, async () => {
+    await artifacts.deleteArtifact(snapshotId, reason)
+    await states.hardDeleteSnapshot(snapshotId)
+    await verification.hardDeleteSnapshot(snapshotId)
+    await artifacts.hardDeleteArtifact(snapshotId)
+  })
+}
+
+export function applyReviewArtifactRetention(
+  artifacts: ReviewArtifactStore,
+  input: Parameters<ReviewArtifactStore['applyRetention']>[0],
+) {
+  return serializeReviewArtifactLifecycle(artifacts, () => artifacts.applyRetention(input))
 }
 
 export async function previewReviewArtifactImport(artifacts: ReviewArtifactStore, value: unknown) {

@@ -156,6 +156,16 @@ export type ReviewSnapshotRef = {
   manifestHash?: string
 }
 
+export function isReviewSnapshotRef(value: unknown): value is ReviewSnapshotRef {
+  if (!value || typeof value !== 'object') return false
+  const ref = value as Record<string, unknown>
+  return typeof ref.snapshotId === 'string' && ref.snapshotId.length > 0 && ref.snapshotId.length <= 512
+    && typeof ref.runId === 'string' && ref.runId.length > 0 && ref.runId.length <= 512
+    && ['pending', 'capturing', 'ready', 'partial', 'failed', 'missing', 'deleted'].includes(String(ref.status))
+    && ['exact', 'attributed', 'shared', 'partial'].includes(String(ref.attributionFidelity))
+    && (ref.manifestHash === undefined || typeof ref.manifestHash === 'string' && /^[a-f0-9]{64}$/.test(ref.manifestHash))
+}
+
 export type ReviewRunnerKind = 'builtin' | 'external'
 
 export type ReviewWorkspaceBinding = {

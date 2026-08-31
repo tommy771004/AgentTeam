@@ -15,4 +15,4 @@
 - [x] Adapter contract tests 覆蓋 duplicate suppression、argv/prompt handoff、project cwd、queue/restart snapshot 與 unsupported provider。
 - [ ] 真機 Codex／Claude qualification 驗證 native discovery；未安裝或未授權 provider 保持 explicit blocked/unqualified evidence。
 
-**Qualification note（2026-08-30）：** [release evidence](../qualification.md) 已把外部界線固定為 Codex `native_discovery_unproven`、Claude `auth_unavailable`；兩者皆為 `unqualified`，本項維持未勾選，等待可用外部環境補證。
+**Qualification note（2026-08-31 fresh rerun）：** [qualification](../qualification.md) 與 retained metadata report 已從 shipped path 重跑。Codex CLI 0.150.1 exit 0 且 checkpoint／record 通過，但 native marker 未出現，仍為 `native_discovery_unproven`；Claude Code 2.1.246 實際啟動後回報 `auth_unavailable`。兩者皆維持 `unqualified`，本項不勾選。

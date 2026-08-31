@@ -2,14 +2,16 @@ import { useState, type FocusEvent } from 'react'
 import type { RunTaskItem } from '../store/runActivityStore'
 import { Icon } from './Icon'
 
-function StepStatusIcon({ task }: { task: RunTaskItem }) {
+type ExecutionStep = Pick<RunTaskItem, 'id' | 'text' | 'status'>
+
+function StepStatusIcon({ task }: { task: ExecutionStep }) {
   if (task.status === 'done') return <Icon name="check_circle" size={16} className="text-green" />
   if (task.status === 'failed') return <Icon name="error" size={16} className="text-red" />
   if (task.status === 'active') return <Icon name="progress_activity" size={16} className="animate-spin text-ink" />
   return <Icon name="radio_button_unchecked" size={16} className="text-ink-3" />
 }
 
-export function ExecutionStepsProgress({ tasks }: { tasks: readonly RunTaskItem[] }) {
+export function ExecutionStepsProgress({ tasks }: { tasks: readonly ExecutionStep[] }) {
   const [pinnedOpen, setPinnedOpen] = useState(false)
   const [hoverOpen, setHoverOpen] = useState(false)
   if (tasks.length === 0) return null

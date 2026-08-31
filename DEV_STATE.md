@@ -1,6 +1,12 @@
 # Development State
 
-截至 2026-08-30。
+截至 2026-08-31。
+
+## 本日資格重跑：External CLI 與 release gate
+
+`app/scripts/qualify-external-cli-real.mts` 已從 shipped admission／adapter owner 重跑並保存 metadata-only evidence。Codex CLI 0.150.1 process exit 0，active checkpoint、restart projection 與 Turn Record 通過，但原生 `AGENTS.md` marker 未出現，因此仍為 `native_discovery_unproven`；Claude Code 2.1.246 實際啟動後回報 `auth_unavailable`。兩者皆維持 unqualified，未由 process success 推導 DoD。本輪依使用者指示未做 Linux bwrap，也未安裝或登入 Grok／Gemini／Cursor。
+
+Paid Beta release qualifier 同日重跑為 **NO-GO（0/43）**：沒有 signed/notarized artifact、clean-machine install、N-1→N、entitlement、workflow 與 trust publication evidence。報告保存在 `release-evidence/paid-beta-qualification.md`；不得發佈或宣稱 ready。
 
 ## 本日收口：Host-owned Agent Collaboration
 
@@ -70,8 +76,7 @@ Ticket 15 完成 contract：Pi Host Protocol v5 移除 whole-bundle `memory/*` �
 
 1. paid-beta #14 release qualification——需 clean-machine signed 安裝等真機證據（目錄已移除，殘餘遷記 Remaining blocked）。
 2. runtime-contract #14——Linux CI 首綠後補勾三框。
-3. harness-gap-closure #09——待維護者裁決。
-4. codex-aligned personalization #11——需可用 Codex／Claude 真機環境補 native filesystem discovery 證據；目前 Codex `native_discovery_unproven`、Claude `auth_unavailable`。
+3. codex-aligned personalization #11——需可用 Codex／Claude 真機環境補 native filesystem discovery 證據；目前 Codex `native_discovery_unproven`、Claude `auth_unavailable`。
 
 ## 延續未解（自 08-15 記載）
 

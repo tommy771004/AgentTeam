@@ -9,7 +9,11 @@ const packageJson = JSON.parse(readFileSync(resolve(appRoot, 'package.json'), 'u
 const scripts = packageJson.scripts
 const exactBuildCalls = (body: string): string[] => body.match(/npm run build(?!:)/g) ?? []
 
-assert.equal(scripts.build, 'npm run build:compile', 'the default build must be compilation-only')
+assert.equal(
+  scripts.build,
+  'npm run check:build-flavor && npm run build:compile',
+  'the default build must fail closed on invalid build flavor before compilation',
+)
 assert.equal(scripts['build:compile'], 'npm run build:pi-host && tsc -b && vite build', 'the compile graph must contain no qualification commands')
 assert.equal(scripts['build:pi-vendor'], 'node --experimental-strip-types scripts/build-pi-vendor.mts', 'Pi vendor compilation must not run smoke tests')
 assert.doesNotMatch(scripts['build:pi-host:actual'] ?? '', /smoke|qualif|electron/, 'Pi Host compilation must not run tests or launch Electron')

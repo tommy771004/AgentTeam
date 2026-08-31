@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { InMemoryReviewArtifactStore, ReviewArtifactStoreError, SqliteReviewArtifactStore, type ReviewArtifactStore } from '../electron/reviewArtifactStore.ts'
 import { InMemoryReviewStateStore, SqliteReviewStateStore, type ReviewStateStore } from '../electron/reviewStateStore.ts'
-import { exportReviewArtifact, importReviewArtifact, previewReviewArtifactImport } from '../electron/reviewArtifactTransfer.ts'
+import { exportReviewArtifact, hardDeleteReviewArtifact, importReviewArtifact, previewReviewArtifactImport } from '../electron/reviewArtifactTransfer.ts'
 import { reviewArtifactBundleHash } from '../electron/reviewArtifactStore.ts'
 import { InMemoryReviewVerificationStore } from '../electron/reviewVerificationStore.ts'
 import type { ReviewAdmissionSnapshot } from '../src/agent/reviewContract.ts'
@@ -16,6 +16,12 @@ function admission(snapshotId: string): Extract<ReviewAdmissionSnapshot, { canon
     snapshotId, runId: `run_${snapshotId}`, status: 'pending', canonical: true, runnerKind: 'builtin',
     workspace: { workspaceId: 'workspace_lifecycle', mode: 'git', projectRoot: '/old/project', repoRoot: '/old/project', worktreeRoot: '/old/project', gitDir: '/old/project/.git' },
     baseline: { capturedAt: '2026-08-01T00:00:00.000Z', head: 'a'.repeat(40), indexRevision: 'b'.repeat(64), workingRevision: 'c'.repeat(64) },
+  }
+}
+
+class FailingImportArtifactStore extends InMemoryReviewArtifactStore {
+  override async importArtifact(): Promise<never> {
+    throw new ReviewArtifactStoreError('closed', 'injected artifact commit failure')
   }
 }
 
@@ -112,6 +118,16 @@ try {
   await lifecycle(new InMemoryReviewArtifactStore(), new InMemoryReviewArtifactStore())
   await transfer(new InMemoryReviewArtifactStore(), new InMemoryReviewArtifactStore(), new InMemoryReviewStateStore(), new InMemoryReviewStateStore())
 
+  const rollbackSource = new InMemoryReviewArtifactStore()
+  const rollbackSourceState = new InMemoryReviewStateStore()
+  const rollbackSnapshotId = 'review_import_rollback'
+  await ready(rollbackSource, rollbackSnapshotId, false)
+  await rollbackSourceState.saveDraft({ id: 'rollback-draft', anchor: { snapshotId: rollbackSnapshotId, path: 'src/lifecycle.ts', side: 'new', line: 1, hunkFingerprint: 'hunk', contextHash: 'context', originalContext: 'line' }, body: 'must not become orphaned' })
+  const rollbackBundle = await exportReviewArtifact(rollbackSource, rollbackSourceState, rollbackSnapshotId)
+  const rollbackDestinationState = new InMemoryReviewStateStore()
+  await assert.rejects(() => importReviewArtifact(new FailingImportArtifactStore(), rollbackDestinationState, rollbackBundle, rollbackBundle.bundleHash), /injected artifact commit failure/)
+  assert.deepEqual(await rollbackDestinationState.listComments(rollbackSnapshotId), [], 'failed artifact commit removes unpublished imported state')
+
   const archivedArtifacts = new InMemoryReviewArtifactStore()
   const archivedState = new InMemoryReviewStateStore()
   const archivedVerification = new InMemoryReviewVerificationStore()
@@ -120,12 +136,10 @@ try {
   await archivedState.markReviewed({ snapshotId: 'review_archived', path: 'src/lifecycle.ts', contentHash: 'f'.repeat(64) })
   await archivedVerification.record({ snapshotId: 'review_archived', runId: 'run_review_archived', workspaceId: 'workspace_lifecycle', verifiedRevision: 'a'.repeat(64), kind: 'build', command: 'npm', args: ['run', 'build'], cwd: '/old/project', runner: 'host', startedAt: '2026-08-30T00:00:00.000Z', durationMs: 1, exitCode: 0, output: 'passed' })
   assert.deepEqual(await archivedState.referencedSnapshotIds(), ['review_archived'])
-  assert.deepEqual((await archivedArtifacts.applyRetention({ retainedSnapshotIds: ['review_archived'], reason: 'archive retention' })).retained, ['review_archived'])
+  assert.deepEqual((await archivedArtifacts.applyRetention({ retainedSnapshotIds: [], retainedThreadIds: ['thread_archive'], reason: 'archive retention' })).retained, ['review_archived'], 'Host thread/archive identity protects its snapshots')
   assert.equal((await archivedState.listComments('review_archived')).length, 1, 'archive retains comments and review state')
   assert.equal((await archivedVerification.list('review_archived')).length, 1, 'archive retains verification records')
-  await archivedState.hardDeleteSnapshot('review_archived')
-  await archivedVerification.hardDeleteSnapshot('review_archived')
-  await archivedArtifacts.hardDeleteArtifact('review_archived')
+  await hardDeleteReviewArtifact(archivedArtifacts, archivedState, archivedVerification, 'review_archived', 'explicit fixture delete')
   assert.equal((await archivedState.listComments('review_archived')).length, 0)
   assert.equal((await archivedState.listFileStates('review_archived')).length, 0)
   assert.equal((await archivedVerification.list('review_archived')).length, 0)
@@ -166,12 +180,17 @@ try {
   }
   await reopened.close()
   const protocol = await readFile(new URL('../electron/piHostProtocol.ts', import.meta.url), 'utf8')
+  const transferSource = await readFile(new URL('../electron/reviewArtifactTransfer.ts', import.meta.url), 'utf8')
   const preload = await readFile(new URL('../electron/preload.ts', import.meta.url), 'utf8')
   assert.match(protocol, /reviewImportPreviews\.add[\s\S]*reviewImportPreviews\.has[\s\S]*reviewImportPreviews\.delete/, 'import apply consumes a Host-issued preview identity')
   assert.match(protocol, /approveReviewLifecycle[\s\S]*action: 'import'/, 'import is approval-controlled after preview')
   assert.match(protocol, /importReviewArtifact\(state\.reviewArtifactStore, state\.reviewStateStore, params\.bundle, expectedBundleHash\)/, 'approved Host import restores both authorities')
   assert.match(protocol, /action: 'retention'/, 'retention cannot silently collect payloads')
-  assert.match(protocol, /action: 'hard-delete'[\s\S]*hardDeleteSnapshot[\s\S]*hardDeleteArtifact/, 'hard delete removes state, verification, and artifact canonical records')
+  assert.match(protocol, /retainedThreadIds[\s\S]*applyReviewArtifactRetention/, 'Host session/archive identities participate in retention authority')
+  assert.match(protocol, /action: 'hard-delete'[\s\S]*hardDeleteReviewArtifact/, 'hard delete routes through the lifecycle owner')
+  assert.match(transferSource, /deleteArtifact\(snapshotId, reason\)[\s\S]*states\.hardDeleteSnapshot[\s\S]*verification\.hardDeleteSnapshot[\s\S]*hardDeleteArtifact/, 'hard delete publishes a tombstone before dependent records are removed')
+  assert.match(transferSource, /catch \(error\)[\s\S]*findByRunId[\s\S]*hardDeleteSnapshot\(snapshotId\)/, 'failed unpublished import rolls back orphan review state')
+  assert.match(transferSource, /serializeReviewArtifactLifecycle[\s\S]*importReviewArtifact[\s\S]*hardDeleteReviewArtifact[\s\S]*applyReviewArtifactRetention/, 'import, retention, and hard delete share one serialized lifecycle owner')
   assert.match(protocol, /captureReviewWorkspaceAdmission[\s\S]*reviewWorkspaces\.set\(originalWorkspace\.workspaceId[\s\S]*rebindWorkspace/, 'rebind validates the new path while preserving the historical workspace identity')
   const lifecycleProtocol = protocol.slice(protocol.indexOf('async function approveReviewLifecycle'), protocol.indexOf('async function handleReviewRequest'))
   assert.doesNotMatch(lifecycleProtocol, /params\.approval/, 'renderer cannot forge lifecycle approval')

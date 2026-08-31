@@ -441,3 +441,30 @@ Reviewed: 2026-08-28
 Final severity count: **P0 0 · P1 0 · P2 0**
 
 final result: passed
+
+---
+
+# Changed-files card design QA
+
+Reference: Codex Desktop changed-files card supplied by the user on 2026-08-31.
+
+## Requirements checked
+
+- [x] The changed-files card sits directly below the assistant result as a single, flat surface.
+- [x] The header shows the number of edited files and aggregate `+ additions / - removals`.
+- [x] The first three file rows show path-level `+ additions / - removals`, including zero values.
+- [x] `顯示另外 N 個檔案` expands and collapses the remaining rows.
+- [x] `查看` opens the immutable run snapshot in the existing Review Workspace.
+- [x] Selecting a file row opens the same Review Workspace with that path selected.
+- [x] Raw patch headers (`diff --git`, `---`, `+++`, `@@`) are not rendered inside the assistant summary.
+- [x] At 640 px width the card has no horizontal overflow.
+
+## Evidence
+
+- Desktop comparison viewport: 1500 × 443, matching the supplied reference dimensions.
+- Rendered fixture: 4 files, aggregate `+38 -8`, first three rows visible, one hidden row.
+- Interaction check: expansion revealed all 4 file rows and changed the control to `只顯示前 3 個檔案`.
+- Data check: settlement now reads per-file additions/removals from the Host-owned review manifest; legacy/degraded runs retain the Turn Record fallback.
+- Automated checks: `npm run build`, `npx oxlint src`, `smoke-review-settlement-integration`, `smoke-install-contract`, `smoke-workspace-panel-session`, and `git diff --check` passed.
+
+final result: passed

@@ -1,6 +1,7 @@
 import type { AgentLifecycleState } from './agentLifecycle.ts'
 import type { AgentAdmissionSnapshot, AgentCollaborationEvent } from './agentCollaboration.ts'
 import type { TurnRecordEntry } from './turnRecord.ts'
+import type { ReviewSnapshotRef } from './reviewContract.ts'
 
 export type AgentWorkActivity = {
   id: string
@@ -21,6 +22,7 @@ export type AgentWorkRow = {
   lifecycle: AgentLifecycleState
   originTurn: number
   workspace?: AgentAdmissionSnapshot['workspace']
+  reviewSnapshotRef?: ReviewSnapshotRef
   activities: AgentWorkActivity[]
 }
 
@@ -104,6 +106,7 @@ function applyLifecycleEntry(rows: Map<string, AgentWorkRow>, entry: Extract<Tur
     lifecycle: entry.event.state,
     originTurn,
     workspace: current?.workspace,
+    reviewSnapshotRef: current?.reviewSnapshotRef,
     activities: current?.activities || [],
   })
 }
@@ -135,6 +138,7 @@ function rowFromSpawn(agentId: string, spawned: Extract<AgentCollaborationEvent,
     lifecycle: current?.lifecycle || 'queued',
     originTurn,
     workspace: spawned.admission.workspace,
+    reviewSnapshotRef: current?.reviewSnapshotRef,
     activities: appendActivity(current, item),
   }
 }
@@ -150,6 +154,7 @@ function rowFromCollaboration(agentId: string, event: AgentCollaborationEvent, c
     lifecycle,
     originTurn,
     workspace: current?.workspace,
+    reviewSnapshotRef: event.type === 'completion' ? event.result.reviewSnapshotRef : current?.reviewSnapshotRef,
     activities: appendActivity(current, item),
   }
 }

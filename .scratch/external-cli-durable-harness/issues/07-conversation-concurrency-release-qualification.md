@@ -30,6 +30,10 @@ only for the one-shot Codex invocation; Claude and Grok retain interactive
 stdin. The qualification ticket remains open until the blocked/absent shipped
 adapters and the complete release suites have evidence.
 
+## 2026-08-31 fresh rerun
+
+最新 metadata-only report 已覆寫至 `../evidence/real-cli-qualification.md`／`.json`：Codex CLI 0.150.1 的 process、checkpoint、restart projection 與 Turn Record 通過，但 native discovery marker 未出現，故為 `native_discovery_unproven`；Claude Code 2.1.246 實際啟動後回報 `auth_unavailable`。這次未安裝、登入或改動 provider；ticket 維持 open。
+
 - [ ] Two different conversation threads can run external sessions independently up to `maxConcurrentRuns` without sharing activity, deadlines, output, cancellation, or settlement.
 - [ ] Same-thread follow-ups retain the configured steer/queue ordering and do not start an overlapping external process accidentally.
 - [ ] Every shipped external adapter uses the common session lifecycle and centrally defined timing policy or returns an explicit unsupported capability.

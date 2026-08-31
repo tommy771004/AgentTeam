@@ -63,7 +63,7 @@ function buildRound1Objective(brief: SubDesignBrief, artifact: SubDesignArtifact
     `請執行 SubDesign Critique Theater 第一輪（獨立審查），針對 brief ${brief.id} 的 artifact ${artifact.id} revision ${artifact.revision} 做 evidence-based review。`,
     `Brief objective：${brief.objective}`,
     `Artifact entry：${artifact.entry}；renderer=${artifact.renderer}；kind=${artifact.kind}。`,
-    '這是一個 read-only review：不可修改 DESIGN.md、不可 patch/tweak/export，也不可寫入 workspace。',
+    '這是一個 read-only review：不可修改任何專案檔（若專案提供 DESIGN.md，它也只是可選的唯讀參考）、不可 patch/tweak/export，也不可寫入 workspace。',
     '先使用 design_artifact_capture 取得 screenshot 與 DOM，再使用 design_artifact_lint 取得語意證據。',
     '接著呼叫 design_critique_note 三次（round=1），分別代表 panelistId=visual（brief coverage／brand conformance）、accessibility（a11y／evidence integrity）、implementation（readiness／artifact boundary）。三次的 score 與 summary 必須反映該 panelist 自己的判斷 —— 不可三次寫相同的分數或文字，那是三個獨立觀點，不是一個分數拆三份。',
     '這一輪不要呼叫 design_critique；那是第二輪交叉核對之後才寫的最終結果。',

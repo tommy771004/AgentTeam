@@ -2309,6 +2309,7 @@ await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and r
   const view = fs.readFileSync(path.join(appRoot, 'src/components/WorkingStateView.tsx'), 'utf8')
   const progress = fs.readFileSync(path.join(appRoot, 'src/components/ExecutionStepsProgress.tsx'), 'utf8')
   const feed = fs.readFileSync(path.join(appRoot, 'src/components/RunProcessFeed.tsx'), 'utf8')
+  const protocols = fs.readFileSync(path.join(appRoot, 'src/pages/ProtocolsPage.tsx'), 'utf8')
   const runPanel = fs.readFileSync(path.join(appRoot, 'src/components/InlineRunPanel.tsx'), 'utf8')
   const archivePage = fs.readFileSync(path.join(appRoot, 'src/pages/RecordsPage.tsx'), 'utf8')
   const threadStore = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
@@ -2332,8 +2333,10 @@ await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and r
     'the live run panel supplies its Host-owned Working State projection to the adaptive status owner')
   assert.match(runPanel, /<WorkingStateDiagnostics projection=\{workingStateProjection\}/,
     'the complete Host projection remains available only in the diagnostic disclosure')
-  assert.match(feed, /<ExecutionStepsProgress tasks=\{tasks\} \/>[\s\S]*data-run-timeline="record"/,
-    'compact live step progress stays directly above the conversation timeline')
+  assert.doesNotMatch(feed, /ExecutionStepsProgress/,
+    'compact live step progress no longer interrupts the conversation timeline')
+  assert.match(protocols, /<ProjectContextBar \/>[\s\S]*lifecycle\.live[\s\S]*<ExecutionStepsProgress[\s\S]*<CommandComposer/,
+    'run-scoped live step progress stays directly above the conversation composer')
   assert.match(progress, /執行步驟：\{completed\}\/\{tasks\.length\}/)
   assert.match(progress, /onMouseEnter=\{\(\) => setHoverOpen\(true\)\}/)
   assert.match(progress, /aria-expanded=\{open\}/)

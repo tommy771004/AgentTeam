@@ -4,6 +4,33 @@ import { resolve } from 'node:path'
 import { projectRunStatusSurface } from '../src/agent/runStatusSurface.ts'
 import { deriveRunLifecycle } from '../src/agent/runLifecycle.ts'
 import { BUILTIN_RUNNER_CAPABILITIES } from '../src/agent/runners/types.ts'
+import { createSubmittingFollowUpProjection } from '../src/agent/interactiveFollowUp.ts'
+
+assert.deepEqual(
+  createSubmittingFollowUpProjection({
+    id: 'client-message-1',
+    threadId: 'thread-1',
+    text: '補上剛發現的限制條件',
+    action: 'steer',
+    attachmentCount: 1,
+  }),
+  {
+    id: 'client-message-1',
+    runId: 'client-message-1',
+    sessionId: 'renderer-submitting',
+    threadId: 'thread-1',
+    text: '補上剛發現的限制條件',
+    action: 'steer',
+    state: 'submitting',
+    revision: 0,
+    queueRevision: 0,
+    editable: false,
+    cancellable: false,
+    reorderable: false,
+    attachmentCount: 1,
+  },
+  'Composer projects the message immediately while Host acknowledgement is pending',
+)
 
 const replayWorkingState = {
   runId: 'replay-run', revision: 2, verification: 'verified' as const, objective: 'private objective', constraints: [], tombstoned: false,
@@ -110,8 +137,12 @@ try {
       onSlashCommand: () => undefined,
       mode: 'agent',
       running: true,
+      followUpAction: 'steer',
+      followUpImmediateAction: 'steer',
+      onFollowUpActionChange: (action: string) => actions.push(`mode:${action}`),
       onStop: () => actions.push('stop'),
       pendingFollowUps: [
+        { ...base, id: 'submitting-1', runId: 'submitting-run', text: '補上剛發現的限制條件', action: 'steer', state: 'submitting', editable: false, cancellable: false, reorderable: false },
         { ...base, id: 'steer-1', runId: 'steer-run', text: '先修正目前分析方向，不要重啟任務', action: 'steer', state: 'accepted', editable: false, cancellable: false, reorderable: false },
         { ...base, id: 'queue-1', runId: 'queue-run-1', text: '完成後整理測試證據與變更摘要', action: 'queue', state: 'queued', editable: true, cancellable: true, reorderable: true, attachmentCount: 2 },
         { ...base, id: 'queue-2', runId: 'queue-run-2', text: '接著檢查窄版畫面不應產生水平捲動', action: 'queue', state: 'queued', editable: true, cancellable: true, reorderable: true },
@@ -124,10 +155,12 @@ try {
     }))
   })
   await composer.getByLabel('待處理的後續指令').waitFor()
-  assert.match(await composer.getByLabel('待處理的後續指令').innerText(), /先修正目前分析方向.*引導 · 已接受.*完成後整理測試證據.*排隊 · 第 1 位 · 排隊中 · 附件 2.*接著檢查窄版.*排隊 · 第 2 位 · 排隊中.*保留這筆未接受.*未接受/s)
-  assert.equal(await composer.getByRole('button', { name: '送出' }).count(), 1)
+  assert.match(await composer.getByLabel('待處理的後續指令').innerText(), /補上剛發現的限制條件.*引導 · 送出中.*先修正目前分析方向.*引導 · 已接受.*完成後整理測試證據.*排隊 · 第 1 位 · 排隊中 · 附件 2.*接著檢查窄版.*排隊 · 第 2 位 · 排隊中.*保留這筆未接受.*未接受/s)
+  assert.equal(await composer.getByRole('button', { name: '引導目前任務', exact: true }).count(), 1)
   assert.equal(await composer.getByRole('button', { name: '停止執行' }).count(), 1)
-  assert.equal(await composer.locator('[aria-live="polite"]').filter({ hasText: '待處理後續指令 4 筆' }).count(), 1, 'queue changes announce one bounded summary')
+  assert.equal(await composer.locator('[aria-live="polite"]').filter({ hasText: '待處理後續指令 5 筆' }).count(), 1, 'queue changes announce one bounded summary')
+  await composer.getByRole('button', { name: '送出模式：引導目前任務' }).click()
+  await composer.getByRole('menuitemradio', { name: /排到下一個任務/ }).click()
   const expandable = composer.getByRole('button', { name: '先修正目前分析方向，不要重啟任務' })
   await expandable.focus()
   await composer.keyboard.press('Enter')
@@ -136,7 +169,7 @@ try {
   await composer.getByRole('button', { name: /上移：接著檢查窄版/ }).focus()
   await composer.keyboard.press('Enter')
   await composer.getByRole('button', { name: /改為排隊：保留這筆/ }).click()
-  assert.deepEqual(await composer.evaluate(() => (window as any).followUpActions), ['move:queue-2:up', 'queue:rejected-1'])
+  assert.deepEqual(await composer.evaluate(() => (window as any).followUpActions), ['mode:queue', 'move:queue-2:up', 'queue:rejected-1'])
   assert.equal(await composer.locator('.agent-composer').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'narrow Composer has no horizontal overflow')
   await composer.screenshot({ path: resolve(followUpEvidenceRoot, 'composer-narrow.png'), animations: 'disabled' })
   await composer.setViewportSize({ width: 1120, height: 720 })

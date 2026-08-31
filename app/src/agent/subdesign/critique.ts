@@ -181,21 +181,16 @@ export function normalizeSubDesignCritique(
     },
     requiredGates,
   )
-  const gatesUnmet = gateStatus.missingGates.length > 0
-    || gateStatus.failedGates.length > 0
+  if (raw.verdict === 'pass' && gateStatus.missingGates.length > 0) {
+    errors.push(`Critique pass 缺少已執行的 verification gates：${gateStatus.missingGates.join('、')}。Gate 沒跑不得宣稱分數。`)
+  }
+  const gatesUnmet = gateStatus.failedGates.length > 0
     || gateStatus.unbackedScores.length > 0
   const verdict = raw.verdict === 'pass' && !hasBlocker && !missingEvidence && !gatesUnmet ? 'pass' : 'needs-revision'
   if (missingEvidence && !findings.some((finding) => finding.path === '.subagents/subdesign/evidence')) {
     findings.push({
       severity: 'blocker',
       message: 'Critique 必須包含 screenshot、DOM 與 lint evidence，才能通過 Deliver gate。',
-      path: '.subagents/subdesign/evidence',
-    })
-  }
-  if (gateStatus.missingGates.length && raw.verdict === 'pass') {
-    findings.push({
-      severity: 'blocker',
-      message: `Critique pass 缺少已執行的 verification gates：${gateStatus.missingGates.join('、')}。Gate 沒跑不得宣稱分數。`,
       path: '.subagents/subdesign/evidence',
     })
   }

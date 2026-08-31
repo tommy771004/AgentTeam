@@ -72,10 +72,6 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function isVisibleSourceDiff(diffText) {
-  return diffText.trim().length > 0 && !/^(?:diff --git |--- |\+\+\+ |@@ )/m.test(diffText)
-}
-
 async function waitForPiApproval(page, timeout = 10000) {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
@@ -167,12 +163,12 @@ async function runPackagedFirstTask(executable, platform, userDataDir, smokeProj
     if (!firstTaskSession) throw new Error('First task did not settle a Pi Host session')
     await page.locator('[data-testid="run-summary-card"] > button').first().click()
     await page.waitForSelector('[data-testid="run-summary-diff"]', { state: 'attached', timeout: 120000 })
-    await page.locator('[data-testid="run-summary-diff"] > button').click()
-    const diffContent = page.locator('[data-testid="run-summary-diff-content"]')
-    await diffContent.waitFor({ state: 'visible', timeout: 120000 })
-    const diffText = await diffContent.innerText()
+    const changeStats = await page.locator('[data-testid="run-summary-diff"]').innerText()
+    await page.getByRole('button', { name: '查看本次執行的變更' }).click()
+    const diffViewer = page.getByRole('main', { name: 'Diff viewer' })
+    await diffViewer.waitFor({ state: 'visible', timeout: 120000 })
     const resultVisible = await page.locator('[data-testid="run-summary-card"]').count() > 0
-    const diffVisible = isVisibleSourceDiff(diffText)
+    const diffVisible = /\+\d+/.test(changeStats) && /-\d+/.test(changeStats)
     if (!resultVisible || !diffVisible) throw new Error('First task result or Git Diff was not visible')
     await app.close()
     app = undefined
@@ -224,7 +220,7 @@ async function runPackagedFirstTask(executable, platform, userDataDir, smokeProj
       objective,
       resultVisible,
       diffVisible,
-      diffPreview: diffText.slice(0, 600),
+      changePreview: changeStats.slice(0, 600),
       firstTaskSessionMessages: firstTaskSession.messages.length,
       settingsPersisted: Boolean(firstRun.settingsState && afterRestart.settingsState === firstRun.settingsState),
       restartedSessionMessages: restoredSession.messages.length,

@@ -2,26 +2,21 @@
 
 **What to build:** An ADR deciding whether ADR-0022's filesystem-sandbox obligation covers the builtin shell, and — only if accepted — the implementation that feeds real probe results into the decision.
 
-**Blocked by:** None. The ADR must be accepted before any code is written.
+**Blocked by:** None.
 
-**Status:** 待分流
+**Status:** resolved
 
-This is a scope decision, not a bug fix, and it needs a maintainer's judgement before an agent implements anything.
+ADR-0047 與 ADR-0051 已接受並完成此 scope decision。Builtin shell 不借用 ADR-0022 external CLI 的 capability boolean，而由 Host-owned verifier 與同一 platform adapter 負責 probe、雙 canary、evidence、command wrapping 與 cleanup。
 
-Today `decideBuiltinShellUnderProtection()` is called with a hardcoded `shellIsolationVerified: false`, so under `required` mode the builtin `bash` is **refused** rather than sandboxed. That is the correct reading of the current rule: ADR-0022 places the filesystem-sandboxing obligation on external CLI only, and states that if verified isolation is unavailable, external CLI execution is unavailable. The consequence is that the strictest mode is the least usable one.
+`required` 在 macOS 使用 Seatbelt、Linux 使用 bubblewrap；只有逐 run 驗證成功且 command 實際被同一 adapter 包裝時才允許。Windows 與無 backend／probe 失敗／canary 失敗環境維持 fail-closed，不降級 optional。舊分析提到的 renderer `shellIsolationVerified` boolean 與 `src/agent/tools/registered/bash.ts` call site 已不存在於 production owner。
 
-Correction to the source analysis: the hardcoded call site is `src/agent/tools/registered/bash.ts:60`. `agent/outbound/cliSandbox.ts` declares the option (line 226) and consumes it (line 253); the comparison document attributes the call site to `cliSandbox.ts`.
-
-The building blocks exist. `electron/cliFilesystemSandbox.ts` has the seatbelt and bwrap profile builders, and `buildSeatbeltProfile()` already produces SBPL. Technically they can be applied to the `electron/shellBridge.ts` spawn path. The open question is whether they should be, and what happens on Windows where no backend exists.
-
-- [ ] An ADR is written stating whether the builtin shell falls under the ADR-0022 sandbox obligation, and why.
-- [ ] The ADR defines what `required` mode means for the builtin shell: isolated execution, refusal, or refusal-with-fallback.
-- [ ] The ADR defines Windows fallback semantics explicitly, since no backend exists there.
-- [ ] The ADR states its relationship to ADR-0022 — revision or extension — and links `docs/DEEPSEEK_HARNESS_COMPARISON_2026-08-17.md` as the analysis of record.
-- [ ] An ADR number is claimed from the free range (`docs/adr/` currently ends at `0046`).
-- [ ] If and only if the ADR is accepted: `shellIsolationVerified` is fed by a real probe rather than a hardcoded `false`, and the profile builders are applied to the `shellBridge.ts` spawn path.
-- [ ] If accepted: verification follows the real-probe pattern of `smoke-cli-sandbox`, `smoke-cli-main-sandbox`, and `smoke-cli-filesystem-sandbox.mts`.
-- [ ] If accepted: `smoke:outbound-shell-evidence` shows builtin `bash` under `required` as isolated execution, not refusal.
-- [ ] If rejected: the ADR records the rejection and the current refusal behaviour is documented as intentional in `CONTEXT.md`.
+- [x] ADR-0047／0051 說明 builtin shell 與 ADR-0022 的關係及獨立 sandbox obligation。
+- [x] `required` 定義為 Host 驗證且實際隔離後執行，否則拒絕。
+- [x] Windows fallback 明定為 unsupported 並拒絕，不靜默降級。
+- [x] ADR 連結 `docs/DEEPSEEK_HARNESS_COMPARISON_2026-08-17.md` 作為分析記錄。
+- [x] Host verifier 由真實 backend probe 與 inside/outside canary 簽發 run/view-bound evidence。
+- [x] macOS Seatbelt 與 Linux bubblewrap adapters 由 Host startup 註冊並包裝實際 command。
+- [x] `smoke-pi-builtin-shell-sandbox-seam`、platform smokes 與 real-turn qualification 覆蓋 verified execution 與 fail-closed refusal。
+- [x] `smoke-outbound-shell-evidence` 明確只驗證缺 Host evidence 的 policy helper 仍拒絕，避免誤稱 production 永遠拒絕。
 
 Files: `docs/adr/`, `app/src/agent/tools/registered/bash.ts`, `app/src/agent/outbound/cliSandbox.ts`, `app/electron/cliFilesystemSandbox.ts`, `app/electron/shellBridge.ts`.

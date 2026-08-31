@@ -64,7 +64,7 @@ const childParams = (spawnId: string, parentAgentId: string, objective: string, 
 let host = startHost()
 let isolatedWorktreePath = ''
 try {
-  host.send(1, 'initialize', { protocolVersion: 5, capabilities: ['agent-tree-v1', 'agent-collaboration-v1'] })
+  host.send(1, 'initialize', { protocolVersion: 5, capabilities: ['agent-tree-v1', 'agent-collaboration-v1', 'review-v1'] })
   assert.equal((await host.waitFor(1)).error, undefined)
   host.send(2, 'sessions/create', { title: 'Collaboration root', threadId: 'collaboration-thread' })
   const rootId = String((await host.waitFor(2)).result?.sessionId)
@@ -109,10 +109,31 @@ try {
 
   host.send(12, 'agents/wait', { agentId: rootId, timeoutMs: 60_000 })
   host.send(13, 'runs/claim', { runId: writerARun }); assert.equal((await host.waitFor(13)).error, undefined)
-  host.send(14, 'runs/settle', { runId: writerARun, settlement: 'answered' }); assert.equal((await host.waitFor(14)).error, undefined)
+  host.send(130, 'review/v1/admit', { runId: writerARun, threadId: writerAId, projectRoot: workspace, runnerKind: 'builtin' })
+  const childReviewAdmission = await host.waitFor(130)
+  const childSnapshotId = childReviewAdmission.result?.reviewAdmission?.snapshotId
+  assert.ok(childSnapshotId)
+  host.send(131, 'review/v1/finalize', { snapshotId: childSnapshotId, settlementKind: 'completed', activeWorkspaceRuns: 1 })
+  assert.equal((await host.waitFor(131)).result?.reviewSnapshotRef?.status, 'ready')
+  host.send(140, 'agents/follow-up', { messageId: 'queued-before-settlement', senderAgentId: rootId, receiverAgentId: writerAId, content: 'run after the active child settles' })
+  const queuedBeforeSettlement = await host.waitFor(140)
+  assert.equal(queuedBeforeSettlement.result?.queued, true)
+  assert.equal(queuedBeforeSettlement.result?.started, false)
+  host.send(14, 'runs/settle', { runId: writerARun, settlement: 'answered' })
+  const firstSettlement = await host.waitFor(14)
+  assert.equal(firstSettlement.error, undefined)
+  const drainedRun = firstSettlement.result?.queue?.find((run: Record<string, any>) => run.runId === 'queued-before-settlement:run')
+  assert.equal(drainedRun?.status, 'queued', 'settlement commits before draining the next durable follow-up')
   const completion = await host.waitFor(12)
   assert.equal(completion.result?.outcome, 'terminal')
   assert.equal(completion.result?.message?.senderAgentId, writerAId)
+  host.send(143, 'sessions/record', { sessionId: rootId, limit: 128 })
+  const settledEntries = ((await host.waitFor(143)).result?.page?.entries || []) as TurnRecordEntry[]
+  const settledRow = projectAgentWorkTree(settledEntries, 1).find((row) => row.agentId === writerAId)
+  assert.equal(settledRow?.reviewSnapshotRef?.snapshotId, childSnapshotId, 'Agent Work Tree uses the Host settlement snapshot identity')
+
+  host.send(141, 'runs/claim', { runId: drainedRun.runId }); assert.equal((await host.waitFor(141)).error, undefined)
+  host.send(142, 'runs/settle', { runId: drainedRun.runId, settlement: 'answered' }); assert.equal((await host.waitFor(142)).error, undefined)
 
   host.send(15, 'agents/follow-up', { messageId: 'follow-up-1', senderAgentId: rootId, receiverAgentId: writerAId, content: 'perform the next bounded pass' })
   const followUp = await host.waitFor(15)
@@ -128,7 +149,7 @@ try {
   await stopHost(host)
 
   host = startHost()
-  host.send(20, 'initialize', { protocolVersion: 5, capabilities: ['agent-tree-v1', 'agent-collaboration-v1'] }); await host.waitFor(20)
+  host.send(20, 'initialize', { protocolVersion: 5, capabilities: ['agent-tree-v1', 'agent-collaboration-v1', 'review-v1'] }); await host.waitFor(20)
   host.send(21, 'agents/list', { rootAgentId: rootId })
   const recovered = await host.waitFor(21)
   assert.equal(recovered.result?.agents?.find((agent: Record<string, any>) => agent.agentId === restartChildId)?.lifecycle, 'interrupted')
@@ -153,5 +174,9 @@ try {
   await rm(workspace, { recursive: true, force: true })
   await rm(stateDir, { recursive: true, force: true })
 }
+
+const agentWorkTreeUi = await readFile(new URL('../src/components/AgentWorkTree.tsx', import.meta.url), 'utf8')
+assert.doesNotMatch(agentWorkTreeUi, /agent-review:|review\.admit|review\.finalize/, 'Agent Work Tree must not mint a second review lifecycle')
+assert.match(agentWorkTreeUi, /row\.reviewSnapshotRef\.snapshotId/, 'Agent Work Tree opens only the Host settlement snapshot')
 
 console.log('Host-owned agent collaboration lifecycle, conflict isolation, recovery, and turn attribution are qualified')

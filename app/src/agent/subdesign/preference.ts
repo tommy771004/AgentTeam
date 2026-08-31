@@ -1,5 +1,6 @@
 import type { MemoryEntry } from '../hermes/types.ts'
-import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignPlatform, SubDesignSurface } from './types.ts'
+import { isSubDesignSurface } from './types.ts'
+import type { SubDesignArtifact, SubDesignBrief, SubDesignCritique, SubDesignPlatform } from './types.ts'
 
 export type SubDesignPreference = Pick<
   SubDesignBrief,
@@ -28,9 +29,9 @@ function parseMemoryPreference(entry: MemoryEntry, projectRoot?: string): SubDes
       return [key, rest.join('=').trim()]
     }).filter(([key, value]) => Boolean(key && value)),
   ) as Record<string, string>
-  const surface = values.surface as SubDesignSurface
+  const surface = values.surface
   const platform = values.platform as SubDesignPlatform | undefined
-  if (!['prototype', 'dashboard', 'deck'].includes(surface)) return null
+  if (!isSubDesignSurface(surface)) return null
   if (platform && !['responsive', 'web-desktop', 'mobile-ios', 'desktop-app'].includes(platform)) return null
   return {
     briefId: `memory:${entry.id}`,

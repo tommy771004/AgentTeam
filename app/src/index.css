@@ -1203,16 +1203,11 @@ html[data-theme='light'] .agent-chat-rewind:hover { background: rgba(15, 23, 42,
   background: var(--color-hover-2);
   color: var(--color-on-surface);
 }
-/* Compact project context behaves like a source chip: enough provenance to
-   orient the user, with richer repository detail kept one click away. */
-.agent-project-picker,
-.agent-project-source,
-.agent-project-branch {
+/* Compact project picker keeps repository controls one click away. */
+.agent-project-picker {
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease, box-shadow 160ms ease;
 }
-.agent-project-picker:hover,
-.agent-project-source:hover,
-.agent-project-branch:hover {
+.agent-project-picker:hover {
   border-color: var(--color-line-strong);
   background: var(--color-hover-2);
 }
@@ -1220,9 +1215,7 @@ html[data-theme='light'] .agent-chat-rewind:hover { background: rgba(15, 23, 42,
   box-shadow: var(--shadow-raised);
   animation: macos-enter 180ms var(--ease-spring-soft) both;
 }
-html[data-theme='light'] .agent-project-picker:hover,
-html[data-theme='light'] .agent-project-source:hover,
-html[data-theme='light'] .agent-project-branch:hover { background: rgba(14, 116, 144, 0.06); }
+html[data-theme='light'] .agent-project-picker:hover { background: rgba(14, 116, 144, 0.06); }
 
 /* Code Block uses the same theme tokens as the surrounding conversation. */
 .agent-code-block { max-width: 100%; border-color: var(--color-line); background: var(--color-surface); }
