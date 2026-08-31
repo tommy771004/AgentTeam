@@ -59,6 +59,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -87,6 +89,12 @@ jobs:
           set -o pipefail
           npx oxlint src electron 2>&1 | tee release-evidence/lint.log
 
+      - name: Deterministic qualification (no App launch)
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run qualify:deterministic 2>&1 | tee release-evidence/deterministic-qualification.log
+
       - name: Build
         shell: bash
         run: |
@@ -97,7 +105,6 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npm run smoke:settings-persistence 2>&1 | tee release-evidence/settings-persistence.log
           npm run smoke:ci 2>&1 | tee release-evidence/smoke.log
 
       - name: Security gates (dependency audit + secret scan + exceptions)
