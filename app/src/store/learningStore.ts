@@ -1210,10 +1210,16 @@ export const useLearningStore = create<LearningStore>((set, get) => {
             installed.mcpServers?.[0]?.secretPluginId ||
             item?.npm?.secretPluginId ||
             item?.dependsOnPluginId
+          const credentialList = secretOwner
+            ? await window.subagents?.credentials?.intent({ action: 'list' })
+            : undefined
+          const hasCustomToolCredential = Boolean(
+            credentialList?.ok && credentialList.metadata.some((entry) => entry.ref === `credential:custom-tool:${secretOwner}`),
+          )
           if (
             secretOwner &&
             !hasPluginSecret(secretOwner) &&
-            !useSettingsStore.getState().settings.customToolSecrets?.[secretOwner]
+            !hasCustomToolCredential
           ) {
             health = {
               ok: false,
@@ -1482,10 +1488,13 @@ export const useLearningStore = create<LearningStore>((set, get) => {
 
     clearPluginAuth: async (id) => {
       clearPluginSecret(id)
-      const settingsStore = useSettingsStore.getState()
-      const secrets = { ...(settingsStore.settings.customToolSecrets || {}) }
-      delete secrets[id]
-      await settingsStore.update({ customToolSecrets: secrets })
+      const credentialResult = await window.subagents?.credentials?.intent({
+        action: 'clear',
+        ref: `credential:custom-tool:${id}`,
+      })
+      if (credentialResult && !credentialResult.ok && credentialResult.code !== 'NOT_CONFIGURED') {
+        throw new Error(credentialResult.error)
+      }
       const existing = pluginRegistry.list().find((plugin) => plugin.id === id)
       if (existing) {
         const next = {

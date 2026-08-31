@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import type { CredentialVaultMetadata } from '../../electron/credentialVaultAuthority'
 
 /** Secret input is an ephemeral write intent, never a settings value or a readback. */
-export function IntegrationCredentialField({ kind, disabled, onChanged }: {
-  kind: 'telegram' | 'webhook'
+export function IntegrationCredentialField({ kind, ownerId = 'primary', disabled, onChanged }: {
+  kind: 'telegram' | 'webhook' | 'custom-tool'
+  ownerId?: string
   disabled?: boolean
   onChanged: (configured: boolean) => Promise<void>
 }) {
@@ -13,7 +14,7 @@ export function IntegrationCredentialField({ kind, disabled, onChanged }: {
   const [busy, setBusy] = useState(false)
   const [ready, setReady] = useState(false)
   const [refreshRevision, setRefreshRevision] = useState(0)
-  const ref = `credential:${kind}:primary` as const
+  const ref = `credential:${kind}:${ownerId}` as const
 
   useEffect(() => {
     let cancelled = false
@@ -42,7 +43,7 @@ export function IntegrationCredentialField({ kind, disabled, onChanged }: {
         ? { action: 'clear', ref }
         : metadata
           ? { action: 'rotate', ref, secret }
-          : { action: 'store', kind, ownerId: 'primary', secret })
+          : { action: 'store', kind, ownerId, secret })
       if (!result.ok) { setError(result.error); return }
       setMetadata(result.metadata.find((item) => item.ref === ref) || null)
       await onChanged(result.metadata.some((item) => item.ref === ref))
@@ -52,7 +53,7 @@ export function IntegrationCredentialField({ kind, disabled, onChanged }: {
 
   return <div className="space-y-2">
     <p className="text-[12px] text-on-surface-variant">{metadata ? `已設定 ${metadata.tokenHint}` : '尚未設定'} · Token 僅儲存於桌面安全 Vault</p>
-    <input type="password" aria-label={kind === 'telegram' ? '新的 Telegram Bot Token' : '新的 Webhook Token'}
+    <input type="password" aria-label={kind === 'telegram' ? '新的 Telegram Bot Token' : kind === 'webhook' ? '新的 Webhook Token' : `新的 ${ownerId} secret`}
       className="w-full rounded-control border border-line bg-inset px-3 py-2 text-[13px]"
       autoComplete="new-password" value={draft} onChange={(event) => setDraft(event.target.value)}
       disabled={disabled || busy || !ready} placeholder="輸入新 Token；不會顯示既有值" />

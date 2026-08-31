@@ -150,6 +150,10 @@ try {
   assert.equal(entry.pack, 'integrations')
   assert.equal(entry.source, 'discovered')
   assert.equal(typeof entry.active, 'boolean')
+  const customEntry = listed.result?.catalog?.find((item: { name: string }) => item.name === 'custom_tool_execute')
+  assert.ok(customEntry, 'custom_tool_execute is discoverable through its capability catalog')
+  assert.equal(customEntry.pack, 'custom-tools')
+  assert.equal(typeof customEntry.active, 'boolean')
   // The legacy flat list holds the Pi builtins plus every ALWAYS-ON pack
   // tool (interaction, planning, core-utils, framework verbs) — those are
   // genuinely callable right now. Capability-gated tools stay out until

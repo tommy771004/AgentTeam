@@ -17,5 +17,6 @@ export type BuiltinCapabilityId =
   | 'messaging'
   | 'code-mode'
   | 'mcp-bridge'
+  | 'custom-tools'
   | 'subdesign-workflow'
   | 'design-critique'

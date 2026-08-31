@@ -9,7 +9,6 @@ import {
   Notification,
   dialog,
   powerSaveBlocker,
-  safeStorage,
   session,
   utilityProcess,
   systemPreferences,
@@ -30,17 +29,23 @@ import {
 import {
   clearVaultSecret,
   getVaultSecret,
-  hasSecretPlaceholder,
   isVaultEncryptionAvailable,
   listVaultMeta,
   migrateIntoVault,
-  resolveSecretPlaceholders,
   setVaultSecret,
 } from './secretsVault'
 import { handleCredentialVaultIntent } from './integrationCredentialVault'
 import type { CredentialVaultIntent } from './credentialVaultAuthority'
 import { migrateIntegrationCredentials, migrateIntegrationSettingsFile } from './integrationCredentialMigration'
 import { legacyIntegrationCredentials, withoutIntegrationCredentials } from '../src/agent/integrationCredentials'
+import {
+  migrateCustomToolCredentials,
+  migrateCustomToolSettingsFile,
+  withoutLegacyCustomToolCredentials,
+} from './customToolCredentialMigration'
+import { executeConfiguredCustomTool, executeHttpTemplate } from './customToolExecution'
+import { customToolsForSettings } from '../src/agent/tools/customTools.ts'
+import type { LlmSettings } from '../src/agent/types.ts'
 import {
   decidePermissionRequest,
   isAllowedNavigationUrl,
@@ -55,7 +60,7 @@ import {
   type WebhookPayload,
 } from './webhookServer'
 import {
-  mcpHttpRpc,
+  mcpHttpRpcWithSecretPlaceholders,
   mcpStdioCallTool,
   mcpStdioEnsure,
   mcpStdioListSessions,
@@ -575,25 +580,17 @@ function writeUsageLedger(ledger: UsageLedger): void {
 
 function settingsForDisk(value: unknown) {
   if (!value || typeof value !== 'object') return value
-  const settings = withoutIntegrationCredentials({ ...(value as Record<string, unknown>) })
-  const secrets = settings.customToolSecrets
-  if (secrets && typeof secrets === 'object' && safeStorage.isEncryptionAvailable()) {
-    settings.encryptedCustomToolSecrets = safeStorage.encryptString(JSON.stringify(secrets)).toString('base64')
-    delete settings.customToolSecrets
-  }
-  return settings
+  return withoutLegacyCustomToolCredentials(withoutIntegrationCredentials({ ...(value as Record<string, unknown>) }))
 }
 
 function settingsForRenderer(value: unknown) {
   if (!value || typeof value !== 'object') return value
-  const settings = withoutIntegrationCredentials({ ...(value as Record<string, unknown>) })
-  const encrypted = settings.encryptedCustomToolSecrets
-  if (typeof encrypted === 'string') {
-    try { settings.customToolSecrets = JSON.parse(safeStorage.decryptString(Buffer.from(encrypted, 'base64'))) }
-    catch { settings.customToolSecrets = {} }
-    delete settings.encryptedCustomToolSecrets
-  }
-  return settings
+  return withoutLegacyCustomToolCredentials(withoutIntegrationCredentials({ ...(value as Record<string, unknown>) }))
+}
+
+function migrateCredentialSettingsFile(file: string) {
+  migrateIntegrationSettingsFile(file)
+  return migrateCustomToolSettingsFile(file)
 }
 
 /** Open native folder picker and push path to renderer */
@@ -921,7 +918,7 @@ app.whenReady().then(async () => {
   try {
     const file = settingsPath()
     if (fs.existsSync(file)) {
-      const s = migrateIntegrationSettingsFile(file) as {
+      const s = migrateCredentialSettingsFile(file) as {
         webhookEnabled?: boolean
         webhookPort?: number
         telegramEnabled?: boolean
@@ -1050,7 +1047,7 @@ ipcMain.handle('usage:clear', async () => {
 
 ipcMain.handle('settings:get', async () => {
   try {
-    return settingsForRenderer(migrateIntegrationSettingsFile(settingsPath()))
+    return settingsForRenderer(migrateCredentialSettingsFile(settingsPath()))
   } catch {
     throw new Error('設定或憑證遷移失敗；原始資料已保留，請重試。')
   }
@@ -1058,8 +1055,11 @@ ipcMain.handle('settings:get', async () => {
 
 ipcMain.handle('settings:set', async (_evt, settings: unknown) => {
   const file = settingsPath()
-  migrateIntegrationSettingsFile(file)
+  migrateCredentialSettingsFile(file)
   if (Object.keys(legacyIntegrationCredentials(settings)).length) throw new Error('請使用憑證 Vault intent 儲存 Token')
+  if (settings && typeof settings === 'object' && Object.keys((settings as { customToolSecrets?: Record<string, string> }).customToolSecrets || {}).length) {
+    throw new Error('請使用憑證 Vault intent 儲存 Custom-tool secret')
+  }
   fs.writeFileSync(file, JSON.stringify(settingsForDisk(settings), null, 2), 'utf-8')
   return { ok: true }
 })
@@ -1425,16 +1425,7 @@ ipcMain.handle(
     _evt,
     input: { url: string; headers?: Record<string, string>; body: unknown },
   ) => {
-    // Resolve vault placeholders in MCP HTTP auth headers main-side.
-    const headers = Object.fromEntries(
-      Object.entries(input?.headers || {}).map(([k, v]) => [
-        k,
-        typeof v === 'string' && hasSecretPlaceholder(v)
-          ? resolveSecretPlaceholders(v, currentCustomToolSecrets()).text
-          : v,
-      ]),
-    )
-    return mcpHttpRpc({ ...input, headers })
+    return mcpHttpRpcWithSecretPlaceholders(input)
   },
 )
 
@@ -2387,6 +2378,7 @@ ipcMain.handle('pi-host:resources:list', async () => ({ resources: await piHostS
 ipcMain.handle('pi-host:packages:list', async () => piHostSupervisor.listPackages())
 ipcMain.handle('pi-host:packages:install', async (_evt, input: { source: string; trusted: boolean }) => piHostSupervisor.installPackage(input.source, input.trusted))
 ipcMain.handle('pi-host:packages:remove', async (_evt, input: { source: string }) => piHostSupervisor.removePackage(input.source))
+ipcMain.handle('pi-host:packages:extensions:set-enabled', async (_evt, input: { source: string; enabled: boolean; trusted: boolean }) => piHostSupervisor.setPackageExtensionsEnabled(input.source, input.enabled, input.trusted))
 ipcMain.handle('pi-host:resources:reload', async (_evt, resources: unknown[]) => ({ resources: await piHostSupervisor.reloadResources(resources || []) }))
 const memoryProjectionAdmin: MemoryAccessContext = {
   origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: true,
@@ -3965,6 +3957,18 @@ async function tokenConsistencyGateSubDesignArtifact(input: { artifact: unknown;
 }
 
 async function runPiHostMainService(service: string, input: Record<string, unknown>): Promise<unknown> {
+  if (service === 'custom-tool/execute') {
+    const settings = migrateCredentialSettingsFile(settingsPath())
+    const toolName = String(input.toolName || '')
+    const tool = settings
+      ? customToolsForSettings(settings as unknown as LlmSettings).find((candidate) => candidate.name === toolName)
+      : undefined
+    if (!tool) throw new Error(`Custom tool not configured: ${toolName}`)
+    const args = input.input && typeof input.input === 'object' && !Array.isArray(input.input)
+      ? input.input as Record<string, unknown>
+      : {}
+    return executeConfiguredCustomTool(tool, args, String(input.cwd || '') || workspaceRoot())
+  }
   if (service === 'messaging/send') {
     return gatewaySendMessage({ channel: 'telegram', chatId: String(input.chatId || ''), text: String(input.text || ''), runId: typeof input.runId === 'string' ? input.runId : undefined })
   }
@@ -4881,49 +4885,8 @@ ipcMain.handle('tools:httpFetch', async (_evt, targetUrl: string, maxChars = 400
   }
 })
 
-/** Decrypted customToolSecrets from the settings file (main-side only). */
-function currentCustomToolSecrets(): Record<string, string> {
-  try {
-    const file = settingsPath()
-    if (!fs.existsSync(file)) return {}
-    const s = settingsForRenderer(JSON.parse(fs.readFileSync(file, 'utf-8'))) as {
-      customToolSecrets?: Record<string, string>
-    }
-    return s?.customToolSecrets || {}
-  } catch {
-    return {}
-  }
-}
-
 ipcMain.handle('tools:httpRequest', async (_evt, input: { url: string; method?: string; headers?: Record<string, string>; body?: string; maxChars?: number }) => {
-  try {
-    // Resolve {{secret:key}} placeholders main-side; raw tokens never
-    // travel through / persist in the renderer.
-    const custom = currentCustomToolSecrets()
-    const missing: string[] = []
-    const resolveText = (t: string | undefined): string | undefined => {
-      if (!t || !hasSecretPlaceholder(t)) return t
-      const r = resolveSecretPlaceholders(t, custom)
-      missing.push(...r.missing)
-      return r.text
-    }
-    const urlText = resolveText(input.url) || input.url
-    const headers = Object.fromEntries(
-      Object.entries(input.headers || {}).map(([k, v]) => [k, resolveText(v) ?? v]),
-    )
-    const body = resolveText(input.body)
-    if (missing.length) {
-      return {
-        ok: false,
-        text: `缺少 secret：${[...new Set(missing)].join(', ')} — 請在 Marketplace 授權或 Settings 補填`,
-        status: 0,
-      }
-    }
-    const url = new URL(urlText)
-    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Only http(s) URLs allowed')
-    const res = await fetch(url, { method: input.method || 'GET', headers, body, redirect: 'follow' })
-    return { ok: res.ok, text: (await res.text()).slice(0, Math.min(Number(input.maxChars) || 50_000, 200_000)), status: res.status }
-  } catch (e) { return { ok: false, text: e instanceof Error ? e.message : String(e), status: 0 } }
+  return executeHttpTemplate(input)
 })
 
 // ── Connector credential vault (renderer sees metadata only) ──
@@ -4932,7 +4895,7 @@ ipcMain.handle(
   'credentials:intent',
   async (_evt, intent: CredentialVaultIntent) => {
     // Prevent a later settings read from resurrecting a cleared legacy credential.
-    try { migrateIntegrationSettingsFile(settingsPath()) } catch {
+    try { migrateCredentialSettingsFile(settingsPath()) } catch {
       return { ok: false, code: 'VAULT_ERROR', error: '憑證遷移尚未完成，請重試。', availability: handleCredentialVaultIntent({ action: 'list' }).availability }
     }
     const result = handleCredentialVaultIntent(intent)
@@ -4946,8 +4909,9 @@ ipcMain.handle(
 
 ipcMain.handle('credentials:migrateLegacy', async (_evt, legacy: unknown) => {
   try {
-    migrateIntegrationSettingsFile(settingsPath())
+    migrateCredentialSettingsFile(settingsPath())
     migrateIntegrationCredentials(legacyIntegrationCredentials(legacy))
+    migrateCustomToolCredentials(legacy && typeof legacy === 'object' ? legacy : {})
     return { ok: true }
   } catch {
     return { ok: false, error: '憑證遷移失敗：原始資料已保留，請確認安全儲存後重試。' }

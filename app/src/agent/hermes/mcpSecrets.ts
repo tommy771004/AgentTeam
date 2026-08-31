@@ -8,7 +8,6 @@
  */
 
 import type { LlmSettings, McpServerConfig } from '../types.ts'
-import { getPluginSecret, hasPluginSecret } from './pluginSecrets.ts'
 
 /** secret owner id → env vars to fill when secret is present */
 export const MCP_SECRET_ENV_KEYS: Record<string, string[]> = {
@@ -31,22 +30,9 @@ export const MCP_SECRET_ENV_KEYS: Record<string, string[]> = {
   'postgres-dsn': ['POSTGRES_CONNECTION_STRING', 'DATABASE_URL'],
 }
 
-function secretForPlugin(pluginId: string, settings?: Partial<LlmSettings> | null): string {
-  // On Electron, send a placeholder; mcpBridge resolves the raw token.
-  // from the main-process vault at spawn time (never through the renderer).
-  const hasVault = Boolean(
-    (globalThis as unknown as { subagents?: { secrets?: unknown } }).subagents?.secrets,
-  )
-  if (hasVault) {
-    if (hasPluginSecret(pluginId) || settings?.customToolSecrets?.[pluginId]) {
-      return `{{secret:${pluginId}}}`
-    }
-    return ''
-  }
-  const fromPlugin = getPluginSecret(pluginId)?.token
-  if (fromPlugin) return fromPlugin
-  const fromSettings = settings?.customToolSecrets?.[pluginId]
-  return fromSettings ? String(fromSettings) : ''
+function secretForPlugin(pluginId: string): string {
+  // Config contains references only. Main resolves or rejects at process spawn.
+  return `{{secret:${pluginId}}}`
 }
 
 /** Resolve which id to use for secret lookup */
@@ -77,12 +63,12 @@ function guessSecretOwnerFromServer(server: McpServerConfig): string | undefined
  */
 export function enrichMcpServerWithSecrets(
   server: McpServerConfig,
-  settings?: Partial<LlmSettings> | null,
+  _settings?: Partial<LlmSettings> | null,
 ): McpServerConfig {
   const secretOwner = resolveMcpSecretOwnerId(server)
   if (!secretOwner) return server
 
-  const token = secretForPlugin(secretOwner, settings)
+  const token = secretForPlugin(secretOwner)
   if (!token) return server
 
   const envKeys =
@@ -121,7 +107,7 @@ export function enrichMcpServerWithSecrets(
 /** True when server expects secrets but none are available */
 export function mcpServerMissingSecret(
   server: McpServerConfig,
-  settings?: Partial<LlmSettings> | null,
+  _settings?: Partial<LlmSettings> | null,
 ): string | null {
   const secretOwner = resolveMcpSecretOwnerId(server)
   if (!secretOwner) return null
@@ -130,7 +116,7 @@ export function mcpServerMissingSecret(
     (a) => a === '${secret}' || a === '${secretToken}' || a === '${accessToken}',
   )
   if (!needsEnv && !needsArgSecret) return null
-  if (secretForPlugin(secretOwner, settings)) return null
+  if (secretForPlugin(secretOwner)) return null
   return secretOwner
 }
 

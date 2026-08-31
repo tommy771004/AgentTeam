@@ -256,22 +256,36 @@ const SECRET_TOKEN = /{{\s*secret:([A-Za-z0-9_.-]+)\s*}}/g
 
 /**
  * Resolve {{secret:key}} placeholders main-side.
- * Order: settings customToolSecrets → vault[key] → vault[`${key}-connector`].
+ * Stable custom-tool credential first; legacy connector ids remain read-only fallbacks.
  */
-export function resolveSecretPlaceholders(
-  text: string,
-  customToolSecrets?: Record<string, string> | null,
-): { text: string; missing: string[] } {
+export function resolveSecretPlaceholders(text: string, usedSecrets?: string[]): { text: string; missing: string[] } {
   const missing: string[] = []
   const out = (text || '').replace(SECRET_TOKEN, (_all, key: string) => {
-    const fromSettings = customToolSecrets?.[key]
-    if (fromSettings != null && String(fromSettings).length > 0) return String(fromSettings)
-    const rec = getVaultSecret(key) || getVaultSecret(`${key}-connector`)
-    if (rec?.token) return rec.token
+    const rec = getVaultSecret(`credential:custom-tool:${key}`) || getVaultSecret(key) || getVaultSecret(`${key}-connector`)
+    if (rec?.token) {
+      usedSecrets?.push(rec.token)
+      return rec.token
+    }
     missing.push(key)
     return ''
   })
   return { text: out, missing }
+}
+
+/** Remove main-only credential material from any value before an IPC response. */
+export function redactSecretValues<T>(value: T, secrets: string[]): T {
+  const redact = (input: unknown): unknown => {
+    if (typeof input === 'string') {
+      return [...new Set(secrets)].filter(Boolean).sort((left, right) => right.length - left.length)
+        .reduce((text, secret) => text.replaceAll(secret, '[REDACTED]'), input)
+    }
+    if (Array.isArray(input)) return input.map(redact)
+    if (input && typeof input === 'object') {
+      return Object.fromEntries(Object.entries(input as Record<string, unknown>).map(([key, item]) => [key, redact(item)]))
+    }
+    return input
+  }
+  return redact(value) as T
 }
 
 export function hasSecretPlaceholder(text: string | undefined | null): boolean {

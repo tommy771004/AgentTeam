@@ -485,6 +485,7 @@ export function SettingsPage() {
   const refreshPluginTokens = useLearningStore((s) => s.refreshPluginTokens)
   // Recompute secret key list when plugins change
   const pluginsTick = useLearningStore((s) => s.plugins)
+  const [customToolVaultKeys, setCustomToolVaultKeys] = useState<string[]>([])
   const approveToolPackage = useLearningStore((s) => s.approveToolPackage)
 
   /** Instant apply — no save button */
@@ -712,11 +713,22 @@ export function SettingsPage() {
         if (server.secretPluginId) found.add(server.secretPluginId)
       }
     }
-    // Already stored secrets
-    for (const key of Object.keys(settings.customToolSecrets || {})) found.add(key)
+    // Browser plugin metadata contains hints only; desktop credentials are listed by each Vault field.
     for (const { id } of listPluginSecretMeta()) found.add(id)
+    for (const key of customToolVaultKeys) found.add(key)
     return [...found].sort()
-  }, [settings, pluginsTick])
+  }, [settings, pluginsTick, customToolVaultKeys])
+
+  useEffect(() => {
+    let cancelled = false
+    void window.subagents?.credentials?.intent({ action: 'list' }).then((result) => {
+      if (cancelled || !result.ok) return
+      setCustomToolVaultKeys(result.metadata
+        .filter((item) => item.kind === 'custom-tool')
+        .map((item) => item.ownerId))
+    })
+    return () => { cancelled = true }
+  }, [pluginsTick])
   const toolTuning = useMemo(
     () => recommendToolTuning(settings.model || settings.roleModels?.orchestrator || ''),
     [settings.model, settings.roleModels?.orchestrator],
@@ -3321,13 +3333,11 @@ export function SettingsPage() {
               </SettingsStack>
               {customToolSecretKeys.map((key) => (
                 <SettingsStack key={key} title={`Secret · ${key}`}>
-                  <input
-                    type="password"
-                    className={settingsInputCls}
-                    value={settings.customToolSecrets?.[key] || ''}
-                    onChange={(event) => set({ customToolSecrets: { ...(settings.customToolSecrets || {}), [key]: event.target.value } })}
-                    autoComplete="off"
-                    placeholder={`{{secret:${key}}} / 市集授權會自動寫入；也可在此覆寫`}
+                  <IntegrationCredentialField
+                    kind="custom-tool"
+                    ownerId={key}
+                    disabled={!loaded || Boolean(credentialMigrationError)}
+                    onChanged={async () => undefined}
                   />
                 </SettingsStack>
               ))}

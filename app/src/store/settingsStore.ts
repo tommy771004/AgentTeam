@@ -235,6 +235,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       try { await migrateLocalIntegrationSettings(localStorage, window.subagents?.credentials?.migrateLegacy) }
       catch (error) { credentialMigrationError = error instanceof Error ? error.message : '憑證遷移失敗，請重試。' }
     }
+    if (!credentialMigrationError && window.subagents?.settings) base = { ...base, customToolSecrets: {} }
 
     // Electron Pi Host owns the overlapping runtime profile. The legacy
     // settings bridge remains only for provider credentials, CLI, and UI-only
@@ -507,25 +508,19 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       if (data.settings) {
         // Skip redacted secrets so we do not wipe live keys
         const legacy = legacyIntegrationCredentials(data.settings)
-        if (Object.keys(legacy).length) {
+        const customToolSecrets = Object.fromEntries(Object.entries(data.settings.customToolSecrets || {})
+          .filter(([, value]) => typeof value === 'string' && value !== '***REDACTED***' && value.length > 0))
+        if (Object.keys(legacy).length || Object.keys(customToolSecrets).length) {
           const migrate = window.subagents?.credentials?.migrateLegacy
           if (!migrate) throw new Error('匯入憑證需要桌面版安全儲存')
-          const migrated = await migrate(legacy)
+          const migrated = await migrate({ ...legacy, ...(Object.keys(customToolSecrets).length ? { customToolSecrets } : {}) })
           if (!migrated.ok) throw new Error(migrated.error || '憑證匯入失敗')
         }
         const patch = withoutIntegrationCredentials({ ...data.settings }) as Partial<LlmSettings>
         if (patch.apiKey === '***REDACTED***') delete patch.apiKey
         if (patch.telegramBotToken === '***REDACTED***') delete patch.telegramBotToken
         if (patch.webhookToken === '***REDACTED***') delete patch.webhookToken
-        if (patch.customToolSecrets) {
-          const live = get().settings.customToolSecrets || {}
-          patch.customToolSecrets = Object.fromEntries(
-            Object.entries(patch.customToolSecrets).map(([key, value]) => [
-              key,
-              value === '***REDACTED***' ? live[key] || '' : value,
-            ]),
-          )
-        }
+        delete patch.customToolSecrets
         if (patch.pluginOAuthClients) {
           const live = get().settings.pluginOAuthClients || {}
           patch.pluginOAuthClients = Object.fromEntries(

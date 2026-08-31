@@ -117,7 +117,7 @@
     "smoke:recovery": "node scripts/smoke-recovery-e2e.mjs",
     "smoke:install": "node scripts/smoke-install-contract.mjs",
     "smoke:release": "node scripts/smoke-release-evidence.mjs && node scripts/smoke-release-promotion.mjs && npm run smoke:credential-vault",
-    "smoke:credential-vault": "node --experimental-strip-types scripts/smoke-credential-vault-contract.mts && node --experimental-strip-types scripts/smoke-integration-credential-migration.mts",
+    "smoke:credential-vault": "node --experimental-strip-types scripts/smoke-credential-vault-contract.mts && node --experimental-strip-types scripts/smoke-integration-credential-migration.mts && node --experimental-strip-types scripts/smoke-custom-tool-credential-migration.mts",
     "smoke:update": "node --experimental-strip-types scripts/smoke-update-migration.mts",
     "smoke:update:e2e": "node scripts/smoke-update-migration-e2e.mjs",
     "release:evidence": "node scripts/release-evidence.mjs",
