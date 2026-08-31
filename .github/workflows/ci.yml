@@ -54,6 +54,11 @@ jobs:
       - name: Lint (oxlint)
         run: npx oxlint src electron
 
+      - name: Resolve PR complexity base
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: echo "COMPLEXITY_PR_BASE_SHA=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_ENV"
+
       - name: Deterministic qualification (no App launch)
         run: npm run qualify:deterministic
 
