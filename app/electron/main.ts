@@ -37,7 +37,12 @@ import {
 } from './secretsVault'
 import { handleCredentialVaultIntent } from './integrationCredentialVault'
 import type { CredentialVaultIntent } from './credentialVaultAuthority'
-import { migrateIntegrationCredentials, migrateIntegrationSettingsFile } from './integrationCredentialMigration'
+import {
+  migrateIntegrationCredentials,
+  migrateIntegrationSettingsFile,
+  migrateIntegrationSettingsFileWithStatus,
+} from './integrationCredentialMigration'
+import { SettingsPersistence, SettingsPersistenceError } from './settingsPersistence'
 import { credentialBash, credentialHttpRequest, createToolCredentialScope } from './customToolCredentials'
 import { hasLegacyCustomToolCredentials, legacyIntegrationCredentials, withoutIntegrationCredentials } from '../src/agent/integrationCredentials'
 import {
@@ -580,6 +585,28 @@ function settingsForRenderer(value: unknown) {
   return withoutIntegrationCredentials(value)
 }
 
+type SettingsPersistenceDiagnostic = {
+  state: 'no-settings' | 'primary' | 'recovered-last-good' | 'corrupt-primary' | 'write-failed' | 'migration-failed'
+  stage?: SettingsPersistenceError['stage']
+  at: string
+}
+
+let settingsPersistenceDiagnostic: SettingsPersistenceDiagnostic = {
+  state: 'no-settings',
+  at: new Date().toISOString(),
+}
+
+function recordSettingsPersistence(
+  state: SettingsPersistenceDiagnostic['state'],
+  stage?: SettingsPersistenceError['stage'],
+): void {
+  settingsPersistenceDiagnostic = {
+    state,
+    ...(stage ? { stage } : {}),
+    at: new Date().toISOString(),
+  }
+}
+
 /** Open native folder picker and push path to renderer */
 async function openProjectFolderPicker(defaultPath?: string) {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -904,27 +931,25 @@ app.whenReady().then(async () => {
   // Auto-start webhook / telegram if settings request it
   try {
     const file = settingsPath()
-    if (fs.existsSync(file)) {
-      const s = migrateIntegrationSettingsFile(file) as {
-        webhookEnabled?: boolean
-        webhookPort?: number
-        telegramEnabled?: boolean
-        telegramAllowedChatIds?: string
-      }
-      if (s.webhookEnabled) {
-        void startWebhookServer({
-          port: s.webhookPort || 8787,
-        }).catch((e) => {
-          console.error('Webhook auto-start failed', e)
-        })
-      }
-      if (s.telegramEnabled) {
-        void startTelegramGateway({
-          allowedChatIds: s.telegramAllowedChatIds || '',
-        }).catch((e) => {
-          console.error('Telegram gateway auto-start failed', e)
-        })
-      }
+    const s = migrateIntegrationSettingsFile(file) as {
+      webhookEnabled?: boolean
+      webhookPort?: number
+      telegramEnabled?: boolean
+      telegramAllowedChatIds?: string
+    } | null
+    if (s?.webhookEnabled) {
+      void startWebhookServer({
+        port: s.webhookPort || 8787,
+      }).catch((e) => {
+        console.error('Webhook auto-start failed', e)
+      })
+    }
+    if (s?.telegramEnabled) {
+      void startTelegramGateway({
+        allowedChatIds: s.telegramAllowedChatIds || '',
+      }).catch((e) => {
+        console.error('Telegram gateway auto-start failed', e)
+      })
     }
   } catch {
     /* ignore */
@@ -1034,19 +1059,48 @@ ipcMain.handle('usage:clear', async () => {
 
 ipcMain.handle('settings:get', async () => {
   try {
-    return settingsForRenderer(migrateIntegrationSettingsFile(settingsPath()))
-  } catch {
+    const result = migrateIntegrationSettingsFileWithStatus(settingsPath())
+    recordSettingsPersistence(result.state)
+    if (result.state === 'recovered-last-good') {
+      console.warn('[settings] recovered last-good settings after an invalid primary')
+    }
+    return settingsForRenderer(result.value)
+  } catch (error) {
+    if (error instanceof SettingsPersistenceError) {
+      recordSettingsPersistence(
+        error.code === 'CORRUPT_PRIMARY' ? 'corrupt-primary' : 'write-failed',
+        error.stage,
+      )
+      throw new Error(error.message)
+    }
+    recordSettingsPersistence('migration-failed')
     throw new Error('設定或憑證遷移失敗；原始資料已保留，請重試。')
   }
 })
 
 ipcMain.handle('settings:set', async (_evt, settings: unknown) => {
   const file = settingsPath()
-  migrateIntegrationSettingsFile(file)
-  if (Object.keys(legacyIntegrationCredentials(settings)).length) throw new Error('請使用憑證 Vault intent 儲存 Token')
-  fs.writeFileSync(file, JSON.stringify(settingsForDisk(settings), null, 2), 'utf-8')
-  return { ok: true }
+  try {
+    migrateIntegrationSettingsFile(file)
+    if (Object.keys(legacyIntegrationCredentials(settings)).length) throw new Error('請使用憑證 Vault intent 儲存 Token')
+    const safe = settingsForDisk(settings)
+    if (!safe || typeof safe !== 'object' || Array.isArray(safe)) throw new Error('設定格式無效。')
+    new SettingsPersistence(file).write(safe as Record<string, unknown>)
+    recordSettingsPersistence('primary')
+    return { ok: true }
+  } catch (error) {
+    if (error instanceof SettingsPersistenceError) {
+      recordSettingsPersistence(
+        error.code === 'CORRUPT_PRIMARY' ? 'corrupt-primary' : 'write-failed',
+        error.stage,
+      )
+      throw new Error(error.message)
+    }
+    throw error
+  }
 })
+
+ipcMain.handle('settings:diagnostics', async () => ({ ...settingsPersistenceDiagnostic }))
 
 // ── LLM proxy (OpenAI-compatible) ───────────────────────────────
 

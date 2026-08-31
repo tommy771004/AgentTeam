@@ -92,7 +92,12 @@ try {
   assert.match(await fs.readFile(settingsFile, 'utf8'), /MIGRATION-CANARY/)
   assert.deepEqual(api.migrateIntegrationSettingsFile(settingsFile), { webhookPort: 8787 })
   assert.doesNotMatch(await fs.readFile(settingsFile, 'utf8'), /Token|CANARY/)
+  assert.doesNotMatch(await fs.readFile(`${settingsFile}.last-good`, 'utf8'), /Token|CANARY/)
   assert.deepEqual(api.migrateIntegrationSettingsFile(settingsFile), { webhookPort: 8787 })
+  await fs.writeFile(`${settingsFile}.last-good`, JSON.stringify({ webhookPort: 7000 }))
+  await fs.writeFile(settingsFile, '{"webhookPort":')
+  assert.deepEqual(api.migrateIntegrationSettingsFile(settingsFile), { webhookPort: 7000 })
+  assert.deepEqual(JSON.parse(await fs.readFile(settingsFile, 'utf8')), { webhookPort: 7000 })
 
   const local = new Map([[INTEGRATION_SETTINGS_KEY, JSON.stringify(legacy)]])
   const storage = { getItem: (key: string) => local.get(key) || null, setItem: (key: string, value: string) => { local.set(key, value) } }

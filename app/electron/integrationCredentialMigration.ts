@@ -2,8 +2,11 @@ import { INTEGRATION_CREDENTIALS, LEGACY_CREDENTIAL_FIELDS, legacyIntegrationCre
 import { handleCredentialVaultIntent, withIntegrationCredential } from './integrationCredentialVault'
 import { credentialReference, type CredentialKind } from './credentialVaultAuthority'
 import { safeStorage } from 'electron'
-import fs from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import {
+  SettingsPersistence,
+  SettingsPersistenceError,
+  type SettingsReadResult,
+} from './settingsPersistence'
 
 /** Vault wins over stale settings. Caller persists the returned projection only on success. */
 export function migrateIntegrationCredentials<T>(settings: T): T {
@@ -41,24 +44,28 @@ export function migrateIntegrationCredentials<T>(settings: T): T {
 }
 
 /** Scrub legacy disk fields only after vault verification; failed writes keep the original file. */
-export function migrateIntegrationSettingsFile(file: string): Record<string, unknown> | null {
-  if (!fs.existsSync(file)) return null
-  let original: Record<string, unknown>
-  try {
-    original = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>
-    if (!original || typeof original !== 'object' || Array.isArray(original)) throw new Error('invalid settings')
-  } catch {
-    throw new Error('設定或憑證資料無法讀取，原始檔案已保留。')
+export function migrateIntegrationSettingsFileWithStatus(file: string): SettingsReadResult {
+  const persistence = new SettingsPersistence(file)
+  const read = persistence.read()
+  if (read.state === 'corrupt-primary') {
+    throw new SettingsPersistenceError('CORRUPT_PRIMARY', 'read')
   }
+  if (read.value === null) return read
+  const original = read.value
   const safe = migrateIntegrationCredentials(original)
-  if (LEGACY_CREDENTIAL_FIELDS.some((field) => Object.hasOwn(original, field))) {
-    const temporary = `${file}.${randomUUID()}.tmp`
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(safe, null, 2), { mode: 0o600 })
-      fs.renameSync(temporary, file)
-    } finally {
-      fs.rmSync(temporary, { force: true })
-    }
+  const hasLegacyFields = LEGACY_CREDENTIAL_FIELDS.some((field) => Object.hasOwn(original, field))
+  if (
+    read.state === 'recovered-last-good'
+    || hasLegacyFields
+  ) {
+    persistence.write(safe, {
+      lastGood: hasLegacyFields ? 'next' : 'current',
+    })
   }
-  return safe
+  return { state: read.state, value: safe }
+}
+
+/** Backward-compatible data projection for existing main-process consumers. */
+export function migrateIntegrationSettingsFile(file: string): Record<string, unknown> | null {
+  return migrateIntegrationSettingsFileWithStatus(file).value
 }

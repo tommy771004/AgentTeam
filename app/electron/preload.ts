@@ -508,6 +508,11 @@ const api = {
     get: () => ipcRenderer.invoke('settings:get') as Promise<unknown | null>,
     set: (settings: unknown) =>
       ipcRenderer.invoke('settings:set', settings) as Promise<{ ok: boolean }>,
+    diagnostics: () => ipcRenderer.invoke('settings:diagnostics') as Promise<{
+      state: 'no-settings' | 'primary' | 'recovered-last-good' | 'corrupt-primary' | 'write-failed' | 'migration-failed'
+      stage?: 'before-temp-write' | 'during-temp-write' | 'before-rename' | 'after-rename' | 'read' | 'backup' | 'flush'
+      at: string
+    }>,
   },
   llm: {
     models: (req: { baseUrl: string; apiKey: string }) =>
