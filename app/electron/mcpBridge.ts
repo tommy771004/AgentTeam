@@ -233,7 +233,7 @@ class McpStdioSession {
     if (msg.error) {
       p.reject(new Error(this.credentials.redact(msg.error.message || `MCP error ${msg.error.code}`)))
     } else {
-      p.resolve(msg.result === undefined ? undefined : JSON.parse(this.credentials.redact(JSON.stringify(msg.result))))
+      p.resolve(this.credentials.redactValue(msg.result))
     }
   }
 

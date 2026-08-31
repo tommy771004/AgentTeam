@@ -43,9 +43,15 @@ try {
   assert.equal(api.handleCredentialVaultIntent({ action: 'clear', ref: 'credential:custom-tool:deploy' }).ok, true)
   assert.deepEqual(api.resolveSecretPlaceholders('{{secret:deploy}}'), { text: '', missing: ['deploy'] })
   api.handleCredentialVaultIntent({ action: 'store', kind: 'custom-tool', ownerId: 'deploy', secret: 'mcp-ARG-CANARY' })
+  const shellResult = await api.credentialBash({ command: 'printf %s {{secret:deploy}}', cwd: directory, timeoutMs: 1000 })
+  assert.equal(shellResult.ok, true)
+  assert.equal(shellResult.stdout, '[REDACTED]')
+  const cappedShell = await api.credentialBash({ command: "printf '%79995s' x; printf %s {{secret:deploy}}", cwd: directory, timeoutMs: 1000 })
+  assert.equal(cappedShell.ok, true)
+  assert.doesNotMatch(cappedShell.stdout, /mcp-/)
   const mcpInput = {
     id: 'credential-mcp', command: process.execPath,
-    args: ['-e', `require('readline').createInterface({input:process.stdin}).on('line',line=>{const msg=JSON.parse(line);if(msg.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:msg.id,result:msg.method==='initialize'?{}:{content:[{type:'text',text:process.argv[1]}]}})+'\\n')})`, '{{secret:deploy}}'],
+    args: ['-e', `require('readline').createInterface({input:process.stdin}).on('line',line=>{const msg=JSON.parse(line);if(msg.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:msg.id,result:msg.method==='initialize'?{}:{count:12345,enabled:true,content:[{type:'text',text:process.argv[1]}]}})+'\\n')})`, '{{secret:deploy}}'],
   }
   try {
     const status = await api.mcpStdioEnsure(mcpInput)
@@ -54,6 +60,13 @@ try {
     assert.equal(called.ok, true)
     assert.doesNotMatch(JSON.stringify(called), /mcp-ARG-CANARY/)
   } finally { api.mcpStdioStopAll() }
+  for (const secret of ['12345', 'true', '"']) {
+    api.handleCredentialVaultIntent({ action: 'rotate', ref: 'credential:custom-tool:deploy', secret })
+    try {
+      const result = await api.mcpStdioCallTool({ ...mcpInput, toolName: 'echo', arguments: {} })
+      assert.deepEqual(result, { ok: true, content: '[REDACTED]' }, 'credential redaction must preserve JSON grammar')
+    } finally { api.mcpStdioStopAll() }
+  }
   const legacy = { telegramBotToken: 'telegram-MIGRATION-CANARY', webhookToken: 'webhook-MIGRATION-CANARY', customToolSecrets: { deploy: 'custom-LOCAL-CANARY' }, webhookPort: 8787 }
   const safe = api.migrateIntegrationCredentials(legacy)
   assert.deepEqual(safe, { webhookPort: 8787 })
@@ -182,13 +195,20 @@ try {
   // Exercise actual renderer store hydration/persistence/export with the IPC/Storage boundaries substituted.
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
   const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const previousBridge = Object.getOwnPropertyDescriptor(globalThis, 'subagents')
   local.set(INTEGRATION_SETTINGS_KEY, JSON.stringify(legacy))
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage })
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { subagents: {
     settings: { get: async () => api.migrateIntegrationSettingsFile(settingsFile), set: async (value: unknown) => { assert.doesNotMatch(JSON.stringify(value), /CANARY/); return { ok: true } } },
     credentials: { migrateLegacy: async (value: unknown) => { api.migrateIntegrationCredentials(value); return { ok: true } } },
+    secrets: { list: async () => api.listVaultMeta() },
+    tools: { httpRequest: async (input: { headers: Record<string, string> }) => {
+      assert.equal(input.headers.Authorization, '{{secret:imported}}')
+      return { ok: true, text: 'ok', status: 200 }
+    } },
     piHost: { memoryProjection: { exportBundle: async () => ({ entries: [] }) } },
   } } })
+  Object.defineProperty(globalThis, 'subagents', { configurable: true, value: window.subagents })
   try {
     const { useSettingsStore, mergeSettings } = await import('../src/store/settingsStore.ts')
     const rawPatch = { telegramBotToken: 'forbidden-state-CANARY', webhookToken: 'forbidden-state-CANARY', customToolSecrets: { deploy: 'forbidden-state-CANARY' } }
@@ -204,7 +224,14 @@ try {
     assert.equal((await useSettingsStore.getState().importBundle(JSON.stringify({ settings: legacy }))).ok, true)
     assert.doesNotMatch(JSON.stringify(useSettingsStore.getState().settings), /customToolSecrets|telegramBotToken|webhookToken|CANARY/)
     assert.doesNotMatch(local.get(INTEGRATION_SETTINGS_KEY)!, /CANARY/)
+    const imported = { customToolSecrets: { imported: 'IMPORT-CANARY' } }
+    assert.equal((await useSettingsStore.getState().importBundle(JSON.stringify({ settings: imported }))).ok, true)
+    const { executeCustomTool } = await import('../src/agent/tools/customTools.ts')
+    const executed = await executeCustomTool({ name: 'import_test', ownerId: 'settings', kind: 'http_template', description: 'test import', params: {}, template: { url: 'https://example.invalid', headers: { Authorization: '{{secret:imported}}' } } }, {}, useSettingsStore.getState().settings)
+    assert.equal(executed.ok, true, 'imported credentials must be usable immediately, without reload')
   } finally {
+    if (previousBridge) Object.defineProperty(globalThis, 'subagents', previousBridge)
+    else Reflect.deleteProperty(globalThis, 'subagents')
     if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
     else Reflect.deleteProperty(globalThis, 'window')
     if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage)

@@ -511,6 +511,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           if (!migrate) throw new Error('匯入憑證需要桌面版安全儲存')
           const migrated = await migrate(legacy)
           if (!migrated.ok) throw new Error(migrated.error || '憑證匯入失敗')
+          const { hydratePluginSecrets } = await import('../agent/hermes/pluginSecrets.ts')
+          await hydratePluginSecrets()
         }
         const patch = withoutIntegrationCredentials({ ...data.settings }) as Partial<LlmSettings>
         if (patch.apiKey === '***REDACTED***') delete patch.apiKey

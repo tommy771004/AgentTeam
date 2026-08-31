@@ -38,7 +38,7 @@ import {
 import { handleCredentialVaultIntent } from './integrationCredentialVault'
 import type { CredentialVaultIntent } from './credentialVaultAuthority'
 import { migrateIntegrationCredentials, migrateIntegrationSettingsFile } from './integrationCredentialMigration'
-import { credentialHttpRequest, createToolCredentialScope } from './customToolCredentials'
+import { credentialBash, credentialHttpRequest, createToolCredentialScope } from './customToolCredentials'
 import { legacyIntegrationCredentials, withoutIntegrationCredentials } from '../src/agent/integrationCredentials'
 import {
   decidePermissionRequest,
@@ -1421,7 +1421,7 @@ ipcMain.handle(
     )
     try {
       const result = await mcpHttpRpc({ ...input, headers })
-      return result === undefined ? undefined : JSON.parse(scope.redact(JSON.stringify(result)))
+      return scope.redactValue(result)
     } catch {
       throw new Error('MCP 請求失敗：請確認憑證與連線設定。')
     }
@@ -1501,13 +1501,7 @@ ipcMain.handle(
       cwd = path.resolve(workspaceRoot(), cwd)
     }
     if (!cwd || !fs.existsSync(cwd)) cwd = workspaceRoot()
-    const scope = createToolCredentialScope()
-    try {
-      const result = await runBash({ ...input, cwd, command: scope.resolve(input.command) })
-      return { ...result, stdout: scope.redact(result.stdout), stderr: scope.redact(result.stderr) }
-    } catch {
-      return { ok: false, code: 1, stdout: '', stderr: '工具執行失敗：請確認憑證與執行設定。' }
-    }
+    return credentialBash({ ...input, cwd })
   },
 )
 
@@ -4906,6 +4900,7 @@ ipcMain.handle('credentials:migrateLegacy', async (_evt, legacy: unknown) => {
   try {
     migrateIntegrationSettingsFile(settingsPath())
     migrateIntegrationCredentials(legacyIntegrationCredentials(legacy))
+    if (Object.keys(legacyIntegrationCredentials(legacy)).some((field) => field === 'customToolSecrets' || field === 'encryptedCustomToolSecrets')) mcpStdioStopAll()
     return { ok: true }
   } catch {
     return { ok: false, error: '憑證遷移失敗：原始資料已保留，請確認安全儲存後重試。' }

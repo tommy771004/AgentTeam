@@ -1,5 +1,6 @@
 /** Main-only resolution scope. Neither resolved inputs nor reflected credentials leave main. */
 import { resolveSecretPlaceholders } from './secretsVault'
+import { runBash } from './shellBridge'
 
 export function createToolCredentialScope() {
   const secrets = new Set<string>()
@@ -18,7 +19,26 @@ export function createToolCredentialScope() {
     }
     return safe
   }
-  return { resolve, redact }
+  const redactValue = (value: unknown): unknown => {
+    if (typeof value === 'string') return redact(value)
+    if (Array.isArray(value)) return value.map(redactValue)
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [redact(key), redactValue(item)]))
+    return value
+  }
+  return { resolve, redact, redactValue, hasCredentials: () => secrets.size > 0 }
+}
+
+export async function credentialBash(input: { command: string; cwd?: string; timeoutMs?: number; runId?: string }) {
+  const scope = createToolCredentialScope()
+  try {
+    const result = await runBash({ ...input, command: scope.resolve(input.command) })
+    if (scope.hasCredentials() && result.outputTruncated) {
+      return { ...result, stdout: '', stderr: '憑證工具輸出超過上限，已隱藏以避免密鑰片段洩漏。' }
+    }
+    return { ...result, stdout: scope.redact(result.stdout), stderr: scope.redact(result.stderr) }
+  } catch {
+    return { ok: false, code: 1, stdout: '', stderr: '工具執行失敗：請確認憑證與執行設定。' }
+  }
 }
 
 export async function credentialHttpRequest(input: {

@@ -45,6 +45,8 @@ export function listActiveBashRuns(): Array<{ runId: string; tag?: string }> {
 /** Kill one run, all runs with a tag, or everything */
 export function cancelBash(opts?: {
   runId?: string
+  /** Output was clipped; credential-bearing callers must not expose partial tokens. */
+  outputTruncated?: boolean
   tag?: string
 }): { ok: boolean; killed: number } {
   const targets = resolveActiveRunIds(opts)
@@ -192,6 +194,7 @@ function runSpawnedProcess(
   return new Promise((resolve) => {
     let stdout = ''
     let stderr = ''
+    let outputTruncated = false
     let settled = false
     const child = spawn(file, args, {
       cwd,
@@ -222,7 +225,7 @@ function runSpawnedProcess(
       settled = true
       clearTimeout(timer)
       activeRuns.delete(runId)
-      resolve({ ...result, runId })
+      resolve({ ...result, runId, ...(outputTruncated ? { outputTruncated: true } : {}) })
     }
 
     const timer = setTimeout(() => {
@@ -244,6 +247,7 @@ function runSpawnedProcess(
     child.stdout?.on('data', (c: Buffer) => {
       const chunk = c.toString('utf-8')
       stdout += chunk
+      if (stdout.length > 80_000) outputTruncated = true
       if (stdout.length > 100_000) stdout = stdout.slice(-80_000)
       try {
         opts.onStdout?.(chunk)
@@ -254,6 +258,7 @@ function runSpawnedProcess(
     child.stderr?.on('data', (c: Buffer) => {
       const chunk = c.toString('utf-8')
       stderr += chunk
+      if (stderr.length > 20_000) outputTruncated = true
       if (stderr.length > 40_000) stderr = stderr.slice(-20_000)
       try {
         opts.onStderr?.(chunk)
