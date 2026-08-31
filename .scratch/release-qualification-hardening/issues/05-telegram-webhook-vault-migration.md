@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — Credential vault expand contract。
 
-**Status:** claimed
+**Status:** resolved
 
 - [x] Telegram 與 Webhook 的新 save/rotate/clear flow 全部經 vault typed intents。
 - [x] App restart 與 integration auto-start 從 vault reference 取得 credential，不再讀 legacy raw fields。
@@ -14,7 +14,7 @@
 
 ## Comments
 
-2026-08-31 — Telegram/Webhook migration 實作完成，完整 smoke qualification 執行中。
+2026-08-31 — Telegram/Webhook migration 實作完成；程式碼隨並行工作樹提交 `8efe5b4` 落地。
 
 - [Main migration owner](../../../app/electron/integrationCredentialMigration.ts) 對 disk/localStorage/import 舊資料採 vault-first verification，已有 Vault record 優先；完成後才移除舊欄位。Disk scrub 使用 temporary file + rename；write/read/parse failure 保留原始資料且不在錯誤中回傳內容。
 - [Renderer migration ingress](../../../app/src/agent/integrationCredentialSettings.ts) 是唯一轉送舊 localStorage 憑證的入口。Settings hydration、save、export 都不投影 raw values；遷移失敗保留唯一舊 copy、顯示錯誤及重試入口，不允許其他 save 蓋掉原始資料。
@@ -24,4 +24,5 @@
 - Gate evidence：[smoke-integration-credential-migration.mts](../../../app/scripts/smoke-integration-credential-migration.mts) 經 `smoke` → `smoke:release` → `smoke:credential-vault` 執行。覆蓋 shipped main adapter、真實本機 HTTP receiver、Pi pack/service payload、附件取消、disk restart/write failure、實際 settingsStore hydration/update/export、localStorage retry 與 canary negative assertions。OS keychain、Telegram network、IPC/Storage 僅在系統邊界使用 fixture，不宣稱真機 Telegram 或 OS keychain qualification。
 - [Credential ownership guard](../../../app/scripts/smoke-credential-vault-contract.mts) 保持 Pi resources／Turn Record owners 不得讀 raw Vault；[side-effect guard](../../../app/scripts/smoke-side-effect-evidence.mts) 已指向 main service authority，未放寬 tool approval 或 delivery-evidence 規則。
 - Focused credential、side-effect、caps（91/91）、Pi contract、tracker-links、build/typecheck 與 scoped oxlint 通過。雙軸 review 的 startup race、附件取消、clear UI 誤報、write-failure fixture 四項已修復並複查。
+- 完整 `npm run smoke` 已依流程啟動且執行至後段；其 process 結束後工具工作階段已被回收，無法取得最終 exit code，因此不把它宣稱為綠。此票的 owning smoke 已在主鏈且 focused 執行通過，符合 tracker 的一-hop gate evidence；完整 qualification 狀態仍須由後續 rollup 重新取得可稽核結果。
 - #06 custom-tool migration 與 #07 flat schema/default/legacy contract deletion 尚未執行；本票不宣稱全部 integration credential migration 收口。Paid Beta 維持 NO-GO。
