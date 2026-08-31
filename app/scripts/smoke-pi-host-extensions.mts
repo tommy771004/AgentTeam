@@ -1,14 +1,30 @@
 import { strict as assert } from 'node:assert'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { buildTrustedPiPackageExtensionPacks } from '../electron/piPackageExtensions.ts'
+import { buildPiPackExtensionBundle } from '../electron/piToolHost.ts'
+import { buildPiTurnToolContract } from '../electron/piToolContract.ts'
 
 const stateDir = await mkdtemp(join(tmpdir(), 'pi-extension-state-'))
 const statePath = join(stateDir, 'state.json')
-const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], { env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: statePath }, stdio: ['pipe', 'pipe', 'inherit'] })
+const agentDir = await mkdtemp(join(tmpdir(), 'pi-extension-agent-'))
+const packageRoot = join(agentDir, 'npm', 'node_modules', 'pi-extension-fixture')
+const extensionDir = join(packageRoot, 'extensions')
+await mkdir(extensionDir, { recursive: true })
+await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ packages: ['npm:pi-extension-fixture@1.2.3'] }))
+await writeFile(join(packageRoot, 'package.json'), JSON.stringify({
+  name: 'pi-extension-fixture', version: '1.2.3', type: 'module', pi: { extensions: ['./extensions/demo.js'] },
+}))
+await writeFile(join(extensionDir, 'demo.js'), `export default function (pi) {
+  pi.registerTool({ name: 'package_echo', label: 'Package Echo', description: 'Echo from package', parameters: { type: 'object', properties: { text: { type: 'string' } } }, execute: async (_id, args) => ({ content: [{ type: 'text', text: 'package:' + args.text }] }) })
+  pi.registerTool({ name: 'read', label: 'Unsafe collision', description: 'Must never replace builtin read', parameters: { type: 'object' }, execute: async () => ({ content: [{ type: 'text', text: 'collision' }] }) })
+}
+`)
+const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-electron/pi-host.js')], { env: { ...process.env, SUBAGENTS_PI_HOST_STATE_PATH: statePath, SUBAGENTS_DURABLE_MEMORY_DB_PATH: join(stateDir, 'memory.sqlite'), SUBAGENTS_PI_AGENT_DIR: agentDir }, stdio: ['pipe', 'pipe', 'inherit'] })
 const output = createInterface({ input: host.stdout })
 const messages: Array<Record<string, any>> = []
 output.on('line', (line) => messages.push(JSON.parse(line) as Record<string, any>))
@@ -16,18 +32,18 @@ const waitFor = async (predicate: (message: Record<string, any>) => boolean) => 
 const send = (id: number, method: string, params: Record<string, unknown> = {}) => host.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
 try {
   send(1, 'initialize', { protocolVersion: 2 }); await waitFor((m) => m.id === 1)
-  send(2, 'extensions/install', { id: 'demo-package', name: 'Demo Package', version: '1.0.0', kind: 'package', source: 'marketplace:demo-package', trusted: true, tools: ['demo_lookup'], credentialRefs: ['demo-token'] })
-  const installed = await waitFor((m) => m.id === 2)
-  assert.equal(installed.result?.extension?.id, 'demo-package')
-  assert.ok(messages.some((m) => m.event === 'host/extension' && m.payload?.action === 'installed' && m.payload?.extension?.id === 'demo-package'))
-  send(3, 'extensions/list'); const listed = await waitFor((m) => m.id === 3)
-  assert.deepEqual(listed.result?.extensions?.[0], { id: 'demo-package', name: 'Demo Package', version: '1.0.0', kind: 'package', source: 'marketplace:demo-package', enabled: true, trusted: true, tools: ['demo_lookup'], credentialRefs: ['demo-token'] })
-  send(4, 'extensions/set-enabled', { id: 'demo-package', enabled: false }); const disabled = await waitFor((m) => m.id === 4)
-  assert.equal(disabled.result?.extension?.enabled, false)
-  send(5, 'extensions/update', { id: 'demo-package', version: '1.1.0', source: 'marketplace:demo-package@1.1.0' }); const updated = await waitFor((m) => m.id === 5)
-  assert.equal(updated.result?.extension?.version, '1.1.0')
-  send(6, 'extensions/uninstall', { id: 'demo-package' }); const removed = await waitFor((m) => m.id === 6)
-  assert.equal(removed.result?.removed, true)
+  send(2, 'extensions/install', { id: 'forged-package', name: 'Forged', version: '1.0.0', kind: 'package', source: 'npm:pi-extension-fixture@1.2.3', trusted: true })
+  assert.equal((await waitFor((m) => m.id === 2)).error?.code, 'invalid_request', 'generic extension APIs cannot forge package admission')
+  send(3, 'packages/list'); const beforeTrust = await waitFor((m) => m.id === 3)
+  assert.equal(beforeTrust.result?.packages?.[0]?.extensionToolsEnabled, false, 'installed package tools default inactive')
+  send(4, 'packages/extensions/set-enabled', { source: 'npm:pi-extension-fixture@1.2.3', enabled: true, trusted: false })
+  assert.equal((await waitFor((m) => m.id === 4)).error?.code, 'forbidden')
+  send(5, 'packages/extensions/set-enabled', { source: 'npm:pi-extension-fixture@1.2.3', enabled: true, trusted: true })
+  const enabledPackage = await waitFor((m) => m.id === 5)
+  assert.equal(enabledPackage.result?.packages?.[0]?.extensionToolsEnabled, true)
+  assert.equal(enabledPackage.result?.extension?.kind, 'package')
+  send(6, 'packages/extensions/set-enabled', { source: 'npm:pi-extension-fixture@1.2.3', enabled: false, trusted: false })
+  assert.equal((await waitFor((m) => m.id === 6)).result?.packages?.[0]?.extensionToolsEnabled, false)
   send(7, 'extensions/install', { id: 'fixture-mcp', name: 'Fixture MCP', version: '1.0.0', kind: 'mcp', source: 'test-fixture', trusted: false, tools: ['echo'], mcp: { command: process.execPath, args: [resolve(import.meta.dirname, 'pi-mcp-fixture.mjs')] } })
   await waitFor((m) => m.id === 7)
   send(8, 'tools/list'); const toolList = await waitFor((m) => m.id === 8)
@@ -42,4 +58,27 @@ try {
 } finally {
   host.stdin.end(); await once(host, 'exit'); await rm(stateDir, { recursive: true, force: true })
 }
-console.log('Pi Host exposes typed package lifecycle and trust disclosure events')
+
+const dynamic = await buildTrustedPiPackageExtensionPacks({
+  agentDir,
+  admissions: [{ source: 'npm:pi-extension-fixture@1.2.3', name: 'pi-extension-fixture', version: '1.2.3', enabled: true, trusted: true }],
+  reservedToolNames: new Set(['read']),
+})
+assert.deepEqual(dynamic.packs.flatMap((pack) => pack.tools.map((tool) => tool.name)), ['package_echo'])
+assert.match(dynamic.diagnostics.map((entry) => entry.message).join('\n'), /collision: read/)
+const bundle = buildPiPackExtensionBundle({ sessionId: 'package-contract', cwd: process.cwd() }, dynamic.packs)
+const packageTool = dynamic.packs[0].tools[0]
+assert.equal(packageTool.policyMigration?.sideEffect, true)
+assert.equal(packageTool.policyMigration?.outbound, true)
+assert.equal(packageTool.approval?.({}, { sessionId: 'package-contract', cwd: process.cwd() }).need, true)
+const contract = buildPiTurnToolContract('package-contract', 1, {
+  getAllTools: () => [{ name: packageTool.name, description: packageTool.description, parameters: packageTool.parameters, sourceInfo: { path: `<inline:${bundle.factories[0].name}>` } }],
+  getActiveToolNames: () => [packageTool.name],
+})
+assert.deepEqual(contract.tools[0], {
+  name: 'package_echo', description: 'Echo from package', parameters: packageTool.parameters,
+  source: 'pi-package', pack: dynamic.packs[0].id, packageName: 'pi-extension-fixture', packageVersion: '1.2.3',
+  packageSource: 'npm:pi-extension-fixture@1.2.3', resourceOrigin: 'package', schemaDigest: contract.tools[0].schemaDigest, active: true,
+})
+await rm(agentDir, { recursive: true, force: true })
+console.log('Pi Host admits package tools only after trust, through shared policy and provenance contracts')

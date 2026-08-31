@@ -51,6 +51,8 @@ type PiPackageView = {
   name?: string
   version?: string
   resourceTypesKnown: boolean
+  extensionToolsEnabled?: boolean
+  extensionToolsTrusted?: boolean
   resources: Array<{ kind: 'extensions' | 'skills' | 'prompts' | 'themes'; total: number; enabled: number }>
   diagnostics: Array<{ code: string; message: string }>
 }
@@ -222,6 +224,30 @@ export function PiCoreSettingsSection() {
     }
   }
 
+  const setPackageExtensionsEnabled = async (item: PiPackageView) => {
+    const setEnabled = window.subagents?.piHost?.packages?.setExtensionsEnabled
+    if (!setEnabled) return
+    const enabled = !item.extensionToolsEnabled
+    if (enabled && !window.confirm(
+      `確定啟用 ${item.source} 的 Extension Tools？\n\n這些工具與 package initialization code 不是 sandbox，可能取得完整 filesystem、process、network、environment 與 credentials 權限；每次工具呼叫仍需通過 Host contract 與核准政策。`,
+    )) return
+    if (!enabled && !window.confirm(`確定停用 ${item.source} 的 Extension Tools？下一輪 Pi run 將不再發布這些工具。`)) return
+    setPackageMutating(true)
+    setPackageOperationMessage(enabled ? '正在驗證並啟用 Extension Tools…' : '正在停用 Extension Tools…')
+    try {
+      const result = await setEnabled({ source: item.source, enabled, trusted: enabled })
+      setPackages(result.packages || [])
+      setPackageMessage(result.diagnostics?.[0]?.message || '')
+      setPackageStatus('ready')
+      setPackageOperationMessage(`${enabled ? '已啟用' : '已停用'} ${item.source} Extension Tools；下一輪 Pi run 套用`)
+    } catch (error) {
+      setPackageOperationMessage(error instanceof Error ? `Extension Tools 變更失敗：${error.message}` : 'Extension Tools 變更失敗')
+      await refreshPackages(false)
+    } finally {
+      setPackageMutating(false)
+    }
+  }
+
   const mcpExtensions = extensions.filter((extension) => extension.kind === 'mcp')
   const packageMutationAvailable = Boolean(window.subagents?.piHost?.packages?.install && window.subagents?.piHost?.packages?.remove)
 
@@ -338,16 +364,29 @@ export function PiCoreSettingsSection() {
           <SettingsRow
             key={`${item.scope}:${item.source}`}
             title={`${item.name || item.source} · ${item.version || '版本未知'}`}
-            description={`${item.source} · ${item.installed ? '已安裝' : '設定存在，檔案缺失'} · ${piPackageResourcesLabel(item)}${item.filtered ? ' · 已套用 resource filters' : ''}${item.diagnostics[0]?.message ? ` · ${item.diagnostics[0].message}` : ''}`}
+            description={`${item.source} · ${item.installed ? '已安裝' : '設定存在，檔案缺失'} · ${piPackageResourcesLabel(item)}${item.resources.some((resource) => resource.kind === 'extensions' && resource.enabled > 0) ? ` · Extension Tools ${item.extensionToolsEnabled ? '已信任啟用' : '預設停用'}` : ''}${item.filtered ? ' · 已套用 resource filters' : ''}${item.diagnostics[0]?.message ? ` · ${item.diagnostics[0].message}` : ''}`}
             control={packageMutationAvailable ? (
-              <button
-                type="button"
-                className={settingsBtnCls}
-                disabled={packageMutating}
-                onClick={() => void removePackage(item.source)}
-              >
-                移除
-              </button>
+              <div className="flex items-center gap-2">
+                {item.resources.some((resource) => resource.kind === 'extensions' && resource.enabled > 0)
+                  && window.subagents?.piHost?.packages?.setExtensionsEnabled && (
+                  <button
+                    type="button"
+                    className={settingsBtnCls}
+                    disabled={packageMutating}
+                    onClick={() => void setPackageExtensionsEnabled(item)}
+                  >
+                    {item.extensionToolsEnabled ? '停用 Tools' : '信任並啟用 Tools'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={settingsBtnCls}
+                  disabled={packageMutating}
+                  onClick={() => void removePackage(item.source)}
+                >
+                  移除
+                </button>
+              </div>
             ) : <span className="text-[11px] text-outline">User scope</span>}
           />
         ))}

@@ -545,6 +545,16 @@ export class PiHostSupervisor {
     }
   }
 
+  async setPackageExtensionsEnabled(source: string, enabled: boolean, trusted: boolean) {
+    const response = await this.request('packages/extensions/set-enabled', { source, enabled, trusted })
+    if (response.error || !response.result?.packages) throw new Error(response.error?.message || 'Pi package extension admission failed')
+    return {
+      packages: response.result.packages,
+      diagnostics: response.result.packageDiagnostics || [],
+      extension: response.result.extension,
+    }
+  }
+
   async reloadResources(resources: unknown[]): Promise<NonNullable<PiHostResponse['result']>['resources']> {
     const response = await this.request('resources/reload', { resources })
     if (response.error || !response.result?.resources) throw new Error(response.error?.message || 'Pi resource reload failed')

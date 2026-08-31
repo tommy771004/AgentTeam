@@ -27,6 +27,10 @@ export function handlePiHostExtensionDomain(input: {
 }
 
 function handleInstall(input: Parameters<typeof handlePiHostExtensionDomain>[0]): PiHostMessage[] {
+  const requestedId = extensionIdFrom(input)
+  if (input.params?.kind === 'package' || input.registry.list().some((extension) => extension.id === requestedId && extension.kind === 'package')) {
+    return [errorResponse(input.id, 'Package extensions use the Pi package trust path')]
+  }
   const installing = input.method === 'extensions/install'
   const extension = installing ? input.registry.install(input.params || {}) : input.registry.update(input.params || {})
   if (extension.kind === 'mcp') reloadPiMcp(extension.id)
@@ -51,6 +55,7 @@ function handleUninstall(input: Parameters<typeof handlePiHostExtensionDomain>[0
   if (!extensionId) return [errorResponse(input.id, 'id is required')]
   const extension = input.registry.list().find((candidate) => candidate.id === extensionId)
   if (!extension) return [errorResponse(input.id, `Unknown Pi extension: ${extensionId}`)]
+  if (extension.kind === 'package') return [errorResponse(input.id, 'Package extensions use the Pi package trust path')]
   input.registry.uninstall(extensionId)
   if (extension.kind === 'mcp') stopPiMcp(extensionId)
   return publish(input, 'uninstalled', extension, { removed: true })

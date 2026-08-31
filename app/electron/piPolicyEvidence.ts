@@ -20,6 +20,10 @@ export type PiInvocationContractIdentity = {
   schemaDigest: string
   toolSource: PiToolContractSource
   toolPack?: string
+  packageName?: string
+  packageVersion?: string
+  packageSource?: string
+  resourceOrigin?: 'package'
 }
 
 export type PiFrozenRunPolicy = Readonly<{

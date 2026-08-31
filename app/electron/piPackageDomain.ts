@@ -37,6 +37,8 @@ export type PiPackageInventoryItem = {
   name?: string
   version?: string
   resourceTypesKnown: boolean
+  extensionToolsEnabled?: boolean
+  extensionToolsTrusted?: boolean
   resources: Array<{ kind: PiPackageResourceKind; total: number; enabled: number }>
   diagnostics: PiPackageDiagnostic[]
 }
@@ -59,7 +61,7 @@ type ResolvedResource = {
   metadata: { source: string; scope: 'user' | 'project' | 'temporary'; origin: 'package' | 'top-level' }
 }
 
-export type PiPackageSkillResource = {
+export type PiPackageResourceDescriptor = {
   path: string
   installedPath: string
   packageName: string
@@ -67,6 +69,9 @@ export type PiPackageSkillResource = {
   source: string
   origin: 'package'
 }
+
+export type PiPackageSkillResource = PiPackageResourceDescriptor
+export type PiPackageExtensionResource = PiPackageResourceDescriptor
 
 type ResolvedPaths = Record<PiPackageResourceKind, ResolvedResource[]>
 
@@ -250,10 +255,10 @@ export async function listPiPackageInventory(): Promise<PiPackageInventory> {
   return { packages, diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS) }
 }
 
-export async function resolvePiPackageSkillResources(agentDir: string | undefined): Promise<{
-  resources: PiPackageSkillResource[]
-  diagnostics: Array<{ path: string; message: string }>
-}> {
+async function resolvePiPackageResources(
+  agentDir: string | undefined,
+  kind: 'skills' | 'extensions',
+): Promise<{ resources: PiPackageResourceDescriptor[]; diagnostics: Array<{ path: string; message: string }> }> {
   if (!agentDir) return { resources: [], diagnostics: [] }
   const packageManager = createPackageManager(agentDir)
   const configured = packageManager.listConfiguredPackages()
@@ -266,14 +271,14 @@ export async function resolvePiPackageSkillResources(agentDir: string | undefine
   } catch (error) {
     return {
       resources: [],
-      diagnostics: [{ path: '', message: boundedMessage(error instanceof Error ? error.message : 'Unable to resolve package skills') }],
+      diagnostics: [{ path: '', message: boundedMessage(error instanceof Error ? error.message : `Unable to resolve package ${kind}`) }],
     }
   }
 
   const metadataBySource = new Map<string, Awaited<ReturnType<typeof readPackageMetadata>>>()
-  const resources: PiPackageSkillResource[] = []
+  const resources: PiPackageResourceDescriptor[] = []
   const diagnostics: Array<{ path: string; message: string }> = []
-  for (const resource of resolved.skills) {
+  for (const resource of resolved[kind]) {
     if (!resource.enabled || resource.metadata.origin !== 'package' || resource.metadata.scope !== 'user') continue
     const configuredPackage = configuredBySource.get(resource.metadata.source)
     if (!configuredPackage?.installedPath) continue
@@ -281,7 +286,7 @@ export async function resolvePiPackageSkillResources(agentDir: string | undefine
     try {
       parsed = parsePinnedNpmPackageSource(configuredPackage.source)
     } catch (error) {
-      diagnostics.push({ path: resource.path, message: error instanceof Error ? error.message : 'Package skill source is not pinned npm' })
+      diagnostics.push({ path: resource.path, message: error instanceof Error ? error.message : 'Package source is not pinned npm' })
       continue
     }
     let metadata = metadataBySource.get(configuredPackage.source)
@@ -307,6 +312,14 @@ export async function resolvePiPackageSkillResources(agentDir: string | undefine
     if (resources.length >= MAX_PACKAGES) break
   }
   return { resources, diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS) }
+}
+
+export function resolvePiPackageSkillResources(agentDir: string | undefined) {
+  return resolvePiPackageResources(agentDir, 'skills')
+}
+
+export function resolvePiPackageExtensionResources(agentDir: string | undefined) {
+  return resolvePiPackageResources(agentDir, 'extensions')
 }
 
 export async function mutatePiPackage(

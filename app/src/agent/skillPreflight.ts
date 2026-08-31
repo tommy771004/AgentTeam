@@ -8,8 +8,12 @@ export type SkillPreflightToolIdentity = {
   contractRevision: number
   contractDigest: string
   schemaDigest: string
-  toolSource: 'builtin' | 'extension-pack' | 'mcp'
+  toolSource: 'builtin' | 'extension-pack' | 'mcp' | 'pi-package'
   toolPack?: string
+  packageName?: string
+  packageVersion?: string
+  packageSource?: string
+  resourceOrigin?: 'package'
 }
 
 export type SkillRevisionIdentity = {
@@ -137,13 +141,18 @@ function isPackageIdentity(value: unknown): value is SkillPreflightPackageIdenti
 function isToolIdentity(value: unknown): value is SkillPreflightToolIdentity {
   if (!value || typeof value !== 'object') return false
   const identity = value as Record<string, unknown>
-  return Object.keys(identity).every((key) => ['tool', 'contractRevision', 'contractDigest', 'schemaDigest', 'toolSource', 'toolPack'].includes(key))
+  return Object.keys(identity).every((key) => ['tool', 'contractRevision', 'contractDigest', 'schemaDigest', 'toolSource', 'toolPack', 'packageName', 'packageVersion', 'packageSource', 'resourceOrigin'].includes(key))
     && bounded(identity.tool, 256)
     && Number.isSafeInteger(identity.contractRevision) && Number(identity.contractRevision) > 0
     && typeof identity.contractDigest === 'string' && SHA256.test(identity.contractDigest)
     && typeof identity.schemaDigest === 'string' && SHA256.test(identity.schemaDigest)
-    && (identity.toolSource === 'builtin' || identity.toolSource === 'extension-pack' || identity.toolSource === 'mcp')
+    && (identity.toolSource === 'builtin' || identity.toolSource === 'extension-pack' || identity.toolSource === 'mcp' || identity.toolSource === 'pi-package')
     && (identity.toolPack === undefined || bounded(identity.toolPack, 256))
+    && (identity.packageName === undefined || bounded(identity.packageName, 256))
+    && (identity.packageVersion === undefined || bounded(identity.packageVersion, 128))
+    && (identity.packageSource === undefined || bounded(identity.packageSource, 512))
+    && (identity.resourceOrigin === undefined || identity.resourceOrigin === 'package')
+    && (identity.toolSource !== 'pi-package' || (bounded(identity.packageName, 256) && bounded(identity.packageVersion, 128) && bounded(identity.packageSource, 512) && identity.resourceOrigin === 'package'))
 }
 
 function isDraftCharacteristics(value: unknown): boolean {

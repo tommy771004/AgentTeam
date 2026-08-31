@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 import { admitBuiltinShellSandbox, releaseBuiltinShellExecution, wrapVerifiedBuiltinShellCommand, type BuiltinShellSandboxVerification } from './piBuiltinShellSandbox.ts'
 import { decideGitCommand, type GitCommandPolicy } from '../src/agent/tools/gitCommandPolicy.ts'
 import type { SkillContextInjectionTrace, SkillRevisionIdentity } from '../src/agent/skillPreflight.ts'
-import { canonicalJson, schemaDigest, type PiToolCatalogEntry } from './piToolContract.ts'
+import { canonicalJson, registerPiPackageToolProvenance, schemaDigest, type PiPackageToolProvenance, type PiToolCatalogEntry } from './piToolContract.ts'
 import type { MemoryAccessContext } from './durableMemoryStore.ts'
 import type { WorkingExecutionEvidence } from '../src/agent/workingState.ts'
 import type { MemoryControlPackageIdentity } from '../src/agent/memoryControlPackage.ts'
@@ -78,6 +78,7 @@ export type PiPackTool = {
   approval?: (args: Record<string, unknown>, ctx: PiToolContext) => PiToolApprovalPlan
   /** Tool-specific restrictions composed by the common Host policy seam. */
   policyMigration?: PiToolPolicyRequirements
+  packageProvenance?: PiPackageToolProvenance
 }
 
 export type PiExtensionPack = {
@@ -1585,6 +1586,7 @@ async function attestBuiltinWriteEffect(input: {
 export type PiPackExtensionBundle = {
   factories: Array<{ name: string; hidden: true; factory: (pi: InlineExtensionFactoryInput) => void }>
   batchTools: Map<string, PiPackTool>
+  packageToolNames: string[]
 }
 
 /** Build replacement resources without mutating the catalog used by the live session. */
@@ -1594,6 +1596,8 @@ export function buildPiPackExtensionBundle(
 ): PiPackExtensionBundle {
   const allPacks = [...piExtensionPacks(), ...additionalPacks]
   const batchTools = new Map(allPacks.flatMap((pack) => pack.tools.map((tool) => [tool.name, tool])))
+  const packageTools = additionalPacks.flatMap((pack) => pack.tools.filter((tool) => tool.packageProvenance))
+  for (const tool of packageTools) registerPiPackageToolProvenance(ctx.sessionId, tool.name, tool.packageProvenance!)
   const factories = allPacks.map((pack) => ({
     name: `subagents-${pack.id}`,
     hidden: true as const,
@@ -1754,7 +1758,7 @@ export function buildPiPackExtensionBundle(
       }
     },
   }))
-  return { factories, batchTools }
+  return { factories, batchTools, packageToolNames: packageTools.map((tool) => tool.name) }
 }
 
 /** Commit the staged catalog only after its replacement Pi session is live. */

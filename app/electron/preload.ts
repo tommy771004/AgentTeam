@@ -211,6 +211,10 @@ const api = {
           diagnostics: PiPackageDiagnostic[]
           mutation?: { action: 'remove'; source: string }
         }>,
+        setExtensionsEnabled: (input: { source: string; enabled: boolean; trusted: boolean }) => ipcRenderer.invoke('pi-host:packages:extensions:set-enabled', input) as Promise<{
+          packages: PiPackageInventoryItem[]
+          diagnostics: PiPackageDiagnostic[]
+        }>,
       },
       resources: {
         list: () => ipcRenderer.invoke('pi-host:resources:list') as Promise<{ resources?: Array<{ id: string; kind: string; source: string; enabled: boolean; reason?: string }>; diagnostics?: Array<{ path: string; message?: unknown }> }>,

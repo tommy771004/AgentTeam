@@ -42,7 +42,7 @@ function normalize(input: Record<string, unknown>, previous?: PiExtension): PiEx
     version: version.trim(),
     kind,
     source: source.trim(),
-    enabled: input.enabled === undefined ? previous?.enabled ?? true : input.enabled === true,
+    enabled: input.enabled === undefined ? previous?.enabled ?? kind === 'mcp' : input.enabled === true,
     trusted: input.trusted === undefined ? previous?.trusted ?? false : input.trusted === true,
     tools: [...new Set(tools as string[])].sort(),
     credentialRefs: [...new Set(credentialRefs as string[])].sort(),
@@ -78,8 +78,23 @@ export class PiExtensionRegistry {
   setEnabled(id: string, enabled: boolean) {
     const previous = this.extensions.get(id)
     if (!previous) throw new Error(`Unknown Pi extension: ${id}`)
+    if (previous.kind === 'package') throw new Error('Package extension admission uses the Pi package trust path')
     previous.enabled = enabled
     return this.clone(previous)
+  }
+  setPackageAdmission(input: { id: string; name: string; version: string; source: string; enabled: boolean; trusted: boolean }) {
+    if (input.enabled && !input.trusted) throw new Error('Explicit Trusted Extension confirmation is required')
+    const previous = [...this.extensions.values()].find((extension) => extension.kind === 'package' && extension.source === input.source)
+    const candidate = normalize({
+      ...input,
+      kind: 'package',
+      credentialRefs: [],
+      tools: previous?.tools || [],
+      trusted: input.trusted || previous?.trusted === true,
+    }, previous)
+    if (previous && previous.id !== candidate.id) this.extensions.delete(previous.id)
+    this.extensions.set(candidate.id, candidate)
+    return this.clone(candidate)
   }
   uninstall(id: string) {
     if (!this.extensions.delete(id)) throw new Error(`Unknown Pi extension: ${id}`)
