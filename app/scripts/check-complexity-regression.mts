@@ -46,12 +46,6 @@ export function resolveComplexityBaseline(options: {
 } = {}): ComplexityBaseline {
   const root = options.repoRoot || repoRoot
   const env = options.env || process.env
-  const argument = options.argument?.trim()
-  if (argument) return { ref: argument, policy: 'argument' }
-
-  const configured = env.COMPLEXITY_BASE_REF?.trim()
-  if (configured) return { ref: configured, policy: 'environment' }
-
   if (env.GITHUB_EVENT_NAME === 'pull_request' || env.GITHUB_EVENT_NAME === 'pull_request_target') {
     const prBaseSha = env.COMPLEXITY_PR_BASE_SHA?.trim()
     if (!prBaseSha) {
@@ -59,6 +53,12 @@ export function resolveComplexityBaseline(options: {
     }
     return { ref: git(root, ['merge-base', 'HEAD', prBaseSha]), policy: 'pr-merge-base' }
   }
+
+  const argument = options.argument?.trim()
+  if (argument) return { ref: argument, policy: 'argument' }
+
+  const configured = env.COMPLEXITY_BASE_REF?.trim()
+  if (configured) return { ref: configured, policy: 'environment' }
 
   return { ref: 'HEAD^', policy: 'local-head-parent' }
 }

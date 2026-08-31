@@ -28,6 +28,7 @@ try {
 
   writeFileSync(path.join(fixtureSource, 'early.ts'), 'export function early(value: number) { return value }\n')
   const baseSha = commit('base')
+  git(['checkout', '-q', '-b', 'feature'])
 
   const branches = Array.from({ length: 22 }, (_, index) => `  if (value === ${index}) return ${index}`).join('\n')
   writeFileSync(path.join(fixtureSource, 'early.ts'), `export function early(value: number) {\n${branches}\n  return -1\n}\n`)
@@ -36,13 +37,26 @@ try {
   writeFileSync(path.join(fixtureSource, 'tip.ts'), 'export const tip = true\n')
   commit('unrelated tip commit')
 
+  git(['checkout', '-q', 'main'])
+  writeFileSync(path.join(fixtureSource, 'base-only.ts'), 'export const baseOnly = true\n')
+  const prBaseSha = commit('advance base branch independently')
+  git(['checkout', '-q', 'feature'])
+
   assert.throws(
-    () => resolveComplexityBaseline({ env: { GITHUB_EVENT_NAME: 'pull_request' }, repoRoot: fixtureRoot }),
+    () => resolveComplexityBaseline({
+      env: { GITHUB_EVENT_NAME: 'pull_request', COMPLEXITY_BASE_REF: 'HEAD^' },
+      repoRoot: fixtureRoot,
+    }),
     /COMPLEXITY_PR_BASE_SHA.*refusing to fall back to HEAD\^/,
-    'PR qualification must fail closed when the base SHA is absent',
+    'PR qualification must fail closed when the base SHA is absent even if a local override exists',
   )
   const baseline = resolveComplexityBaseline({
-    env: { GITHUB_EVENT_NAME: 'pull_request', COMPLEXITY_PR_BASE_SHA: baseSha },
+    argument: 'HEAD^',
+    env: {
+      GITHUB_EVENT_NAME: 'pull_request',
+      COMPLEXITY_BASE_REF: 'HEAD^',
+      COMPLEXITY_PR_BASE_SHA: prBaseSha,
+    },
     repoRoot: fixtureRoot,
   })
   assert.equal(baseline.policy, 'pr-merge-base')

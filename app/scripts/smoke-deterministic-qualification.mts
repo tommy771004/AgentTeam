@@ -13,6 +13,7 @@ const command = packageJson.scripts['qualify:deterministic'] || ''
 const required = [
   'check:build-flavor',
   'check:complexity',
+  'smoke:complexity-merge-base',
   'check:release-build-once',
   'check:pi-production-owners',
   'check:pi-contract',
