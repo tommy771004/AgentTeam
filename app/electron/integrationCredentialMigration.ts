@@ -8,6 +8,8 @@ import {
   type SettingsReadResult,
 } from './settingsPersistence'
 
+export type MigratedSettingsReadResult = Exclude<SettingsReadResult, { state: 'corrupt-primary' }>
+
 /** Vault wins over stale settings. Caller persists the returned projection only on success. */
 export function migrateIntegrationCredentials<T>(settings: T): T {
   const legacy = legacyIntegrationCredentials(settings)
@@ -44,7 +46,7 @@ export function migrateIntegrationCredentials<T>(settings: T): T {
 }
 
 /** Scrub legacy disk fields only after vault verification; failed writes keep the original file. */
-export function migrateIntegrationSettingsFileWithStatus(file: string): SettingsReadResult {
+export function migrateIntegrationSettingsFileWithStatus(file: string): MigratedSettingsReadResult {
   const persistence = new SettingsPersistence(file)
   const read = persistence.read()
   if (read.state === 'corrupt-primary') {

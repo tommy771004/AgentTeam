@@ -1,12 +1,12 @@
 # Development State
 
-截至 2026-08-31。
+截至 2026-09-01。
 
 ## 本日進展：Release qualification credential 與 settings durability
 
 `.scratch/release-qualification-hardening` #05–#08 resolved。Telegram、Webhook 與 custom-tool credentials 現在以 stable `credential:*` refs 儲存於 main-process OS-backed vault；renderer settings、localStorage、bundle、Pi catalog 與 MCP session metadata 只保留設定狀態或 placeholder。Custom-tool HTTP、bash、MCP 於 main execution seam 最後一刻解析，成功／失敗回應、結構化值與截斷輸出均不反射 raw token；credential rotate／clear／legacy import 會失效既有 MCP session 並刷新 metadata projection。
 
-舊 flat／encrypted custom-tool fields 僅由 vault-first migration ingress 接受，寫入與讀回驗證完成後才 scrub；safeStorage unavailable、disk write failure 與 parse failure 均保留唯一舊 copy 並 fail closed。一般 settings 已改由 main-process `SettingsPersistence` 以 0600 temp、fsync、atomic rename、directory flush 與 0600 last-good 儲存；讀取能區分 no-settings、corrupt-primary 與 recovered-last-good，metadata-only diagnostics 不包含設定內容或路徑。temp write 前／中、rename 前／後 failure matrix 與 fresh restart 證明只會恢復完整舊／新 generation；credential migration 的 last-good 同步 scrub raw secret。`npm run build`、`smoke:release`、scoped oxlint（僅四個既有 main warning）與完整 `npm run smoke` 全綠。下一 frontier 為 #09 no-App-launch deterministic qualification；Paid Beta 仍是 NO-GO（0/43）。
+舊 flat／encrypted custom-tool fields 僅由 vault-first migration ingress 接受，寫入與讀回驗證完成後才 scrub；safeStorage unavailable、disk write failure 與 parse failure 均保留唯一舊 copy 並 fail closed。一般 settings 已改由 main-process `SettingsPersistence` 以 0600 temp、fsync、atomic rename、directory flush 與 0600 last-good 儲存；讀取能區分 no-settings、corrupt-primary 與 recovered-last-good，metadata-only diagnostics 不包含設定內容或路徑，startup recovery evidence 亦不會被後續 primary read 抹除。temp write 前／中、rename 前／後與 preparation failure matrix 加上 fresh restart，證明只會恢復完整舊／新 generation；credential migration 的 last-good 同步 scrub raw secret。`smoke:settings-persistence` 由 PR CI 與 release package job blocking 執行；`npm run build`、`smoke:release`、release workflow evidence、scoped oxlint（僅四個既有 main warning）與完整 `npm run smoke` 全綠。下一 frontier 為 #09 no-App-launch deterministic qualification；Paid Beta 仍是 NO-GO（0/43）。
 
 ## 本日資格重跑：External CLI 與 release gate
 

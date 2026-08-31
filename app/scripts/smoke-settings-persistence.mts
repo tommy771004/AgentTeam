@@ -78,6 +78,16 @@ try {
     value: null,
   })
 
+  const blockedParent = path.join(root, 'blocked-parent')
+  fs.writeFileSync(blockedParent, 'not a directory')
+  assert.throws(
+    () => new SettingsPersistence(path.join(blockedParent, 'settings.json')).write({ secret: 'PREPARE-CANARY' }),
+    (error: unknown) => {
+      assert.doesNotMatch(String(error), /blocked-parent|PREPARE-CANARY|ENOTDIR/)
+      return true
+    },
+  )
+
   console.log('settings persistence: atomic generations, failure matrix, permissions, and explicit recovery states passed')
 } finally {
   fs.rmSync(root, { recursive: true, force: true })

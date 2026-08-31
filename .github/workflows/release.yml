@@ -97,6 +97,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          npm run smoke:settings-persistence 2>&1 | tee release-evidence/settings-persistence.log
           npm run smoke:ci 2>&1 | tee release-evidence/smoke.log
 
       - name: Security gates (dependency audit + secret scan + exceptions)

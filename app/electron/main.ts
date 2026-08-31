@@ -607,6 +607,13 @@ function recordSettingsPersistence(
   }
 }
 
+function recordSettingsRead(state: 'no-settings' | 'primary' | 'recovered-last-good'): void {
+  // Recovery is boot-significant evidence. A later read of the repaired primary
+  // must not erase it; the next successful user write clears the degraded state.
+  if (state === 'primary' && settingsPersistenceDiagnostic.state === 'recovered-last-good') return
+  recordSettingsPersistence(state)
+}
+
 /** Open native folder picker and push path to renderer */
 async function openProjectFolderPicker(defaultPath?: string) {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -930,8 +937,12 @@ app.whenReady().then(async () => {
 
   // Auto-start webhook / telegram if settings request it
   try {
-    const file = settingsPath()
-    const s = migrateIntegrationSettingsFile(file) as {
+    const result = migrateIntegrationSettingsFileWithStatus(settingsPath())
+    recordSettingsRead(result.state)
+    if (result.state === 'recovered-last-good') {
+      console.warn('[settings] startup recovered last-good settings after an invalid primary')
+    }
+    const s = result.value as {
       webhookEnabled?: boolean
       webhookPort?: number
       telegramEnabled?: boolean
@@ -951,8 +962,16 @@ app.whenReady().then(async () => {
         console.error('Telegram gateway auto-start failed', e)
       })
     }
-  } catch {
-    /* ignore */
+  } catch (error) {
+    if (error instanceof SettingsPersistenceError) {
+      recordSettingsPersistence(
+        error.code === 'CORRUPT_PRIMARY' ? 'corrupt-primary' : 'write-failed',
+        error.stage,
+      )
+    } else {
+      recordSettingsPersistence('migration-failed')
+    }
+    console.warn('[settings] startup settings recovery unavailable')
   }
 
   app.on('activate', () => {
@@ -1060,7 +1079,7 @@ ipcMain.handle('usage:clear', async () => {
 ipcMain.handle('settings:get', async () => {
   try {
     const result = migrateIntegrationSettingsFileWithStatus(settingsPath())
-    recordSettingsPersistence(result.state)
+    recordSettingsRead(result.state)
     if (result.state === 'recovered-last-good') {
       console.warn('[settings] recovered last-good settings after an invalid primary')
     }
@@ -1079,8 +1098,8 @@ ipcMain.handle('settings:get', async () => {
 })
 
 ipcMain.handle('settings:set', async (_evt, settings: unknown) => {
-  const file = settingsPath()
   try {
+    const file = settingsPath()
     migrateIntegrationSettingsFile(file)
     if (Object.keys(legacyIntegrationCredentials(settings)).length) throw new Error('請使用憑證 Vault intent 儲存 Token')
     const safe = settingsForDisk(settings)
@@ -1096,7 +1115,8 @@ ipcMain.handle('settings:set', async (_evt, settings: unknown) => {
       )
       throw new Error(error.message)
     }
-    throw error
+    recordSettingsPersistence('write-failed')
+    throw new Error('設定儲存失敗；原始資料已保留，請重試。')
   }
 })
 

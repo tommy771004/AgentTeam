@@ -130,18 +130,26 @@ export class SettingsPersistence {
   }
 
   write(value: Record<string, unknown>, writeOptions: SettingsWriteOptions = {}): void {
-    const payload = JSON.stringify(value, null, 2)
-    const directory = path.dirname(this.file)
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
-    const temporary = `${this.file}.${randomUUID()}.tmp`
-    let stage: SettingsPersistenceError['stage'] = 'backup'
+    let temporary: string | null = null
+    let stage: SettingsPersistenceError['stage'] = 'before-temp-write'
     let fd: number | null = null
     try {
+      const payload = JSON.stringify(value, null, 2)
+      const directory = path.dirname(this.file)
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
+      temporary = `${this.file}.${randomUUID()}.tmp`
+
+      stage = 'backup'
       const currentRaw = optionalFile(this.file)
       if (writeOptions.lastGood === 'next') {
         durableReplace(this.lastGoodFile, payload)
       } else if (currentRaw !== null && parseSettings(currentRaw)) {
         durableReplace(this.lastGoodFile, currentRaw)
+      } else {
+        const lastGoodRaw = optionalFile(this.lastGoodFile)
+        if (lastGoodRaw !== null && parseSettings(lastGoodRaw)) {
+          fs.chmodSync(this.lastGoodFile, 0o600)
+        }
       }
 
       stage = 'before-temp-write'
@@ -161,9 +169,9 @@ export class SettingsPersistence {
       stage = 'before-rename'
       this.options.checkpoint?.('before-rename')
       fs.renameSync(temporary, this.file)
+      stage = 'after-rename'
       fs.chmodSync(this.file, 0o600)
 
-      stage = 'after-rename'
       this.options.checkpoint?.('after-rename')
       stage = 'flush'
       syncDirectory(directory)
@@ -171,7 +179,7 @@ export class SettingsPersistence {
       throw new SettingsPersistenceError('WRITE_FAILED', stage)
     } finally {
       closeQuietly(fd)
-      removeQuietly(temporary)
+      if (temporary !== null) removeQuietly(temporary)
     }
   }
 }

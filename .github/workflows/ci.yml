@@ -55,6 +55,9 @@ jobs:
       - name: Typecheck + Vite build
         run: npm run build
 
+      - name: Settings durability contract
+        run: npm run smoke:settings-persistence
+
       - name: Smoke (CI stable matrix)
         run: npm run smoke:ci
 

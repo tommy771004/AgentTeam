@@ -20,6 +20,7 @@ import {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const workflowPath = path.join(repoRoot, '.github', 'workflows', 'release.yml')
+const ciWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'ci.yml')
 const packagePath = path.join(repoRoot, 'app', 'package.json')
 const signingSetupPath = path.join(repoRoot, 'docs', 'RELEASE_SIGNING_SETUP.md')
 
@@ -117,6 +118,7 @@ await test('release provenance labels local and GitHub runs truthfully', () => {
 
 await test('release workflow requires Windows and macOS packaging evidence', async () => {
   const workflow = await fs.readFile(workflowPath, 'utf8')
+  const ciWorkflow = await fs.readFile(ciWorkflowPath, 'utf8')
   const signingSetup = await fs.readFile(signingSetupPath, 'utf8')
   const packageJob = workflowJobSource(workflow, 'package')
   const publishJob = workflowJobSource(workflow, 'publish')
@@ -127,6 +129,8 @@ await test('release workflow requires Windows and macOS packaging evidence', asy
   assert.match(workflow, /electron-builder --mac/)
   assert.match(workflow, /release:evidence/)
   assert.match(workflow, /npm run smoke:marketplace/)
+  assert.match(packageJob, /npm run smoke:settings-persistence/)
+  assert.match(ciWorkflow, /npm run smoke:settings-persistence[\s\S]*npm run smoke:ci/)
   assert.match(workflow, /npm run smoke:recovery/)
   assert.match(workflow, /npm run smoke:update/)
   assert.match(workflow, /UPDATE_EVIDENCE_OUTPUT=release-evidence\/update-rollback-evidence\.json/)

@@ -18,7 +18,7 @@ const APPROVED_PRE_QUALIFICATION_ACTIONS = new Set([
   'actions/download-artifact@v4',
 ])
 const APPROVED_PRE_QUALIFICATION_JOB_DIGESTS = new Set([
-  '4e7224e5fffe7e59ce738272f4bfea7b3fd66e2226c156cd5bb182da982b27fc',
+  'b3b91d93df28bf72c383492fcf9e488e21580f5897ecbbbab0b7ac5c49b00565',
   'a86177eba04721423bc7ca5a9b90c1db5d737aa9fdf423f23129a601619bac75',
   '38dd37eb4370b90c1f4ad45c74cee2a81507d27bbf61e0c7f4b1e56943ad7af6',
 ])
