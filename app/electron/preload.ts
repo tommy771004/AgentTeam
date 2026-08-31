@@ -8,6 +8,7 @@ import { sanitizeCliDoctorProviders } from '../src/agent/cliDoctor'
 import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from '../src/agent/subdesign/pluginExecution'
 import type { SubDesignMetadataKind } from '../src/agent/subdesign/metadataKinds'
 import type { PiCatalogEntry } from './piToolHost'
+import type { PiPackageDiagnostic, PiPackageInventoryItem } from './piPackageDomain'
 import type { PiHostAttachment, PiHostAttachmentPage, PiHostFinalizationClaimResult, PiHostFinalizationCompleteResult } from './piHostAttachment'
 import type {
   ExternalCliConnectorRequirement,
@@ -193,6 +194,12 @@ const api = {
         reorder: (input: { sessionId: string; runIds: string[]; expectedRevision: number }) => ipcRenderer.invoke('pi-host:runs:reorder', input) as Promise<{ queue: unknown[]; queueRevision?: number }>,
         claim: (runId?: string) => ipcRenderer.invoke('pi-host:runs:claim', runId) as Promise<{ run?: unknown; queue: unknown[] }>,
         settle: (runId: string, settlement: PiTurnSettlement) => ipcRenderer.invoke('pi-host:runs:settle', runId, settlement) as Promise<{ run?: unknown; queue: unknown[]; settlement: string }>,
+      },
+      packages: {
+        list: () => ipcRenderer.invoke('pi-host:packages:list') as Promise<{
+          packages: PiPackageInventoryItem[]
+          diagnostics: PiPackageDiagnostic[]
+        }>,
       },
       resources: {
         list: () => ipcRenderer.invoke('pi-host:resources:list') as Promise<{ resources?: Array<{ id: string; kind: string; source: string; enabled: boolean; reason?: string }>; diagnostics?: Array<{ path: string; message?: unknown }> }>,

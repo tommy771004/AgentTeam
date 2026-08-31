@@ -50,7 +50,7 @@ import type { ReviewDeliveryApproval, ReviewDeliveryIntent, ReviewDeliveryPrevie
  * field. Durable memory is available only through negotiated memory-store-v1.
  */
 export const PI_HOST_PROTOCOL_VERSION = 5 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', 'capabilities'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'packages', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
@@ -72,7 +72,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'agents/spawn' | 'agents/send' | 'agents/mailbox' | 'agents/ack' | 'agents/follow-up' | 'agents/wait' | 'agents/lease/resolve' | 'agents/interrupt' | 'agents/cancel' | 'agents/close' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/update' | 'runs/reorder' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'packages/list' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'agents/spawn' | 'agents/send' | 'agents/mailbox' | 'agents/ack' | 'agents/follow-up' | 'agents/wait' | 'agents/lease/resolve' | 'agents/interrupt' | 'agents/cancel' | 'agents/close' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/update' | 'runs/reorder' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
     | 'review/v1/finalize' | 'review/v1/read' | 'review/v1/payload-page' | 'review/v1/describe' | 'review/v1/files' | 'review/v1/file-diff' | 'review/v1/refresh' | 'review/v1/comments/list' | 'review/v1/draft/save' | 'review/v1/draft/delete' | 'review/v1/comment/transition' | 'review/v1/file-state/list' | 'review/v1/file-state/mark' | 'review/v1/state/inherit' | 'review/v1/feedback/prepare' | 'review/v1/feedback/claim' | 'review/v1/feedback/release' | 'review/v1/verification/list' | 'review/v1/verification/run' | 'review/v1/verification/output' | 'review/v1/mutation/preview' | 'review/v1/mutation/apply' | 'review/v1/delivery/preview' | 'review/v1/delivery/apply' | 'review/v1/artifact/export' | 'review/v1/artifact/import-preview' | 'review/v1/artifact/import-apply' | 'review/v1/artifact/rebind' | 'review/v1/artifact/retention' | 'review/v1/artifact/hard-delete'
   params: Record<string, unknown>
 }
@@ -128,6 +128,8 @@ export type PiHostResponse = {
     catalogContractRevision?: number
     catalogContractDigest?: string
     diagnostics?: Array<{ path: string; message?: unknown }>
+    packages?: import('./piPackageDomain.ts').PiPackageInventoryItem[]
+    packageDiagnostics?: import('./piPackageDomain.ts').PiPackageDiagnostic[]
     report?: { skillsDir?: string; results?: PiSkillSyncResult[] }
     /** The Host skills directory projected back out for renderer hydration (resources/read-skill-files). */
     files?: import('./piSkills.ts').PiSkillCatalogFile[]
@@ -382,6 +384,7 @@ import { settlePiRunLearning, type PiRunLearningSettlement } from './piRunLearni
 import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
 import { handlePiHostCapabilityDomain } from './piHostCapabilityDomain.ts'
 import { handlePiHostResourceDomain } from './piHostResourceDomain.ts'
+import { listPiPackageInventory } from './piPackageDomain.ts'
 import { handlePiHostExtensionDomain } from './piHostExtensionDomain.ts'
 import { runPiOrchestration, type PiLoopPattern, type PiOrchestrationTurn } from './piOrchestrationExtension.ts'
 import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
@@ -4909,6 +4912,12 @@ export function handlePiHostRequest(
   if (sessionResponse) return sessionResponse
   const boundedReadResponse = handleBoundedHostRead(state, input, id)
   if (boundedReadResponse) return boundedReadResponse
+  if (input.method === 'packages/list') {
+    return listPiPackageInventory().then((inventory) => [{
+      id,
+      result: { packages: inventory.packages, packageDiagnostics: inventory.diagnostics },
+    }])
+  }
   const resourceResponse = handlePiHostResourceDomain({
     method: input.method,
     params: input.params,

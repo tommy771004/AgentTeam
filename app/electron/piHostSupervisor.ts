@@ -513,6 +513,18 @@ export class PiHostSupervisor {
     return response.result.resources
   }
 
+  async listPackages(): Promise<{
+    packages: NonNullable<NonNullable<PiHostResponse['result']>['packages']>
+    diagnostics: NonNullable<NonNullable<PiHostResponse['result']>['packageDiagnostics']>
+  }> {
+    const response = await this.request('packages/list', {})
+    if (response.error || !response.result?.packages) throw new Error(response.error?.message || 'Pi package listing failed')
+    return {
+      packages: response.result.packages,
+      diagnostics: response.result.packageDiagnostics || [],
+    }
+  }
+
   async reloadResources(resources: unknown[]): Promise<NonNullable<PiHostResponse['result']>['resources']> {
     const response = await this.request('resources/reload', { resources })
     if (response.error || !response.result?.resources) throw new Error(response.error?.message || 'Pi resource reload failed')

@@ -42,6 +42,33 @@ type PiExtensionView = {
   credentialRefs: string[]
 }
 
+type PiPackageView = {
+  source: string
+  scope: 'user'
+  filtered: boolean
+  installed: boolean
+  name?: string
+  version?: string
+  resourceTypesKnown: boolean
+  resources: Array<{ kind: 'extensions' | 'skills' | 'prompts' | 'themes'; total: number; enabled: number }>
+  diagnostics: Array<{ code: string; message: string }>
+}
+
+type PiPackageLoadStatus = 'loading' | 'ready' | 'unavailable' | 'error'
+
+const PACKAGE_RESOURCE_LABELS: Record<PiPackageView['resources'][number]['kind'], string> = {
+  extensions: 'Extensions',
+  skills: 'Skills',
+  prompts: 'Prompts',
+  themes: 'Themes',
+}
+
+function piPackageResourcesLabel(item: PiPackageView): string {
+  if (!item.resourceTypesKnown) return '資源未知'
+  if (item.resources.length === 0) return '未發現 Pi resources'
+  return item.resources.map((resource) => `${PACKAGE_RESOURCE_LABELS[resource.kind]} ${resource.enabled}/${resource.total}`).join(' · ')
+}
+
 const TOOLS = [
   ['read', '讀取檔案'],
   ['write', '寫入檔案'],
@@ -77,6 +104,9 @@ export function PiCoreSettingsSection() {
   const [status, setStatus] = useState('載入中…')
   const [saving, setSaving] = useState(false)
   const [extensions, setExtensions] = useState<PiExtensionView[]>([])
+  const [packages, setPackages] = useState<PiPackageView[]>([])
+  const [packageStatus, setPackageStatus] = useState<PiPackageLoadStatus>('loading')
+  const [packageMessage, setPackageMessage] = useState('')
   const [configStatus, setConfigStatus] = useState<PiConfigStatus | undefined>()
 
   useEffect(() => {
@@ -93,6 +123,22 @@ export function PiCoreSettingsSection() {
     void window.subagents?.piHost?.extensions?.list?.().then((result) => {
       if (active) setExtensions((result.extensions || []) as PiExtensionView[])
     }).catch(() => { /* extensions are optional in older Hosts */ })
+    const listPackages = window.subagents?.piHost?.packages?.list
+    if (!listPackages) {
+      setPackageStatus('unavailable')
+    } else {
+      void listPackages().then((result) => {
+        if (!active) return
+        setPackages(result.packages || [])
+        setPackageMessage(result.diagnostics?.[0]?.message || '')
+        setPackageStatus('ready')
+      }).catch((error: unknown) => {
+        if (!active) return
+        const message = error instanceof Error ? error.message : '無法讀取 Pi Packages'
+        setPackageMessage(message)
+        setPackageStatus(/unknown|unsupported|protocol|not running/i.test(message) ? 'unavailable' : 'error')
+      })
+    }
     return () => { active = false }
   }, [syncPiHostSettings])
 
@@ -121,6 +167,8 @@ export function PiCoreSettingsSection() {
       setSaving(false)
     }
   }
+
+  const mcpExtensions = extensions.filter((extension) => extension.kind === 'mcp')
 
   return (
     <div className="space-y-1">
@@ -199,12 +247,27 @@ export function PiCoreSettingsSection() {
           />
         ))}
       </SettingsGroup>
-      <SettingsGroup title="Pi Extensions / MCP" action={<span className="text-[11px] text-outline">由 Pi Host 管理</span>}>
-        {extensions.length === 0 ? <span className="text-[11px] text-outline">尚未安裝 Pi package 或 MCP extension</span> : extensions.map((extension) => (
+      <SettingsGroup title="Pi Packages" action={<span className="text-[11px] text-outline">Pi Host 真實狀態</span>}>
+        {packageStatus === 'loading' && <span className="text-[11px] text-outline">載入中…</span>}
+        {packageStatus === 'unavailable' && <span className="text-[11px] text-outline">目前 Pi Host 不支援 Packages{packageMessage ? ` · ${packageMessage}` : ''}</span>}
+        {packageStatus === 'error' && <span role="status" className="text-[11px] text-danger">無法讀取 Pi Packages{packageMessage ? ` · ${packageMessage}` : ''}</span>}
+        {packageStatus === 'ready' && packages.length === 0 && <span className="text-[11px] text-outline">尚未設定 Pi Package{packageMessage ? ` · ${packageMessage}` : ''}</span>}
+        {packageStatus === 'ready' && packages.map((item) => (
+          <SettingsRow
+            key={`${item.scope}:${item.source}`}
+            title={`${item.name || item.source} · ${item.version || '版本未知'}`}
+            description={`${item.source} · ${item.installed ? '已安裝' : '設定存在，檔案缺失'} · ${piPackageResourcesLabel(item)}${item.filtered ? ' · 已套用 resource filters' : ''}${item.diagnostics[0]?.message ? ` · ${item.diagnostics[0].message}` : ''}`}
+            control={<span className="text-[11px] text-outline">User scope</span>}
+          />
+        ))}
+        {packageStatus === 'ready' && packages.length > 0 && packageMessage && <span role="status" className="text-[11px] text-outline">{packageMessage}</span>}
+      </SettingsGroup>
+      <SettingsGroup title="MCP Extensions" action={<span className="text-[11px] text-outline">由 Pi Host 管理</span>}>
+        {mcpExtensions.length === 0 ? <span className="text-[11px] text-outline">尚未安裝 MCP extension</span> : mcpExtensions.map((extension) => (
           <SettingsRow
             key={extension.id}
             title={`${extension.name} · ${extension.version}`}
-            description={`${extension.kind === 'mcp' ? 'MCP' : 'Package'} · ${extension.trusted ? '已信任來源' : '未信任來源'}${extension.credentialRefs.length ? ` · ${extension.credentialRefs.length} 個 credential reference` : ''}`}
+            description={`MCP · ${extension.trusted ? '已信任來源' : '未信任來源'}${extension.credentialRefs.length ? ` · ${extension.credentialRefs.length} 個 credential reference` : ''}`}
             control={<SettingsToggle checked={extension.enabled} onChange={() => {
               void window.subagents?.piHost?.extensions?.setEnabled?.(extension.id, !extension.enabled).then((result) => {
                 if (result.extension) setExtensions((current) => current.map((item) => item.id === extension.id ? result.extension as PiExtensionView : item))

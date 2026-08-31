@@ -2384,6 +2384,7 @@ ipcMain.handle('pi-host:runs:reorder', async (_evt, input: { sessionId: string; 
 ipcMain.handle('pi-host:runs:claim', async (_evt, runId?: string) => piHostSupervisor.claimQueuedRun(runId))
 ipcMain.handle('pi-host:runs:settle', async (_evt, runId: string, settlement: PiTurnSettlement) => piHostSupervisor.settleQueuedRun(runId, settlement))
 ipcMain.handle('pi-host:resources:list', async () => ({ resources: await piHostSupervisor.listResources() }))
+ipcMain.handle('pi-host:packages:list', async () => piHostSupervisor.listPackages())
 ipcMain.handle('pi-host:resources:reload', async (_evt, resources: unknown[]) => ({ resources: await piHostSupervisor.reloadResources(resources || []) }))
 const memoryProjectionAdmin: MemoryAccessContext = {
   origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: true,
