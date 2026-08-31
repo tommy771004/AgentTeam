@@ -2385,8 +2385,10 @@ ipcMain.handle('pi-host:runs:claim', async (_evt, runId?: string) => piHostSuper
 ipcMain.handle('pi-host:runs:settle', async (_evt, runId: string, settlement: PiTurnSettlement) => piHostSupervisor.settleQueuedRun(runId, settlement))
 ipcMain.handle('pi-host:resources:list', async () => ({ resources: await piHostSupervisor.listResources() }))
 ipcMain.handle('pi-host:packages:list', async () => piHostSupervisor.listPackages())
+ipcMain.handle('pi-host:packages:catalog-search', async (_evt, query: string) => piHostSupervisor.searchPackageCatalog(query))
 ipcMain.handle('pi-host:packages:install', async (_evt, input: { source: string; trusted: boolean }) => piHostSupervisor.installPackage(input.source, input.trusted))
 ipcMain.handle('pi-host:packages:remove', async (_evt, input: { source: string }) => piHostSupervisor.removePackage(input.source))
+ipcMain.handle('pi-host:packages:set-tools-enabled', async (_evt, input: { source: string; enabled: boolean; trusted: boolean }) => piHostSupervisor.setPackageToolsEnabled(input.source, input.enabled, input.trusted))
 ipcMain.handle('pi-host:resources:reload', async (_evt, resources: unknown[]) => ({ resources: await piHostSupervisor.reloadResources(resources || []) }))
 const memoryProjectionAdmin: MemoryAccessContext = {
   origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: true,

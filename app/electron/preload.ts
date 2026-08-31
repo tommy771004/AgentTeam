@@ -201,6 +201,9 @@ const api = {
           packages: PiPackageInventoryItem[]
           diagnostics: PiPackageDiagnostic[]
         }>,
+        searchCatalog: (query: string) => ipcRenderer.invoke('pi-host:packages:catalog-search', query) as Promise<{
+          items: import('./piPackageCatalog').PiPackageCatalogItem[]
+        }>,
         install: (input: { source: string; trusted: boolean }) => ipcRenderer.invoke('pi-host:packages:install', input) as Promise<{
           packages: PiPackageInventoryItem[]
           diagnostics: PiPackageDiagnostic[]
@@ -210,6 +213,10 @@ const api = {
           packages: PiPackageInventoryItem[]
           diagnostics: PiPackageDiagnostic[]
           mutation?: { action: 'remove'; source: string }
+        }>,
+        setToolsEnabled: (input: { source: string; enabled: boolean; trusted: boolean }) => ipcRenderer.invoke('pi-host:packages:set-tools-enabled', input) as Promise<{
+          packages: PiPackageInventoryItem[]
+          diagnostics: PiPackageDiagnostic[]
         }>,
       },
       resources: {

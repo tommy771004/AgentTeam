@@ -1,5 +1,6 @@
-import { join } from 'node:path'
-import { open } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { isAbsolute, join, relative, resolve } from 'node:path'
+import { mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
 import { resolvePiAgentDir } from './piUserConfig.ts'
 import { piCodingAgentModule } from './piVendor.ts'
 
@@ -8,6 +9,7 @@ const MAX_PACKAGE_SOURCE_BYTES = 512
 const MAX_PACKAGE_JSON_BYTES = 128 * 1024
 const MAX_DIAGNOSTICS = 32
 const MAX_DIAGNOSTIC_MESSAGE = 320
+const PACKAGE_TOOL_TRUST_FILE = 'agentstudio-package-tools.json'
 
 export type PiPackageMutationAction = 'install' | 'remove'
 export type PiPackageDomainErrorCode = 'invalid_request' | 'conflict' | 'not_found' | 'unavailable' | 'runtime_error'
@@ -25,9 +27,18 @@ export class PiPackageDomainError extends Error {
 export type PiPackageResourceKind = 'extensions' | 'skills' | 'prompts' | 'themes'
 
 export type PiPackageDiagnostic = {
-  code: 'agent-dir-unavailable' | 'inventory-truncated' | 'metadata-missing' | 'metadata-invalid' | 'version-mismatch' | 'resource-resolution-failed'
+  code: 'agent-dir-unavailable' | 'inventory-truncated' | 'metadata-missing' | 'metadata-invalid' | 'version-mismatch' | 'resource-resolution-failed' | 'tool-name-collision'
   message: string
 }
+
+export type PiPackageToolTrust = 'unsupported' | 'inactive' | 'trusted-disabled' | 'active'
+
+export type PiPackageToolProvenance = Readonly<{
+  packageName: string
+  version: string
+  source: string
+  origin: 'package'
+}>
 
 export type PiPackageInventoryItem = {
   source: string
@@ -38,6 +49,8 @@ export type PiPackageInventoryItem = {
   version?: string
   resourceTypesKnown: boolean
   resources: Array<{ kind: PiPackageResourceKind; total: number; enabled: number }>
+  toolTrust: PiPackageToolTrust
+  toolNames: string[]
   diagnostics: PiPackageDiagnostic[]
 }
 
@@ -68,6 +81,21 @@ export type PiPackageSkillResource = {
   origin: 'package'
 }
 
+export type PiPackageExtensionResource = PiPackageToolProvenance & {
+  path: string
+  installedPath: string
+}
+
+type PiPackageToolTrustRecord = PiPackageToolProvenance & {
+  trusted: true
+  enabled: boolean
+}
+
+type PiPackageToolTrustState = {
+  version: 1
+  packages: Record<string, PiPackageToolTrustRecord>
+}
+
 type ResolvedPaths = Record<PiPackageResourceKind, ResolvedResource[]>
 
 type PackageManager = {
@@ -85,6 +113,7 @@ type PiPackageApi = {
 }
 
 const RESOURCE_KINDS: PiPackageResourceKind[] = ['extensions', 'skills', 'prompts', 'themes']
+const discoveredPackageTools = new Map<string, { names: string[]; collisions: string[] }>()
 
 function boundedMessage(message: string): string {
   return message.trim().slice(0, MAX_DIAGNOSTIC_MESSAGE) || 'Unknown package inventory error'
@@ -92,6 +121,60 @@ function boundedMessage(message: string): string {
 
 function diagnostic(code: PiPackageDiagnostic['code'], message: string): PiPackageDiagnostic {
   return { code, message: boundedMessage(message) }
+}
+
+function packageToolTrustPath(agentDir: string): string {
+  return join(agentDir, PACKAGE_TOOL_TRUST_FILE)
+}
+
+async function readPackageToolTrust(agentDir: string): Promise<PiPackageToolTrustState> {
+  try {
+    const raw = await readFile(packageToolTrustPath(agentDir), 'utf8')
+    if (Buffer.byteLength(raw, 'utf8') > 128 * 1024) return { version: 1, packages: {} }
+    const parsed = JSON.parse(raw) as Partial<PiPackageToolTrustState>
+    if (parsed.version !== 1 || !parsed.packages || typeof parsed.packages !== 'object' || Array.isArray(parsed.packages)) {
+      return { version: 1, packages: {} }
+    }
+    const packages: Record<string, PiPackageToolTrustRecord> = {}
+    for (const [source, value] of Object.entries(parsed.packages).slice(0, MAX_PACKAGES)) {
+      if (!value || typeof value !== 'object') continue
+      const record = value as Partial<PiPackageToolTrustRecord>
+      try {
+        const pinned = parsePinnedNpmPackageSource(source)
+        if (record.trusted !== true || typeof record.enabled !== 'boolean'
+          || record.packageName !== pinned.name || record.version !== pinned.version
+          || record.source !== pinned.source || record.origin !== 'package') continue
+        packages[source] = { ...record, trusted: true } as PiPackageToolTrustRecord
+      } catch { /* an invalid or stale record grants no authority */ }
+    }
+    return { version: 1, packages }
+  } catch {
+    return { version: 1, packages: {} }
+  }
+}
+
+async function writePackageToolTrust(agentDir: string, state: PiPackageToolTrustState): Promise<void> {
+  await mkdir(agentDir, { recursive: true, mode: 0o700 })
+  const path = packageToolTrustPath(agentDir)
+  const temporary = `${path}.${process.pid}.${createHash('sha256').update(JSON.stringify(state)).digest('hex').slice(0, 12)}.tmp`
+  await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+  await rename(temporary, path)
+}
+
+async function clearPackageToolTrust(agentDir: string, source: string): Promise<void> {
+  const state = await readPackageToolTrust(agentDir)
+  if (!(source in state.packages)) return
+  delete state.packages[source]
+  await writePackageToolTrust(agentDir, state)
+  discoveredPackageTools.delete(source)
+}
+
+/** Runtime-owned diagnostics discovered only after a trusted extension loads. */
+export function recordPiPackageToolDiscovery(source: string, names: readonly string[], collisions: readonly string[]): void {
+  discoveredPackageTools.set(source, {
+    names: [...new Set(names)].sort().slice(0, 128),
+    collisions: [...new Set(collisions)].sort().slice(0, 32),
+  })
 }
 
 async function readPackageMetadata(installedPath: string): Promise<{
@@ -211,6 +294,7 @@ export async function listPiPackageInventory(): Promise<PiPackageInventory> {
   }
 
   const packageManager = createPackageManager(agentDir)
+  const toolTrust = await readPackageToolTrust(agentDir)
   const configured = packageManager.listConfiguredPackages().filter((item) => item.scope === 'user')
   const diagnostics: PiPackageDiagnostic[] = []
   const selected = configured.slice(0, MAX_PACKAGES)
@@ -234,6 +318,14 @@ export async function listPiPackageInventory(): Promise<PiPackageInventory> {
     const versionMismatch = Boolean(configuredVersion && metadata.version && configuredVersion !== metadata.version)
     if (versionMismatch) itemDiagnostics.push(diagnostic('version-mismatch', `Configured ${configuredVersion} but found ${metadata.version}`))
     const resourceTypesKnown = Boolean(item.installedPath && resolved && !versionMismatch)
+    const extensionCount = resourceTypesKnown
+      ? packageResources(item.source, resolved).find((resource) => resource.kind === 'extensions')?.total || 0
+      : 0
+    const trust = toolTrust.packages[item.source]
+    const discovery = discoveredPackageTools.get(item.source)
+    if (discovery?.collisions.length) {
+      itemDiagnostics.push(...discovery.collisions.map((name) => diagnostic('tool-name-collision', `Package tool ${name} collides with a Host tool and was not admitted`)))
+    }
     return {
       source: item.source.slice(0, 2_048),
       scope: 'user',
@@ -243,11 +335,98 @@ export async function listPiPackageInventory(): Promise<PiPackageInventory> {
       ...(metadata.version ? { version: metadata.version } : {}),
       resourceTypesKnown,
       resources: resourceTypesKnown ? packageResources(item.source, resolved) : [],
+      toolTrust: extensionCount === 0 ? 'unsupported' : trust?.enabled ? 'active' : trust ? 'trusted-disabled' : 'inactive',
+      toolNames: discovery?.names || [],
       diagnostics: itemDiagnostics.slice(0, MAX_DIAGNOSTICS),
     }
   }))
 
   return { packages, diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS) }
+}
+
+export async function setPiPackageToolsEnabled(
+  requestedSource: unknown,
+  enabled: boolean,
+  trusted: boolean,
+): Promise<PiPackageInventory> {
+  const pinned = parsePinnedNpmPackageSource(requestedSource)
+  const agentDir = resolvePiAgentDir()
+  if (!agentDir) throw new PiPackageDomainError('unavailable', 'Pi user agent directory is unavailable')
+  const packageManager = createPackageManager(agentDir)
+  const configured = packageManager.listConfiguredPackages()
+    .find((item) => item.scope === 'user' && item.source === pinned.source)
+  if (!configured?.installedPath) throw new PiPackageDomainError('not_found', 'This exact Pi package is not installed')
+  const metadata = await readPackageMetadata(configured.installedPath)
+  if (metadata.diagnostic || metadata.name !== pinned.name || metadata.version !== pinned.version) {
+    throw new PiPackageDomainError('conflict', metadata.diagnostic?.message || 'Installed package metadata does not match the pinned source')
+  }
+  const resolved = await packageManager.resolve(async () => 'skip')
+  const hasExtensions = resolved.extensions.some((resource) =>
+    resource.metadata.origin === 'package'
+    && resource.metadata.scope === 'user'
+    && resource.metadata.source === pinned.source)
+  if (!hasExtensions) throw new PiPackageDomainError('not_found', 'This package does not expose a compatible extension tool resource')
+  const state = await readPackageToolTrust(agentDir)
+  const previous = state.packages[pinned.source]
+  if (enabled && trusted !== true) {
+    throw new PiPackageDomainError('invalid_request', 'Explicit Trusted Extension confirmation is required before enabling Pi package tools')
+  }
+  if (enabled || previous) {
+    state.packages[pinned.source] = {
+      packageName: pinned.name,
+      version: pinned.version,
+      source: pinned.source,
+      origin: 'package',
+      trusted: true,
+      enabled,
+    }
+  }
+  await writePackageToolTrust(agentDir, state)
+  return listPiPackageInventory()
+}
+
+export async function resolvePiPackageExtensionResources(agentDir: string | undefined): Promise<{
+  resources: PiPackageExtensionResource[]
+  digest: string
+  diagnostics: Array<{ path: string; message: string }>
+}> {
+  if (!agentDir) return { resources: [], digest: '', diagnostics: [] }
+  const trust = await readPackageToolTrust(agentDir)
+  const enabledSources = new Set(Object.values(trust.packages).filter((record) => record.enabled).map((record) => record.source))
+  if (enabledSources.size === 0) return { resources: [], digest: createHash('sha256').update('[]').digest('hex'), diagnostics: [] }
+  const packageManager = createPackageManager(agentDir)
+  const configured = packageManager.listConfiguredPackages().filter((item) => item.scope === 'user' && enabledSources.has(item.source))
+  const bySource = new Map(configured.map((item) => [item.source, item]))
+  let resolved: ResolvedPaths
+  try {
+    resolved = await packageManager.resolve(async () => 'skip')
+  } catch (error) {
+    return { resources: [], digest: '', diagnostics: [{ path: '', message: boundedMessage(error instanceof Error ? error.message : 'Unable to resolve package extensions') }] }
+  }
+  const resources: PiPackageExtensionResource[] = []
+  const diagnostics: Array<{ path: string; message: string }> = []
+  for (const resource of resolved.extensions) {
+    if (resource.metadata.origin !== 'package' || resource.metadata.scope !== 'user' || !enabledSources.has(resource.metadata.source)) continue
+    const configuredPackage = bySource.get(resource.metadata.source)
+    const record = trust.packages[resource.metadata.source]
+    if (!configuredPackage?.installedPath || !record) continue
+    const metadata = await readPackageMetadata(configuredPackage.installedPath)
+    if (metadata.diagnostic || metadata.name !== record.packageName || metadata.version !== record.version) {
+      diagnostics.push({ path: resource.path, message: metadata.diagnostic?.message || `Package metadata does not match ${record.packageName}@${record.version}` })
+      continue
+    }
+    const installedRoot = resolve(configuredPackage.installedPath)
+    const extensionPath = resolve(resource.path)
+    const relativeExtensionPath = relative(installedRoot, extensionPath)
+    if (relativeExtensionPath.startsWith('..') || isAbsolute(relativeExtensionPath)) {
+      diagnostics.push({ path: resource.path, message: 'Package extension escaped its installed package root' })
+      continue
+    }
+    resources.push({ path: extensionPath, installedPath: installedRoot, packageName: record.packageName, version: record.version, source: record.source, origin: 'package' })
+    if (resources.length >= MAX_PACKAGES) break
+  }
+  const digest = createHash('sha256').update(JSON.stringify(resources.map(({ installedPath: _installedPath, ...resource }) => resource))).digest('hex')
+  return { resources, digest, diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS) }
 }
 
 export async function resolvePiPackageSkillResources(agentDir: string | undefined): Promise<{
@@ -328,9 +507,15 @@ export async function mutatePiPackage(
         throw new PiPackageDomainError('conflict', 'This package is already configured at another source; package updates are not supported here')
       }
       if (exactMatch?.installedPath) throw new PiPackageDomainError('conflict', 'This exact package source is already installed')
+      // A previous installation of the exact source must never silently
+      // reactivate newly downloaded code with stale trust evidence.
+      await clearPackageToolTrust(agentDir, source)
       await packageManager.installAndPersist(source)
     } else {
       if (!exactMatch) throw new PiPackageDomainError('not_found', 'This exact user-scope package source is not configured')
+      // Revoke execution authority before changing package-manager state so a
+      // failed removal can only leave installed-but-inactive code behind.
+      await clearPackageToolTrust(agentDir, source)
       const removed = await packageManager.removeAndPersist(source)
       if (!removed) throw new PiPackageDomainError('not_found', 'The package source was not present in user settings')
     }

@@ -525,6 +525,12 @@ export class PiHostSupervisor {
     }
   }
 
+  async searchPackageCatalog(query: string) {
+    const response = await this.request('packages/catalog-search', { query })
+    if (response.error || !response.result?.packageCatalog) throw new Error(response.error?.message || 'Pi package catalog search failed')
+    return { items: response.result.packageCatalog }
+  }
+
   async installPackage(source: string, trusted: boolean) {
     const response = await this.request('packages/install', { source, scope: 'user', trusted })
     if (response.error || !response.result?.packages) throw new Error(response.error?.message || 'Pi package installation failed')
@@ -542,6 +548,15 @@ export class PiHostSupervisor {
       packages: response.result.packages,
       diagnostics: response.result.packageDiagnostics || [],
       mutation: response.result.packageMutation,
+    }
+  }
+
+  async setPackageToolsEnabled(source: string, enabled: boolean, trusted: boolean) {
+    const response = await this.request('packages/set-tools-enabled', { source, enabled, trusted })
+    if (response.error || !response.result?.packages) throw new Error(response.error?.message || 'Pi package tool trust update failed')
+    return {
+      packages: response.result.packages,
+      diagnostics: response.result.packageDiagnostics || [],
     }
   }
 

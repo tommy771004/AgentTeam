@@ -644,6 +644,7 @@ function samePreflightTool(left: PiInvocationContractIdentity, right: PiInvocati
     && left.schemaDigest === right.schemaDigest
     && left.toolSource === right.toolSource
     && left.toolPack === right.toolPack
+    && canonicalJson(left.packageProvenance) === canonicalJson(right.packageProvenance)
 }
 
 function sameSelectedSkills(left: PendingSkillContext, right: PendingSkillContext): boolean {
@@ -1167,7 +1168,9 @@ export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: 
         const binding = piSessionRunBinding(ctx.sessionId)
         const callId = typeof event.toolCallId === 'string' ? event.toolCallId : `${binding?.runId || 'turn'}:${toolName}`
         const contract = policyEvidenceBridge?.contractIdentity(ctx.sessionId, toolName)
-        if (!['bash', 'edit', 'find', 'grep', 'ls', 'read', 'write'].includes(toolName)) {
+        const builtinTool = ['bash', 'edit', 'find', 'grep', 'ls', 'read', 'write'].includes(toolName)
+        const packageTool = contract?.toolSource === 'pi-package'
+        if (!builtinTool && !packageTool) {
           const unsafeResumeTool = binding?.completedFileEffects?.length
             && (!contract || contract.toolSource === 'builtin' || contract.toolSource === 'mcp')
           if (unsafeResumeTool) {
@@ -1180,16 +1183,16 @@ export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: 
         }
         const frozenPolicy = binding?.frozenPolicy
         if (!binding || !contract || !frozenPolicy || !policyEvidenceBridge) {
-          const reason = `Host policy evidence unavailable for Pi builtin ${toolName}`
+          const reason = `Host policy evidence unavailable for ${packageTool ? 'Pi package tool' : 'Pi builtin'} ${toolName}`
           markPiDeniedInTurnCall(ctx.sessionId, callId, reason)
           auditPiInTurnDecision({ runId: binding?.runId || 'turn', sessionId: ctx.sessionId, tool: toolName, callId, decision: 'deny', settlement: 'denied', reason })
           return { block: true, reason }
         }
-        if (binding.completedFileEffects?.length && (toolName === 'write' || toolName === 'edit' || toolName === 'bash')) {
+        if (binding.completedFileEffects?.length && (packageTool || toolName === 'write' || toolName === 'edit' || toolName === 'bash')) {
           const toolInput = (event.input as Record<string, unknown>) || {}
           const path = typeof toolInput.path === 'string' ? toolInput.path : ''
           const canonicalPath = path ? canonicalPiToolPath(frozenPolicy.projectRoot, path) : ''
-          const protectedEffect = toolName === 'bash'
+          const protectedEffect = packageTool || toolName === 'bash'
             ? binding.completedFileEffects[0]
             : binding.completedFileEffects.find((effect) =>
                 canonicalPiToolPath(frozenPolicy.projectRoot, effect.path) === canonicalPath)
@@ -1208,7 +1211,11 @@ export function piBashGateExtensionFactory(ctx: { sessionId: string }): { name: 
           contract,
           args: Object(event.input) as Record<string, unknown>,
           policy: frozenPolicy,
-          requirements: builtinPolicyRequirements(toolName),
+          requirements: packageTool ? {
+            capabilityApproval: `Trusted Pi Package ${contract.packageProvenance?.packageName || contract.toolPack || 'extension'} tool ${toolName} requires approval`,
+            sideEffect: true,
+            outbound: true,
+          } : builtinPolicyRequirements(toolName),
         })
         const redraftBlock = await consumePiSkillPreflightDirective({
           evaluation,

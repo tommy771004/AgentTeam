@@ -74,7 +74,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'packages/list' | 'packages/install' | 'packages/remove' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'agents/spawn' | 'agents/send' | 'agents/mailbox' | 'agents/ack' | 'agents/follow-up' | 'agents/wait' | 'agents/lease/resolve' | 'agents/interrupt' | 'agents/cancel' | 'agents/close' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/update' | 'runs/reorder' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'packages/list' | 'packages/install' | 'packages/remove' | 'packages/set-tools-enabled' | 'packages/catalog-search' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'agents/spawn' | 'agents/send' | 'agents/mailbox' | 'agents/ack' | 'agents/follow-up' | 'agents/wait' | 'agents/lease/resolve' | 'agents/interrupt' | 'agents/cancel' | 'agents/close' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/update' | 'runs/reorder' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
     | 'review/v1/finalize' | 'review/v1/read' | 'review/v1/payload-page' | 'review/v1/describe' | 'review/v1/files' | 'review/v1/file-diff' | 'review/v1/refresh' | 'review/v1/comments/list' | 'review/v1/draft/save' | 'review/v1/draft/delete' | 'review/v1/comment/transition' | 'review/v1/file-state/list' | 'review/v1/file-state/mark' | 'review/v1/state/inherit' | 'review/v1/feedback/prepare' | 'review/v1/feedback/claim' | 'review/v1/feedback/release' | 'review/v1/verification/list' | 'review/v1/verification/run' | 'review/v1/verification/output' | 'review/v1/mutation/preview' | 'review/v1/mutation/apply' | 'review/v1/delivery/preview' | 'review/v1/delivery/apply' | 'review/v1/artifact/export' | 'review/v1/artifact/import-preview' | 'review/v1/artifact/import-apply' | 'review/v1/artifact/rebind' | 'review/v1/artifact/retention' | 'review/v1/artifact/hard-delete'
   params: Record<string, unknown>
 }
@@ -133,6 +133,7 @@ export type PiHostResponse = {
     packages?: import('./piPackageDomain.ts').PiPackageInventoryItem[]
     packageDiagnostics?: import('./piPackageDomain.ts').PiPackageDiagnostic[]
     packageMutation?: { action: import('./piPackageDomain.ts').PiPackageMutationAction; source: string }
+    packageCatalog?: import('./piPackageCatalog.ts').PiPackageCatalogItem[]
     report?: { skillsDir?: string; results?: PiSkillSyncResult[] }
     /** The Host skills directory projected back out for renderer hydration (resources/read-skill-files). */
     files?: import('./piSkills.ts').PiSkillCatalogFile[]
@@ -282,7 +283,7 @@ export type PiHostEvent =
     }
   | {
       event: 'host/tool-start' | 'host/tool-decision' | 'host/tool-result'
-      payload: { runId: string; tool: string; callId?: string; parentRunId?: string; decision?: 'allow' | 'ask' | 'deny'; settlement?: 'success' | 'failed' | 'cancelled' | 'denied' | 'not-executed'; reason?: string; item?: unknown; idleLeaseMs?: number; executionEvidence?: WorkingExecutionEvidence; contractRevision?: number; contractDigest?: string; schemaDigest?: string; toolSource?: 'builtin' | 'extension-pack' | 'mcp'; toolPack?: string; invocationOrigin?: PiInvocationOrigin }
+      payload: { runId: string; tool: string; callId?: string; parentRunId?: string; decision?: 'allow' | 'ask' | 'deny'; settlement?: 'success' | 'failed' | 'cancelled' | 'denied' | 'not-executed'; reason?: string; item?: unknown; idleLeaseMs?: number; executionEvidence?: WorkingExecutionEvidence; contractRevision?: number; contractDigest?: string; schemaDigest?: string; toolSource?: 'builtin' | 'extension-pack' | 'mcp' | 'pi-package'; toolPack?: string; packageProvenance?: import('./piPackageDomain.ts').PiPackageToolProvenance; invocationOrigin?: PiInvocationOrigin }
     }
   | {
       event: 'host/orchestration'
@@ -387,7 +388,8 @@ import { settlePiRunLearning, type PiRunLearningSettlement } from './piRunLearni
 import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
 import { handlePiHostCapabilityDomain } from './piHostCapabilityDomain.ts'
 import { handlePiHostResourceDomain } from './piHostResourceDomain.ts'
-import { listPiPackageInventory, mutatePiPackage, PiPackageDomainError } from './piPackageDomain.ts'
+import { listPiPackageInventory, mutatePiPackage, PiPackageDomainError, setPiPackageToolsEnabled } from './piPackageDomain.ts'
+import { searchPiPackageCatalog } from './piPackageCatalog.ts'
 import { handlePiHostExtensionDomain } from './piHostExtensionDomain.ts'
 import { runPiOrchestration, type PiLoopPattern, type PiOrchestrationTurn } from './piOrchestrationExtension.ts'
 import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
@@ -1617,6 +1619,7 @@ function modelToolContractIdentity(
     schemaDigest: lookup.tool.schemaDigest,
     toolSource: lookup.tool.source,
     ...(lookup.tool.pack ? { toolPack: lookup.tool.pack } : {}),
+    ...(lookup.tool.packageProvenance ? { packageProvenance: lookup.tool.packageProvenance } : {}),
     invocationOrigin: 'model',
   }
 }
@@ -1744,6 +1747,7 @@ function recordToolAudit(state: HostState, sessionId: unknown, event: PiHostEven
         schemaDigest: payload.schemaDigest,
         toolSource: payload.toolSource,
         ...(payload.toolPack ? { toolPack: payload.toolPack } : {}),
+        ...(payload.packageProvenance ? { packageProvenance: payload.packageProvenance } : {}),
         invocationOrigin: payload.invocationOrigin,
       } : {}),
     })
@@ -2057,6 +2061,7 @@ function contractIdentityForCurrentTool(
       schemaDigest: lookup.tool.schemaDigest,
       toolSource: lookup.tool.source,
       ...(lookup.tool.pack ? { toolPack: lookup.tool.pack } : {}),
+      ...(lookup.tool.packageProvenance ? { packageProvenance: lookup.tool.packageProvenance } : {}),
     },
   }
 }
@@ -2379,6 +2384,7 @@ function appendInvocationEvidence(sessionId: string, event: PiPolicyEvidenceEven
     schemaDigest: event.schemaDigest,
     toolSource: event.toolSource,
     ...(event.toolPack ? { toolPack: event.toolPack } : {}),
+    ...(event.packageProvenance ? { packageProvenance: event.packageProvenance } : {}),
     invocationOrigin: event.origin,
   })
 }
@@ -4922,6 +4928,15 @@ export function handlePiHostRequest(
       result: { packages: inventory.packages, packageDiagnostics: inventory.diagnostics },
     }])
   }
+  if (input.method === 'packages/catalog-search') {
+    return searchPiPackageCatalog(input.params?.query)
+      .then((packageCatalog) => [{ id, result: { packageCatalog } }])
+      .catch((error: unknown) => [errorResponse(
+        id,
+        error instanceof PiPackageDomainError ? error.code : 'unavailable',
+        error instanceof Error ? error.message : 'Unable to search the Pi package catalog',
+      )])
+  }
   if (input.method === 'packages/install' || input.method === 'packages/remove') {
     const action = input.method === 'packages/install' ? 'install' : 'remove'
     if (input.params?.scope !== undefined && input.params.scope !== 'user') {
@@ -4951,6 +4966,29 @@ export function handlePiHostRequest(
         const code = error instanceof PiPackageDomainError ? error.code : 'runtime_error'
         const message = error instanceof Error ? error.message : `Unable to ${action} Pi package`
         return [errorResponse(id, code, message)]
+      })
+      .finally(() => { packageMutationInFlight = false })
+  }
+  if (input.method === 'packages/set-tools-enabled') {
+    if (typeof input.params?.enabled !== 'boolean') {
+      return [errorResponse(id, 'invalid_request', 'enabled must be a boolean')]
+    }
+    if (input.params.enabled && input.params?.trusted !== true) {
+      return [errorResponse(id, 'forbidden', 'Explicit Trusted Extension confirmation is required before enabling Pi package tools')]
+    }
+    if (packageMutationInFlight) return [errorResponse(id, 'busy', 'Another Pi package mutation is already running')]
+    if (activeSessionRuns.size > 0 || activeTurnRecorders.size > 0) {
+      return [errorResponse(id, 'busy', 'Pi package tools cannot change while a Pi run is active')]
+    }
+    packageMutationInFlight = true
+    return setPiPackageToolsEnabled(input.params?.source, input.params.enabled, input.params?.trusted === true)
+      .then(async (inventory) => {
+        await disposeAllPiSessions()
+        return [{ id, result: { packages: inventory.packages, packageDiagnostics: inventory.diagnostics } }]
+      })
+      .catch((error: unknown) => {
+        const code = error instanceof PiPackageDomainError ? error.code : 'runtime_error'
+        return [errorResponse(id, code, error instanceof Error ? error.message : 'Unable to change Pi package tool trust')]
       })
       .finally(() => { packageMutationInFlight = false })
   }
@@ -6593,6 +6631,7 @@ export function createPiHostServer(
         schemaDigest: lookup.tool.schemaDigest,
         toolSource: lookup.tool.source,
         ...(lookup.tool.pack ? { toolPack: lookup.tool.pack } : {}),
+        ...(lookup.tool.packageProvenance ? { packageProvenance: lookup.tool.packageProvenance } : {}),
       }
     },
     append: (sessionId, event) => {
@@ -6612,6 +6651,7 @@ export function createPiHostServer(
         schemaDigest: event.schemaDigest,
         toolSource: event.toolSource,
         ...(event.toolPack ? { toolPack: event.toolPack } : {}),
+        ...(event.packageProvenance ? { packageProvenance: event.packageProvenance } : {}),
         invocationOrigin: event.origin,
       })
     },

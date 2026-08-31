@@ -179,7 +179,13 @@ fs.writeFileSync(path.join(piAgentDir, 'settings.json'), JSON.stringify({
 const app = await electron.launch({
   executablePath: electronExecutable,
   args: [launcherDir, '--no-sandbox', '--disable-gpu'],
-  env: { ...process.env, SUBAGENTS_PI_HOST_E2E_USER_DATA_DIR: userDataDir },
+  env: {
+    ...process.env,
+    SUBAGENTS_PI_HOST_E2E_USER_DATA_DIR: userDataDir,
+    SUBAGENTS_PI_AGENT_DIR: piAgentDir,
+    SUBAGENTS_PI_NATIVE_AGENT_DIR: path.join(userDataDir, 'empty-native-agent'),
+    SUBAGENTS_PI_SYNC_CLI_OAUTH: 'false',
+  },
   timeout: 30_000,
 })
 app.process().on('exit', (code, signal) => console.error(`electron exited code=${code} signal=${signal}`))
@@ -324,6 +330,7 @@ const startScenario = async (page, kind, iteration) => {
 // tool also writes entries and can settle before the renderer reloads.
 const waitForRunningTool = async (page, attachment, token) => {
   const deadline = Date.now() + timeout
+  let lastDiagnostics
   while (Date.now() < deadline) {
     const { page: record } = await page.evaluate(async ({ runId, sessionId }) => {
       const attached = await window.subagents.piHost.runs.attach(runId, undefined, 200)
@@ -331,9 +338,14 @@ const waitForRunningTool = async (page, attachment, token) => {
       return window.subagents.piHost.sessions.record(sessionId, undefined, 200)
     }, attachment)
     const entries = record?.entries || []
+    lastDiagnostics = {
+      status: record?.attachment?.status,
+      entries: entries.filter((entry) => ['tool-call', 'tool-result', 'error', 'turn-end'].includes(entry.kind)).map((entry) => ({ kind: entry.kind, tool: entry.tool, callId: entry.callId, settlement: entry.settlement, message: entry.message })),
+      modelTurns: [...modelTurns.entries()],
+    }
     const result = entries.find((entry) => entry.kind === 'tool-result' && entry.callId === `call_${token}`)
     if (result || record?.attachment?.status === 'terminal') {
-      throw new Error(`Long-running bash did not stay active: ${JSON.stringify({ runId: attachment.runId, status: record?.attachment?.status, result })}`)
+      throw new Error(`Long-running bash did not stay active: ${JSON.stringify({ runId: attachment.runId, result, diagnostics: lastDiagnostics })}`)
     }
     if (fs.existsSync(toolStartedPath(token))) {
       assert.equal(record?.attachment?.status, 'active', 'tool execution marker belongs to an active Host run')
@@ -341,7 +353,12 @@ const waitForRunningTool = async (page, attachment, token) => {
     }
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
-  throw new Error(`Long-running bash never wrote its execution marker for ${attachment.runId}`)
+  const publicState = await page.evaluate(async (runId) => ({
+    settings: (await window.subagents.piHost.settings.get()).settings,
+    archives: (await window.subagents.archive.list()).filter((entry) => entry.id === runId)
+      .map((entry) => ({ id: entry.id, status: entry.status, result: entry.result })),
+  }), attachment.runId)
+  throw new Error(`Long-running bash never wrote its execution marker for ${attachment.runId}: ${JSON.stringify({ lastDiagnostics, publicState })}`)
 }
 
 const readRecoveredRun = async ({ id, sessionId }) => {

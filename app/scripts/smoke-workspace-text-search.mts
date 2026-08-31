@@ -15,6 +15,7 @@ import {
 } from '../electron/piWorkspaceTextSearchRuntime.ts'
 import { resolveWorkspaceSearchBase } from '../electron/piExtensionPacks/workspaceTextSearch.ts'
 import { pagedText } from '../electron/piExtensionPacks/utility.ts'
+import { llmSettingsFromPiHost } from '../src/agent/piProduction.ts'
 
 let passed = 0
 const test = async (name: string, fn: () => void | Promise<void>) => {
@@ -43,8 +44,12 @@ await test('renderer setting contract has an explicit false default and General 
   assert.match(settingsPage, /開啟後模型才會取得 workspace_grep \/ workspace_glob 搜尋工具/)
   assert.match(settingsPage, /checked=\{settings\.workspaceTextSearch === true\}/)
   assert.match(production, /workspaceTextSearch:\s*'workspaceTextSearch'/)
-  assert.match(settingsStore, /workspaceTextSearch:\s*pi\.workspaceTextSearch === true/, 'explicit Pi sync projects the Host setting')
-  assert.match(settingsStore, /workspaceTextSearch:\s*pi\.settings\.workspaceTextSearch === true/, 'startup hydration projects the persisted Host setting')
+  assert.match(settingsStore, /llmSettingsFromPiHost\(pi\)/, 'explicit Pi sync uses the shared Host projection')
+  assert.match(settingsStore, /llmSettingsFromPiHost\(pi\.settings\)/, 'startup hydration uses the same Host projection')
+  const hostSettings = { model: 'fixture', approvalMode: 'auto' as const, unattended: false }
+  assert.equal(llmSettingsFromPiHost({ ...hostSettings, workspaceTextSearch: true }).workspaceTextSearch, true)
+  assert.equal(llmSettingsFromPiHost({ ...hostSettings, workspaceTextSearch: false }).workspaceTextSearch, false)
+  assert.equal(llmSettingsFromPiHost(hostSettings).workspaceTextSearch, false)
   assert.match(preload, /workspaceTextSearch\?: boolean/, 'renderer bridge carries the Host setting type')
 })
 

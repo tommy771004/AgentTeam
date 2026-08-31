@@ -4,13 +4,17 @@
 
 **Blocked by:** 02 — Pinned npm 安裝、移除與安全 reload
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] 新安裝 package 的 extension tools 預設 inactive，且不出現在 model-visible active-tool set
-- [ ] 使用者必須再次明確接受 Trusted Extension 完整本機權限語意後，Host 才能啟用相容 package tools
-- [ ] 啟用後的工具帶 package name、exact version 與 resource origin provenance，並由 Host-issued tool contract 發布 schema identity
-- [ ] Agent Chat 與 Pi-backed SubDesign 只可呼叫當輪 contract 中 active 的 package tool，不各自維護 enable 狀態
-- [ ] Package tool calls 沿用既有 approval、Outbound Data Gate、Turn Record、execution evidence 與 settlement，不新增繞過路徑
-- [ ] Package tool 與安全敏感 builtin 發生名稱 collision 時 fail-closed 並回報 diagnostics，不靜默覆寫或自動改名
-- [ ] 停用或移除 package 後，安全 reload 的下一輪 contract 不再包含其 active tool
-- [ ] Unsupported lifecycle hooks、TUI custom UI、prompts、commands、themes 與 provider extensions 不被標示為可用 tools
+- [x] 新安裝 package 的 extension tools 預設 inactive，且不出現在 model-visible active-tool set
+- [x] 使用者必須再次明確接受 Trusted Extension 完整本機權限語意後，Host 才能啟用相容 package tools
+- [x] 啟用後的工具帶 package name、exact version 與 resource origin provenance，並由 Host-issued tool contract 發布 schema identity
+- [x] Agent Chat 與 Pi-backed SubDesign 只可呼叫當輪 contract 中 active 的 package tool，不各自維護 enable 狀態
+- [x] Package tool calls 沿用既有 approval、Outbound Data Gate、Turn Record、execution evidence 與 settlement，不新增繞過路徑
+- [x] Package tool 與安全敏感 builtin 發生名稱 collision 時 fail-closed 並回報 diagnostics，不靜默覆寫或自動改名
+- [x] 停用或移除 package 後，安全 reload 的下一輪 contract 不再包含其 active tool
+- [x] Unsupported lifecycle hooks、TUI custom UI、prompts、commands、themes 與 provider extensions 不被標示為可用 tools
+
+## Comments
+
+2026-08-31：Host 持久化 exact-source trust；Pi runtime 僅載入可信任且啟用的 package extension。工具經既有 policy/evidence path，碰撞 fail-closed。Contract、Turn Record 與 Skill preflight 保留 package provenance，並拒絕缺漏／不一致來源；確切 extension origin 優先於舊 MCP 同名快取。`smoke-pi-package-tools.mts`、`smoke-pi-package-lifecycle.mts` 通過。詳見 [release evidence](../release-evidence.md)。

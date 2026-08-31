@@ -88,6 +88,8 @@
     "smoke:pi-host-capabilities": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-capabilities.mts",
     "smoke:pi-host-tool-registry": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-tool-registry.mts",
     "smoke:pi-host-catalog": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-catalog-projection.mts",
+    "smoke:pi-packages": "npm run build:pi-host && npm run smoke:pi-packages:built",
+    "smoke:pi-packages:built": "node --experimental-strip-types scripts/smoke-pi-package-tools.mts && node --experimental-strip-types scripts/smoke-pi-package-catalog.mts && node --experimental-strip-types scripts/smoke-pi-package-lifecycle.mts",
     "smoke:pi-host-capability-contract": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-host-capability-contract-revision.mts",
     "smoke:pi-mcp-native": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-mcp-native-dynamic.mts",
     "smoke:pi-mcp-reload": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-pi-mcp-reload-contract.mts",
@@ -168,7 +170,7 @@
     "check:agent-collaboration-boundary": "node --experimental-strip-types scripts/check-agent-collaboration-boundary.mts",
     "smoke:learning-export": "node --experimental-strip-types scripts/smoke-learning-export.mts",
     "smoke:capability-inspection": "node --experimental-strip-types scripts/smoke-capability-inspection.mts",
-    "qualify:pi-runtime-contract": "npm run build:pi-host && node --experimental-strip-types scripts/qualify-pi-agent-runtime-contract.mts && npm run smoke:pi-host-catalog && npm run smoke:pi-real-tool-contract && npm run smoke:pi-host-capability-contract && npm run smoke:pi-all-origin-policy && npm run smoke:pi-direct-code-policy && npm run smoke:pi-mcp-native && npm run smoke:pi-mcp-reload && npm run smoke:pi-builtin-shell-sandbox",
+    "qualify:pi-runtime-contract": "npm run build:pi-host && node --experimental-strip-types scripts/qualify-pi-agent-runtime-contract.mts && npm run smoke:pi-host-catalog && npm run smoke:pi-real-tool-contract && npm run smoke:pi-host-capability-contract && npm run smoke:pi-all-origin-policy && npm run smoke:pi-direct-code-policy && npm run smoke:pi-mcp-native && npm run smoke:pi-mcp-reload && npm run smoke:pi-builtin-shell-sandbox && npm run smoke:pi-packages:built",
     "verify:mac-signature": "node --experimental-strip-types scripts/verify-mac-release-signature.mts"
   },
   "dependencies": {

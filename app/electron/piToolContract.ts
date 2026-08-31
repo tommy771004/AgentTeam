@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
+import { resolve } from 'node:path'
+import type { PiPackageToolProvenance } from './piPackageDomain.ts'
 
 /** Version of the Host-owned model-visible tool contract payload. */
 export const PI_TOOL_CONTRACT_VERSION = 1 as const
 
-export type PiToolContractSource = 'builtin' | 'extension-pack' | 'mcp'
+export type PiToolContractSource = 'builtin' | 'extension-pack' | 'mcp' | 'pi-package'
 
 /**
  * The compact catalog is deliberately separate from the full turn contract.
@@ -22,6 +24,7 @@ export type PiToolCatalogEntry = {
   contractDigest?: string
   extensionId?: string
   upstreamToolName?: string
+  packageProvenance?: PiPackageToolProvenance
 }
 
 export type PiTurnToolContractTool = {
@@ -32,16 +35,23 @@ export type PiTurnToolContractTool = {
   pack?: string
   extensionId?: string
   upstreamToolName?: string
+  packageProvenance?: PiPackageToolProvenance
   schemaDigest: string
   active: boolean
 }
 
 type PiMcpToolProvenance = { extensionId: string; upstreamToolName: string }
 const mcpToolProvenance = new Map<string, PiMcpToolProvenance>()
+const packageExtensionProvenance = new Map<string, PiPackageToolProvenance>()
 
 /** Bind a native model-facing MCP name to the exact enabled upstream tool. */
 export function registerPiMcpToolProvenance(name: string, provenance: PiMcpToolProvenance): void {
   mcpToolProvenance.set(name, Object.freeze({ ...provenance }))
+}
+
+/** Bind a loaded extension file to the exact pinned package that supplied it. */
+export function registerPiPackageExtensionProvenance(path: string, provenance: PiPackageToolProvenance): void {
+  packageExtensionProvenance.set(resolve(path), Object.freeze({ ...provenance }))
 }
 
 export type PiTurnToolContract = {
@@ -113,6 +123,7 @@ function sourceForTool(definition: PiSessionToolDefinition): {
   pack?: string
   extensionId?: string
   upstreamToolName?: string
+  packageProvenance?: PiPackageToolProvenance
 } {
   if (definition.sourceInfo?.source === 'builtin' || (typeof definition.sourceInfo?.path === 'string' && /^<builtin(?::[^>]+)?>$/.test(definition.sourceInfo.path))) {
     return { source: 'builtin' }
@@ -124,6 +135,10 @@ function sourceForTool(definition: PiSessionToolDefinition): {
     return { source: 'builtin' }
   }
   const pack = extensionPackFromPath(definition.sourceInfo?.path)
+  if (typeof definition.sourceInfo?.path === 'string') {
+    const packageProvenance = packageExtensionProvenance.get(resolve(definition.sourceInfo.path))
+    if (packageProvenance) return { source: 'pi-package', pack: packageProvenance.packageName, packageProvenance }
+  }
   const mcp = mcpToolProvenance.get(definition.name)
   if (mcp) return { source: 'mcp', pack: pack || `mcp-${mcp.extensionId}`, ...mcp }
   return { source: 'extension-pack', ...(pack ? { pack } : {}) }
@@ -262,7 +277,15 @@ export function isPiTurnToolContract(value: unknown): value is PiTurnToolContrac
   if (tools.some((entry) => {
     if (!entry || typeof entry !== 'object') return true
     const tool = entry as Partial<PiTurnToolContractTool>
-    return typeof tool.name !== 'string' || typeof tool.description !== 'string' || !tool.parameters || typeof tool.parameters !== 'object' || (tool.source !== 'builtin' && tool.source !== 'extension-pack' && tool.source !== 'mcp') || typeof tool.schemaDigest !== 'string' || !/^[a-f0-9]{64}$/.test(tool.schemaDigest) || typeof tool.active !== 'boolean' || tool.schemaDigest !== schemaDigest(tool.parameters)
+    const packageProvenanceValid = tool.packageProvenance != null
+      && typeof tool.packageProvenance.packageName === 'string' && Boolean(tool.packageProvenance.packageName)
+      && typeof tool.packageProvenance.version === 'string' && Boolean(tool.packageProvenance.version)
+      && tool.packageProvenance.origin === 'package'
+      && tool.packageProvenance.source === `npm:${tool.packageProvenance.packageName}@${tool.packageProvenance.version}`
+    const sourceProvenanceValid = tool.source === 'pi-package'
+      ? packageProvenanceValid
+      : tool.packageProvenance === undefined
+    return typeof tool.name !== 'string' || typeof tool.description !== 'string' || !tool.parameters || typeof tool.parameters !== 'object' || (tool.source !== 'builtin' && tool.source !== 'extension-pack' && tool.source !== 'mcp' && tool.source !== 'pi-package') || !sourceProvenanceValid || typeof tool.schemaDigest !== 'string' || !/^[a-f0-9]{64}$/.test(tool.schemaDigest) || typeof tool.active !== 'boolean' || tool.schemaDigest !== schemaDigest(tool.parameters)
   })) return false
   return contract.contractDigest === schemaDigest(tools)
 }

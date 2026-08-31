@@ -8,8 +8,14 @@ export type SkillPreflightToolIdentity = {
   contractRevision: number
   contractDigest: string
   schemaDigest: string
-  toolSource: 'builtin' | 'extension-pack' | 'mcp'
+  toolSource: 'builtin' | 'extension-pack' | 'mcp' | 'pi-package'
   toolPack?: string
+  packageProvenance?: {
+    packageName: string
+    version: string
+    source: string
+    origin: 'package'
+  }
 }
 
 export type SkillRevisionIdentity = {
@@ -137,13 +143,21 @@ function isPackageIdentity(value: unknown): value is SkillPreflightPackageIdenti
 function isToolIdentity(value: unknown): value is SkillPreflightToolIdentity {
   if (!value || typeof value !== 'object') return false
   const identity = value as Record<string, unknown>
-  return Object.keys(identity).every((key) => ['tool', 'contractRevision', 'contractDigest', 'schemaDigest', 'toolSource', 'toolPack'].includes(key))
+  const packageProvenance = identity.packageProvenance
+  const packageProvenanceValid = packageProvenance != null
+    && typeof packageProvenance === 'object'
+    && bounded((packageProvenance as Record<string, unknown>).packageName, 214)
+    && bounded((packageProvenance as Record<string, unknown>).version, 128)
+    && (packageProvenance as Record<string, unknown>).source === `npm:${(packageProvenance as Record<string, unknown>).packageName}@${(packageProvenance as Record<string, unknown>).version}`
+    && (packageProvenance as Record<string, unknown>).origin === 'package'
+  return Object.keys(identity).every((key) => ['tool', 'contractRevision', 'contractDigest', 'schemaDigest', 'toolSource', 'toolPack', 'packageProvenance'].includes(key))
     && bounded(identity.tool, 256)
     && Number.isSafeInteger(identity.contractRevision) && Number(identity.contractRevision) > 0
     && typeof identity.contractDigest === 'string' && SHA256.test(identity.contractDigest)
     && typeof identity.schemaDigest === 'string' && SHA256.test(identity.schemaDigest)
-    && (identity.toolSource === 'builtin' || identity.toolSource === 'extension-pack' || identity.toolSource === 'mcp')
+    && (identity.toolSource === 'builtin' || identity.toolSource === 'extension-pack' || identity.toolSource === 'mcp' || identity.toolSource === 'pi-package')
     && (identity.toolPack === undefined || bounded(identity.toolPack, 256))
+    && (identity.toolSource === 'pi-package' ? packageProvenanceValid : packageProvenance === undefined)
 }
 
 function isDraftCharacteristics(value: unknown): boolean {

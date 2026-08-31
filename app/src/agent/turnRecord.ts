@@ -168,8 +168,14 @@ export type TurnRecordToolContractIdentity = {
   contractRevision?: number
   contractDigest?: string
   schemaDigest?: string
-  toolSource?: 'builtin' | 'extension-pack' | 'mcp'
+  toolSource?: 'builtin' | 'extension-pack' | 'mcp' | 'pi-package'
   toolPack?: string
+  packageProvenance?: {
+    packageName: string
+    version: string
+    source: string
+    origin: 'package'
+  }
   invocationOrigin?: 'model' | 'direct-protocol' | 'code-mode' | 'mcp'
   /**
    * Why this entry carries no contract identity (issue 19).
@@ -695,7 +701,7 @@ function isToolRecordEntry(entry: Record<string, unknown>): boolean {
   if (['tool-call', 'tool-result', 'tool-evidence', 'approval'].includes(String(entry.kind))
     && (typeof entry.tool !== 'string' || typeof entry.callId !== 'string')) return false
   if (!toolKinds.includes(String(entry.kind))) return true
-  const hasContractIdentity = ['contractRevision', 'contractDigest', 'schemaDigest', 'toolSource', 'toolPack', 'invocationOrigin']
+  const hasContractIdentity = ['contractRevision', 'contractDigest', 'schemaDigest', 'toolSource', 'toolPack', 'packageProvenance', 'invocationOrigin']
     .some((field) => entry[field] !== undefined)
   if (!hasContractIdentity) return true
   return typeof entry.contractRevision === 'number'
@@ -704,9 +710,22 @@ function isToolRecordEntry(entry: Record<string, unknown>): boolean {
     // remain readable; the current Host writes it for every new invocation.
     && (entry.contractDigest === undefined || (typeof entry.contractDigest === 'string' && /^[a-f0-9]{64}$/.test(entry.contractDigest)))
     && typeof entry.schemaDigest === 'string' && /^[a-f0-9]{64}$/.test(entry.schemaDigest)
-    && ['builtin', 'extension-pack', 'mcp'].includes(String(entry.toolSource))
+    && ['builtin', 'extension-pack', 'mcp', 'pi-package'].includes(String(entry.toolSource))
     && (entry.toolPack === undefined || typeof entry.toolPack === 'string')
+    && (entry.toolSource === 'pi-package'
+      ? isPackageToolProvenance(entry.packageProvenance)
+      : entry.packageProvenance === undefined)
     && ['model', 'direct-protocol', 'code-mode', 'mcp'].includes(String(entry.invocationOrigin))
+}
+
+function isPackageToolProvenance(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const provenance = value as Record<string, unknown>
+  return typeof provenance.packageName === 'string' && Boolean(provenance.packageName)
+    && typeof provenance.version === 'string' && Boolean(provenance.version)
+    && typeof provenance.source === 'string'
+    && provenance.source === `npm:${provenance.packageName}@${provenance.version}`
+    && provenance.origin === 'package'
 }
 
 function isProviderRecordEntry(entry: Record<string, unknown>): boolean {

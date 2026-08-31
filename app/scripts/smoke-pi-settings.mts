@@ -64,7 +64,11 @@ try {
   assert.equal(invalid.error?.code, 'invalid_request')
 
   send(4, 'settings/update', { model: 'pi-test-model', thinkingLevel: 'high', activeTools: ['read'], approvalMode: 'full', unattended: true })
-  const updated = await waitFor((message) => message.id === 4)
+  const unconfigured = await waitFor((message) => message.id === 4)
+  assert.equal(unconfigured.error?.code, 'invalid_request', 'a model without a configured provider is rejected')
+  send(7, 'settings/update', { provider: 'openrouter', model: 'pi-test-model', thinkingLevel: 'high', activeTools: ['read'], approvalMode: 'full', unattended: true })
+  const updated = await waitFor((message) => message.id === 7)
+  assert.equal(updated.error, undefined)
   assert.equal(updated.result?.settings?.model, 'pi-test-model')
   assert.equal(updated.result?.settings?.approvalMode, 'full')
   assert.equal(updated.result?.settings?.unattended, true)
