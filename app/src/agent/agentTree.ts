@@ -49,6 +49,7 @@ type ProjectionInput = {
   sessions: readonly AgentTreeSession[]
   queue?: readonly AgentTreeRun[]
   activeSessionIds?: ReadonlySet<string>
+  activeRunIds?: ReadonlyMap<string, string>
   rootAgentId?: string
   agentId?: string
 }
@@ -103,23 +104,33 @@ function identityFor(session: AgentTreeSession, byId: ReadonlyMap<string, AgentT
   return identity
 }
 
-function recordedLifecycle(session: AgentTreeSession): { state: AgentLifecycleState; runId?: string } | undefined {
+function recordedLifecycle(session: AgentTreeSession, runId?: string): { state: AgentLifecycleState; runId?: string } | undefined {
   const entries = turnRecordEntries(session.record)
   let settlementFallback: AgentLifecycleState | undefined
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index]
-    if (entry.kind === 'agent-lifecycle' && entry.event.agentId === session.id) {
+    if (entry.kind === 'agent-lifecycle' && entry.event.agentId === session.id && (!runId || entry.event.runId === runId)) {
       return { state: entry.event.state, runId: entry.event.runId }
     }
     if (entry.kind === 'turn-end' && !settlementFallback) settlementFallback = agentLifecycleFromTurnSettlement(entry.settlement)
   }
-  return settlementFallback ? { state: settlementFallback } : undefined
+  return !runId && settlementFallback ? { state: settlementFallback } : undefined
 }
 
-function lifecycleFor(session: AgentTreeSession, queue: readonly AgentTreeRun[], active: ReadonlySet<string>): { state: AgentLifecycleState; runId?: string; legacy: boolean } {
+function activeLifecycle(session: AgentTreeSession, runId?: string): { state: AgentLifecycleState; runId?: string; legacy: boolean } {
+  const recorded = runId ? recordedLifecycle(session, runId) : undefined
+  if (recorded && recorded.state !== 'queued' && recorded.state !== 'admitted') return { ...recorded, legacy: false }
+  return { state: 'running', runId, legacy: false }
+}
+
+function lifecycleFor(session: AgentTreeSession, queue: readonly AgentTreeRun[], active: ReadonlySet<string>, activeRunId?: string): { state: AgentLifecycleState; runId?: string; legacy: boolean } {
   const latestRun = [...queue].reverse().find((run) => run.sessionId === session.id)
-  if (active.has(session.id)) return { state: 'running', runId: latestRun?.runId, legacy: false }
-  if (latestRun?.status === 'queued' || latestRun?.status === 'running' || latestRun?.status === 'interrupted') {
+  if (activeRunId || active.has(session.id)) {
+    const runningRun = queue.find((run) => run.sessionId === session.id && run.status === 'running')
+    return activeLifecycle(session, activeRunId || runningRun?.runId)
+  }
+  if (latestRun?.status === 'running') return activeLifecycle(session, latestRun.runId)
+  if (latestRun?.status === 'queued' || latestRun?.status === 'interrupted') {
     return { state: latestRun.status, runId: latestRun.runId, legacy: false }
   }
   const recorded = recordedLifecycle(session)
@@ -148,7 +159,7 @@ export function projectAgentTree(input: ProjectionInput): AgentTreeSnapshot | un
     .map((session) => ({ session, identity: identityFor(session, byId, identities) }))
     .filter(({ identity }) => identity.rootAgentId === rootAgentId)
     .map(({ session, identity }) => {
-      const lifecycle = lifecycleFor(session, input.queue || [], input.activeSessionIds || new Set())
+      const lifecycle = lifecycleFor(session, input.queue || [], input.activeSessionIds || new Set(), input.activeRunIds?.get(session.id))
       return {
         agentId: session.id,
         rootAgentId,

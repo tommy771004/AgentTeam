@@ -74,6 +74,10 @@ try {
   assert.equal(comments.result?.reviewComments?.length, 1)
   const fileState = await request(host, messages, 36, 'review/v1/file-state/mark', { snapshotId, path: 'a.ts', contentHash: artifact.manifest[0]?.contentHash })
   assert.equal(fileState.result?.reviewFileState?.state, 'reviewed')
+  const exported = await request(host, messages, 361, 'review/v1/artifact/export', { snapshotId })
+  const exportedState = exported.result?.reviewArtifactExport?.reviewState
+  assert.deepEqual(exportedState?.comments, comments.result?.reviewComments, 'Host export must carry actual comments, not only references')
+  assert.deepEqual(exportedState?.fileStates, [fileState.result?.reviewFileState], 'Host export must carry reviewed state')
   const originalPatch = Buffer.from(await store.readPayload(snapshotId!, payloadRef!)).toString('utf8')
   await writeFile(join(repo, 'a.ts'), 'later mutation\n')
   await git(repo, ['add', '.'])

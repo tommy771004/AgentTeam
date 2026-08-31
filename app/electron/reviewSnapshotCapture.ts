@@ -97,7 +97,6 @@ function normalizedPathSet(mutations: TrustedReviewMutation[] | undefined, runId
 
 function decideFidelity(input: {
   runnerKind: 'builtin' | 'external'
-  isolatedWorktree: boolean
   headChanged: boolean
   activeWorkspaceRuns: number
   contaminationReasons: string[]
@@ -112,12 +111,11 @@ function decideFidelity(input: {
   if (input.headChanged) diagnostics.push('head-changed-during-run')
   if (input.activeWorkspaceRuns > 1) diagnostics.push('parallel-runs-share-workspace')
   const trustedCoverage = input.changedPaths.length > 0 && input.changedPaths.every((path) => input.trustedPaths.has(path))
-  if (input.isolatedWorktree && !input.headChanged && input.activeWorkspaceRuns <= 1 && diagnostics.length === 0) {
-    return { fidelity: 'exact', diagnostics }
-  }
-  if (trustedCoverage && !input.headChanged && input.activeWorkspaceRuns <= 1 && diagnostics.length === 0) {
-    return { fidelity: 'attributed', diagnostics }
-  }
+  // A linked worktree is not an exclusive lease, and settlement-time counts
+  // cannot disprove earlier overlap. Path-only receipts cannot disprove a
+  // subsequent user edit either. Until a Host adapter supplies verifiable
+  // ownership/pre-post evidence, retain the diff but never upgrade fidelity.
+  diagnostics.push(trustedCoverage ? 'host-mutation-content-attribution-unproven' : 'exclusive-workspace-ownership-unproven')
   if (!trustedCoverage && input.changedPaths.length > 0) diagnostics.push('changes-not-fully-covered-by-host-mutation-evidence')
   return { fidelity: input.contaminationReasons.includes('capture-incomplete') ? 'partial' : 'shared', diagnostics }
 }
@@ -187,10 +185,8 @@ async function captureGitReview(
   const limits = input.qualificationLimits || { payloadBytes: MAX_REVIEW_PAYLOAD_BYTES, totalBytes: MAX_REVIEW_TOTAL_BYTES }
   const captured = await captureChangedFiles(cwd, baseline.workingTree, settlement.workingTree, changes, parseNumstat(numstat), limits)
   const changedPaths = captured.manifest.flatMap((entry) => [entry.path, ...(entry.oldPath ? [entry.oldPath] : [])])
-  const workspace = input.admission.workspace!
   const fidelity = decideFidelity({
     runnerKind: input.admission.runnerKind,
-    isolatedWorktree: workspace.repoRoot !== undefined && workspace.worktreeRoot !== workspace.repoRoot,
     headChanged: settlement.head !== baseline.head,
     activeWorkspaceRuns: input.activeWorkspaceRuns || 1,
     contaminationReasons: [...new Set(input.contaminationReasons || [])],

@@ -78,12 +78,21 @@ try {
     () => staleProjection.describeTarget(liveTarget),
     (error: unknown) => error instanceof WorkspaceReviewProjectionError && error.code === 'stale',
   )
+  const refreshedLive = await projection.refresh(liveTarget)
+  assert.notEqual(refreshedLive.revision, liveTarget.revision)
+  const refreshedPatch = await projection.readFileDiff(refreshedLive.target, 'win\\path.ts')
+  assert.match(refreshedPatch.items.map((item) => item.content).join(''), /changed after target/)
+  await assert.rejects(() => projection.describeTarget(liveTarget), (error: unknown) => error instanceof WorkspaceReviewProjectionError && error.code === 'stale')
 
   await git(repo, ['add', '路徑.ts'])
   const stagedState = await captureReviewWorkspaceAdmission({ runId: 'staged', projectRoot: repo, runnerKind: 'builtin' })
   if (!stagedState.canonical || !stagedState.baseline) throw new Error('staged baseline required')
   const stagedTarget = { kind: 'staged' as const, workspaceId: binding.workspaceId, revision: stagedState.baseline.indexRevision }
   assert.equal((await projection.describeTarget(stagedTarget)).mutationCapable, true)
+  await git(repo, ['add', 'large file.ts'])
+  const refreshedStaged = await projection.refresh(stagedTarget)
+  assert.notEqual(refreshedStaged.revision, stagedTarget.revision)
+  assert.ok((await projection.listFiles(refreshedStaged.target)).items.some((item) => item.path === 'large file.ts'))
 
   const branchRepo = join(root, 'branch-repo')
   await mkdir(branchRepo)

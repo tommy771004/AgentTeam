@@ -81,12 +81,18 @@ try {
   const trustedAdmission = await captureReviewWorkspaceAdmission({ runId: 'run_trusted', projectRoot: trustedRepo, runnerKind: 'builtin' })
   if (!trustedAdmission.canonical) throw new Error('expected canonical trusted admission')
   await writeFile(join(trustedRepo, 'a.ts'), 'after\n')
-  const attributed = await captureRunReviewSnapshot({
+  const pathOnlyCapture = await captureRunReviewSnapshot({
     admission: trustedAdmission,
     threadId: 'thread_trusted',
     trustedMutations: [{ source: 'host', runId: 'run_trusted', callId: 'call_1', tool: 'write', paths: ['a.ts'], settlement: 'success' }],
   })
-  assert.equal(attributed.attributionFidelity, 'attributed')
+  assert.equal(pathOnlyCapture.attributionFidelity, 'shared', 'path-only receipts cannot prove content attribution')
+  await writeFile(join(trustedRepo, 'a.ts'), 'subsequent user edit\n')
+  const userEdited = await captureRunReviewSnapshot({
+    admission: trustedAdmission, threadId: 'thread_trusted', activeWorkspaceRuns: 1,
+    trustedMutations: [{ source: 'host', runId: 'run_trusted', callId: 'call_1', tool: 'write', paths: ['a.ts'], settlement: 'success' }],
+  })
+  assert.equal(userEdited.attributionFidelity, 'shared', 'a successful write receipt must not attribute subsequent user edits')
   const parallel = await captureRunReviewSnapshot({ admission: trustedAdmission, threadId: 'thread_trusted', activeWorkspaceRuns: 2 })
   assert.equal(parallel.attributionFidelity, 'shared')
 
@@ -129,9 +135,14 @@ try {
   await git(trustedRepo, ['worktree', 'add', '-b', 'isolated-fixture', linked])
   const isolatedAdmission = await captureReviewWorkspaceAdmission({ runId: 'run_isolated', projectRoot: linked, runnerKind: 'builtin' })
   if (!isolatedAdmission.canonical) throw new Error('expected canonical isolated admission')
+  const overlappingAdmission = await captureReviewWorkspaceAdmission({ runId: 'run_overlap', projectRoot: linked, runnerKind: 'builtin' })
   await writeFile(join(linked, 'a.ts'), 'isolated\n')
-  const exact = await captureRunReviewSnapshot({ admission: isolatedAdmission, threadId: 'thread_isolated' })
-  assert.equal(exact.attributionFidelity, 'exact')
+  await writeFile(join(linked, 'other-run.txt'), 'written by overlapping run\n')
+  await captureRunReviewSnapshot({ admission: overlappingAdmission, threadId: 'thread_overlap', activeWorkspaceRuns: 2 })
+  const lastRun = await captureRunReviewSnapshot({ admission: isolatedAdmission, threadId: 'thread_isolated', activeWorkspaceRuns: 1 })
+  assert.equal(lastRun.attributionFidelity, 'shared', 'ending last in a linked worktree does not prove exclusive ownership')
+  const linkedCapture = await captureRunReviewSnapshot({ admission: isolatedAdmission, threadId: 'thread_isolated' })
+  assert.equal(linkedCapture.attributionFidelity, 'shared', 'linked worktree layout is not proof of exclusive ownership')
   await git(linked, ['add', '.'])
   await git(linked, ['commit', '-m', 'run commit'])
   const committed = await captureRunReviewSnapshot({ admission: isolatedAdmission, threadId: 'thread_isolated' })

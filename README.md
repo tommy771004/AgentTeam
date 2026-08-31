@@ -20,7 +20,9 @@ AI Agent Loop 桌面應用（React + TypeScript + Electron，支援 **macOS** �
 cd app
 npm install
 npm run dev        # 開發模式（Vite + Electron）
-npm run dist:mac   # 打包 macOS DMG
+npm run build      # 僅編譯，不執行 smoke/E2E
+npm run check      # 獨立執行檢查與快速 smoke
+npm run dist:mac   # 僅編譯並打包 macOS DMG
 npm run dist:win   # 打包 Windows NSIS
 ```
 

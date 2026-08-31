@@ -14,17 +14,18 @@ All from `app/`:
 
 ```bash
 npm run dev        # Vite + Electron; UI also works in plain browser at :5173
-npm run build      # tsc -b && vite build — use this as the typecheck
+npm run build      # compile only: Pi Host + tsc -b + Vite; no smoke/E2E/App launch
+npm run check      # deterministic checks/smokes, then compile
 npm run smoke      # full chain; standalone mode prepares its own build
 npx oxlint src     # lint
-npm run dist:mac   # build once + after-build smoke + electron-builder (also dist / dist:win / dist:all)
+npm run dist:mac   # compile + electron-builder only (also dist / dist:win / dist:all)
 ```
 
 No unit-test runner. Smokes import the shipped modules, so green means the shipped path is correct — never re-implement logic inline in a smoke, and never add a loader dependency to make an import work. Many are drift guards over source text: moving code can require repointing one at its new owner, never weakening it.
 
 ## Architecture
 
-**One ingress — `agent/taskRunCoordinator.ts` `runTask`.** Every entry point (`sourceKind`: composer/slash/retry/schedule/webhook/telegram/event/delegate) goes through it; it owns capacity, attachments, thread bind, beforeRun, dispatch snapshot, and **unique finalization** (summary → afterRun → Archive → onSettled → release → drain). `runExternal.ts` is the legacy implementation behind it. **Never call `dispatchThreadTask` or `startExecution` from UI code** — a drift guard fails the build.
+**One ingress — `agent/taskRunCoordinator.ts` `runTask`.** Every entry point (`sourceKind`: composer/slash/retry/schedule/webhook/telegram/event/delegate) goes through it; it owns capacity, attachments, thread bind, beforeRun, dispatch snapshot, and **unique finalization** (summary → afterRun → Archive → onSettled → release → drain). `runExternal.ts` is the legacy implementation behind it. **Never call `dispatchThreadTask` or `startExecution` from UI code** — a drift guard fails `npm run check` / smoke qualification.
 
 **Busy policy.** Different conversation threads execute independently, up to the `maxConcurrentRuns` safety cap. Builtin Pi same-session follow-ups use Host-owned true steer or the Host FIFO queue, selected once from `settings.followUpMode` and then frozen on the submission. External CLI cannot true-steer: the same default maps to the explicitly named「中止並接手」takeover; if its stopped process has not released capacity within the bounded wait, the renderer compatibility queue fallback preserves the new goal. Automation overflow and non-Host compatibility still use `agent/runQueue.ts` (FIFO + dedupe + persist, max 24). Capacity is held in the run registry, so `agentStore.isRunning` is derived rather than a sole lock.
 
@@ -36,7 +37,7 @@ No unit-test runner. Smokes import the shipped modules, so green means the shipp
 
 **Pi Core owns the loop.** Pi Core in the supervised Electron utility process is the production owner of the tool loop, execution, approvals, and settlement; `agent/engine.ts` / `runDispatch.ts` are adapters (Parse, continueGoal restore, project guidance, trigger verification, HITL timeout policy) handing it the snapshot. `agent/loop/` is a removable plain-browser seam, not a second owner — nothing outside the existing allowlist may import it and a drift guard fails on a new import or string reference (ADR-0045). Its fallback paths bottom out in simulation with no LLM, so every feature must degrade gracefully to that. Every LLM call goes through `chatCompletionWithTools`, below the Outbound Data Gate.
 
-**Turn Record is the one timeline.** Everything model-visible is logged — thinking included: the Host writes a `reasoning` entry whenever a step's thinking deltas end, **whole, never truncated** (volume is served by paging). The privacy-preserving exception is sensitive durable input such as long-term memory: ADR-0049 requires an exact Host-owned identity/revision reference in the Turn Record, while its private body remains only in the owning durable authority and model request. The Pi path's live timeline is `projectLiveTimeline` over the entries `host/record-append` publishes, folded by `runTimelineRows` — the SAME projection a replayed page goes through, so live and replay cannot disagree about order. The activity event channel (`piHostActivity.ts` → `runActivityStore`) is transport only and the fallback for runners with no record (external CLI); a drift guard fails the build if the Pi path grows a second way to build its timeline.
+**Turn Record is the one timeline.** Everything model-visible is logged — thinking included: the Host writes a `reasoning` entry whenever a step's thinking deltas end, **whole, never truncated** (volume is served by paging). The privacy-preserving exception is sensitive durable input such as long-term memory: ADR-0049 requires an exact Host-owned identity/revision reference in the Turn Record, while its private body remains only in the owning durable authority and model request. The Pi path's live timeline is `projectLiveTimeline` over the entries `host/record-append` publishes, folded by `runTimelineRows` — the SAME projection a replayed page goes through, so live and replay cannot disagree about order. The activity event channel (`piHostActivity.ts` → `runActivityStore`) is transport only and the fallback for runners with no record (external CLI); a qualification drift guard fails if the Pi path grows a second way to build its timeline.
 
 Automation runs set `unattended: true`: HITL asks and safety interventions auto-deny after a timeout (45s unattended, 90s interactive).
 
@@ -46,6 +47,6 @@ Automation runs set `unattended: true`: HITL asks and safety interventions auto-
 
 **Tools.** Pi Host owns the catalog and production execution (ADR-0028). **A new tool is a Host Extension Pack tool**: add it to a pack in `electron/piExtensionPacks/` (or a new pack registered in that directory's `index.ts`), and give it an owning capability in `capabilities/builtins.ts` so the catalog can defer or reveal it. Pack tools answer in one envelope via `packResults.ts` — a failure is CONTENT (`ok:false`), never a throw.
 
-`src/agent/tools/registered/*.ts` + `toolDefinitions.ts` are the **renderer** seam and are FROZEN: `scripts/check-pi-contract.mts` fails the build on a new file there. What survives is only what the Host does not own — the non-equivalent `workspace_*` tools and handlers still serving the plain-browser degrade. Do not add to it; `registry.ts` / `schemas.ts` remain derived views of it, and no central executor switch may be added anywhere.
+`src/agent/tools/registered/*.ts` + `toolDefinitions.ts` are the **renderer** seam and are FROZEN: `scripts/check-pi-contract.mts` fails `npm run check` on a new file there. What survives is only what the Host does not own — the non-equivalent `workspace_*` tools and handlers still serving the plain-browser degrade. Do not add to it; `registry.ts` / `schemas.ts` remain derived views of it, and no central executor switch may be added anywhere.
 
 **Settings.** One flat `LlmSettings`; a new field needs three edits — the interface in `agent/types.ts`, the default in `DEFAULT_LLM_SETTINGS` (`agent/llm.ts`), and UI in `pages/SettingsPage.tsx`. Persisted to localStorage + Electron IPC, merged in `store/settingsStore.ts` (array/object fields need explicit merge handling). Subscription connections (`openai-codex` / `anthropic`, ADR-0052) are the exception to endpoint fields: their credential lives Host-side from the synced CLI login, so the renderer never sends `baseUrl`/`apiKey` for them and model choices come from the Host's bounded `config.subscriptionCatalog`, fail-closed.

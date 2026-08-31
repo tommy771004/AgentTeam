@@ -5,7 +5,9 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { InMemoryReviewArtifactStore, ReviewArtifactStoreError, SqliteReviewArtifactStore, type ReviewArtifactStore } from '../electron/reviewArtifactStore.ts'
-import { InMemoryReviewStateStore } from '../electron/reviewStateStore.ts'
+import { InMemoryReviewStateStore, SqliteReviewStateStore, type ReviewStateStore } from '../electron/reviewStateStore.ts'
+import { exportReviewArtifact, importReviewArtifact, previewReviewArtifactImport } from '../electron/reviewArtifactTransfer.ts'
+import { reviewArtifactBundleHash } from '../electron/reviewArtifactStore.ts'
 import { InMemoryReviewVerificationStore } from '../electron/reviewVerificationStore.ts'
 import type { ReviewAdmissionSnapshot } from '../src/agent/reviewContract.ts'
 
@@ -38,7 +40,7 @@ async function lifecycle(source: ReviewArtifactStore, destination: ReviewArtifac
   const tampered = structuredClone(bundle); tampered.payloads[0]!.contentBase64 = Buffer.from('tampered').toString('base64')
   assert.equal((await destination.previewImport(tampered)).status, 'invalid')
   const unsupported = structuredClone(bundle) as unknown as { schemaVersion: number }
-  unsupported.schemaVersion = 2
+  unsupported.schemaVersion = 99
   assert.equal((await destination.previewImport(unsupported)).status, 'unsupported')
   const missing = structuredClone(bundle)
   delete missing.artifact.settlement
@@ -64,9 +66,51 @@ async function lifecycle(source: ReviewArtifactStore, destination: ReviewArtifac
   await assert.rejects(() => destination.read('review_unreferenced'), (error) => error instanceof ReviewArtifactStoreError && error.code === 'not_found')
 }
 
+async function transfer(source: ReviewArtifactStore, destination: ReviewArtifactStore, sourceState: ReviewStateStore, destinationState: ReviewStateStore) {
+  const snapshotId = 'review_state_transfer'
+  const artifact = await ready(source, snapshotId, false)
+  const anchor = { snapshotId, path: 'src/lifecycle.ts', side: 'new' as const, line: 1, hunkFingerprint: 'hunk', contextHash: 'context', originalContext: 'line' }
+  await sourceState.saveDraft({ id: 'transfer-draft', anchor, body: '保留草稿' })
+  await sourceState.saveDraft({ id: 'transfer-resolved', anchor, body: '保留已解決留言' })
+  for (const status of ['submitted', 'acknowledged', 'resolved'] as const) await sourceState.transitionComment('transfer-resolved', status)
+  await sourceState.markReviewed({ snapshotId, path: anchor.path, contentHash: artifact.manifest[0]!.contentHash! })
+  const bundle = await exportReviewArtifact(source, sourceState, snapshotId)
+  assert.equal(bundle.schemaVersion, 2)
+  assert.equal((await previewReviewArtifactImport(destination, bundle)).status, 'ready')
+  const tampered = structuredClone(bundle)
+  tampered.reviewState!.comments[0]!.body = 'tampered'
+  assert.equal((await previewReviewArtifactImport(destination, tampered)).status, 'invalid', 'state body is bound by the export hash')
+  const crossSnapshot = structuredClone(bundle)
+  crossSnapshot.reviewState!.comments[0]!.anchor.snapshotId = 'other-snapshot'
+  const { bundleHash: _hash, ...unsigned } = crossSnapshot
+  crossSnapshot.bundleHash = reviewArtifactBundleHash(unsigned)
+  assert.equal((await previewReviewArtifactImport(destination, crossSnapshot)).status, 'invalid', 'even rehashed state cannot cross snapshot identity')
+  await destinationState.saveDraft({ id: 'transfer-resolved', anchor: { ...anchor, snapshotId: 'existing-snapshot' }, body: 'do not overwrite' })
+  await assert.rejects(() => importReviewArtifact(destination, destinationState, bundle, bundle.bundleHash), /collision/)
+  assert.deepEqual(await destinationState.listComments(snapshotId), [], 'state collision rolls back earlier inserts')
+  await assert.rejects(() => destination.read(snapshotId), /not found/, 'failed state restore does not publish an artifact')
+  assert.equal((await destinationState.listComments('existing-snapshot'))[0]?.body, 'do not overwrite')
+  await destinationState.deleteDraft('transfer-resolved')
+  // Simulate interruption after state restore but before artifact publication.
+  await destinationState.importSnapshot(bundle.reviewState!)
+  const concurrent = await Promise.allSettled([
+    importReviewArtifact(destination, destinationState, bundle, bundle.bundleHash),
+    importReviewArtifact(destination, destinationState, bundle, bundle.bundleHash),
+  ])
+  assert.equal(concurrent.filter((item) => item.status === 'fulfilled').length, 1, 'concurrent imports publish one snapshot only')
+  const imported = await destination.read(snapshotId)
+  assert.equal(imported.manifestHash, artifact.manifestHash)
+  assert.deepEqual(await destinationState.listComments(snapshotId), await sourceState.listComments(snapshotId))
+  assert.deepEqual(await destinationState.listFileStates(snapshotId), await sourceState.listFileStates(snapshotId))
+  assert.equal((await previewReviewArtifactImport(destination, bundle)).status, 'collision')
+  const legacy = await ready(source, 'legacy_refs')
+  assert.equal((await previewReviewArtifactImport(destination, await source.exportArtifact(legacy.snapshotId))).status, 'missing', 'legacy reference-only exports cannot silently lose comments')
+}
+
 const root = await mkdtemp(join(tmpdir(), 'agentstudio-review-lifecycle-'))
 try {
   await lifecycle(new InMemoryReviewArtifactStore(), new InMemoryReviewArtifactStore())
+  await transfer(new InMemoryReviewArtifactStore(), new InMemoryReviewArtifactStore(), new InMemoryReviewStateStore(), new InMemoryReviewStateStore())
 
   const archivedArtifacts = new InMemoryReviewArtifactStore()
   const archivedState = new InMemoryReviewStateStore()
@@ -90,6 +134,15 @@ try {
   const sqliteSource = await SqliteReviewArtifactStore.open(join(root, 'source.sqlite'))
   const sqliteDestination = await SqliteReviewArtifactStore.open(join(root, 'destination.sqlite'))
   await lifecycle(sqliteSource, sqliteDestination)
+  const sourceState = await SqliteReviewStateStore.open(join(root, 'source-state.sqlite'))
+  const destinationStatePath = join(root, 'destination-state.sqlite')
+  const destinationState = await SqliteReviewStateStore.open(destinationStatePath)
+  await transfer(sqliteSource, sqliteDestination, sourceState, destinationState)
+  await sourceState.close(); await destinationState.close()
+  const restoredState = await SqliteReviewStateStore.open(destinationStatePath)
+  assert.deepEqual((await restoredState.listComments('review_state_transfer')).map((item) => item.status), ['draft', 'resolved'], 'imported lifecycle survives restart')
+  assert.equal((await restoredState.listFileStates('review_state_transfer'))[0]?.state, 'reviewed')
+  await restoredState.close()
   await sqliteSource.close(); await sqliteDestination.close()
 
   const recoveryPath = join(root, 'recovery.sqlite')
@@ -116,6 +169,7 @@ try {
   const preload = await readFile(new URL('../electron/preload.ts', import.meta.url), 'utf8')
   assert.match(protocol, /reviewImportPreviews\.add[\s\S]*reviewImportPreviews\.has[\s\S]*reviewImportPreviews\.delete/, 'import apply consumes a Host-issued preview identity')
   assert.match(protocol, /approveReviewLifecycle[\s\S]*action: 'import'/, 'import is approval-controlled after preview')
+  assert.match(protocol, /importReviewArtifact\(state\.reviewArtifactStore, state\.reviewStateStore, params\.bundle, expectedBundleHash\)/, 'approved Host import restores both authorities')
   assert.match(protocol, /action: 'retention'/, 'retention cannot silently collect payloads')
   assert.match(protocol, /action: 'hard-delete'[\s\S]*hardDeleteSnapshot[\s\S]*hardDeleteArtifact/, 'hard delete removes state, verification, and artifact canonical records')
   assert.match(protocol, /captureReviewWorkspaceAdmission[\s\S]*reviewWorkspaces\.set\(originalWorkspace\.workspaceId[\s\S]*rebindWorkspace/, 'rebind validates the new path while preserving the historical workspace identity')

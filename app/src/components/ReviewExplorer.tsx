@@ -223,7 +223,7 @@ export function ReviewExplorer({
   }
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface text-ink">
-      <ReviewExplorerHeader target={target} state={state} onReload={() => setReload((value) => value + 1)} />
+      <ReviewExplorerHeader key={JSON.stringify(target)} target={target} state={state} onOpenTarget={onOpenTarget} />
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <ReviewFileNavigation state={state} files={files} selectedPath={selectedPath} comments={comments} fileStates={fileStates} query={query} statusFilter={statusFilter} reviewFilter={reviewFilter} sort={sort} searchRef={searchRef} onQuery={setQuery} onStatusFilter={setStatusFilter} onReviewFilter={setReviewFilter} onSort={setSort} onSelectPath={onSelectPath} onLoadMore={loadMore} onReload={() => setReload((value) => value + 1)} />
@@ -261,16 +261,29 @@ function ReviewDelivery({ target, onOpenTarget }: { target: ReviewTarget; onOpen
   return <ReviewDeliveryPanel target={target} onOpenTarget={onOpenTarget} />
 }
 
-function ReviewExplorerHeader({ target, state, onReload }: { target: ReviewTarget; state: LoadState; onReload: () => void }) {
+function ReviewExplorerHeader({ target, state, onOpenTarget }: { target: ReviewTarget; state: LoadState; onOpenTarget?: (target: ReviewTarget, title?: string) => void }) {
   const mutable = target.kind === 'live-working-tree' || target.kind === 'staged'
-  const refresh = () => void window.subagents?.piHost?.review?.refresh(target).then(onReload).catch(onReload)
+  const [refreshError, setRefreshError] = useState<string>()
+  const [refreshing, setRefreshing] = useState(false)
+  const refresh = async () => {
+    const bridge = window.subagents?.piHost?.review
+    if (typeof bridge?.refresh !== 'function' || !onOpenTarget) { setRefreshError('Pi Host review refresh 不可用'); return }
+    setRefreshing(true)
+    setRefreshError(undefined)
+    try {
+      const { reviewTargetDescription } = await bridge.refresh(target)
+      onOpenTarget(reviewTargetDescription.target, `${SOURCE_LABEL[target.kind]} · refreshed`)
+    } catch (error) { setRefreshError(error instanceof Error ? error.message : String(error)) }
+    finally { setRefreshing(false) }
+  }
   return <header className="shrink-0 border-b border-line bg-surface-container-low px-3 py-2">
     <div className="flex min-w-0 items-center gap-2">
       <span className="text-[12px] font-semibold">{SOURCE_LABEL[target.kind]}</span>
       <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-ink-3">{targetIdentity(target)}</span>
       <span className={`ml-auto shrink-0 text-[10px] ${mutable ? 'text-orange' : 'text-green'}`}>{mutable ? '可變 · 需刷新' : '固定來源'}</span>
-      {mutable ? <button type="button" onClick={refresh} className="shrink-0 p-1 text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent" aria-label="刷新可變審查來源"><Icon name="refresh" size={14} /></button> : null}
+      {mutable ? <button type="button" disabled={refreshing} onClick={() => void refresh()} className="shrink-0 p-1 text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent" aria-label="刷新可變審查來源"><Icon name="refresh" size={14} /></button> : null}
     </div>
+    {refreshError ? <div role="alert" className="mt-1 text-[10px] text-red">刷新失敗：{refreshError}</div> : null}
     {state.kind === 'ready' ? <div className="mt-1 flex items-center gap-2 text-[10px] text-ink-3">
       <span>{state.artifact.status}</span><span>·</span><span>{state.artifact.attributionFidelity} attribution</span>
       {state.artifact.manifestHash ? <span className="truncate font-[family-name:var(--font-mono)]">· {state.artifact.manifestHash.slice(0, 10)}</span> : null}

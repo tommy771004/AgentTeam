@@ -9,6 +9,27 @@ import { agentLifecycleFromTurnSettlement, createAgentLifecycleEvent, isLegalAge
 import { projectAgentTree } from '../src/agent/agentTree.ts'
 import { hasAgentTreeCapability, projectAgentTreeSnapshot } from '../src/agent/agentTreeProjection.ts'
 import { recordAgentLifecycle } from '../electron/piAgentLifecycleRecord.ts'
+import { handlePiHostAgentDomain } from '../electron/piHostAgentDomain.ts'
+
+const approvalSession: import('../electron/piHostProtocol.ts').SessionRecord = { id: 'approval-agent', title: 'Approval', messages: [] }
+for (const state of ['admitted', 'running', 'waiting-approval'] as const) recordAgentLifecycle([approvalSession], approvalSession.id, state, 'approval-run')
+const approvalInput = {
+  method: 'agents/list', params: { agentId: approvalSession.id }, id: 'approval-list', sessions: [approvalSession],
+  queue: [{ runId: 'approval-run', sessionId: approvalSession.id, status: 'running' as const, enqueuedAt: 1, prompt: 'fixture' }],
+  activeSessionIds: new Set([approvalSession.id]),
+  activeRunIds: new Map([[approvalSession.id, 'approval-run']]),
+}
+const approvalResponse = handlePiHostAgentDomain(approvalInput)?.[0] as import('../electron/piHostProtocol.ts').PiHostResponse
+assert.equal(approvalResponse.result?.agents?.[0]?.lifecycle, 'waiting-approval', 'active registry must not hide the Turn Record approval wait')
+recordAgentLifecycle([approvalSession], approvalSession.id, 'queued', 'next-run')
+const waitingWithFollowUp = handlePiHostAgentDomain({ ...approvalInput, queue: [...approvalInput.queue, { ...approvalInput.queue[0]!, runId: 'next-run', status: 'queued' }] })?.[0] as import('../electron/piHostProtocol.ts').PiHostResponse
+assert.equal(waitingWithFollowUp.result?.agents?.[0]?.lifecycle, 'waiting-approval', 'queued follow-up must not hide the active run wait')
+assert.equal(waitingWithFollowUp.result?.agents?.[0]?.runId, 'approval-run')
+recordAgentLifecycle([approvalSession], approvalSession.id, 'running', 'approval-run')
+const resumed = handlePiHostAgentDomain(approvalInput)?.[0] as import('../electron/piHostProtocol.ts').PiHostResponse
+assert.equal(resumed.result?.agents?.[0]?.lifecycle, 'running', 'approval resolution returns the same run to running')
+const nextRun = handlePiHostAgentDomain({ ...approvalInput, activeRunIds: new Map([[approvalSession.id, 'new-active-run']]) })?.[0] as import('../electron/piHostProtocol.ts').PiHostResponse
+assert.equal(nextRun.result?.agents?.[0]?.lifecycle, 'running', 'old lifecycle must not leak into a new active run')
 
 type Agent = { agentId: string; rootAgentId: string; parentAgentId?: string; taskPath: string; lifecycle: string }
 type Message = { id?: number; event?: string; payload?: Record<string, unknown>; result?: { capabilities?: string[]; sessionId?: string; runId?: string; agents?: Agent[]; rootAgentId?: string; page?: { entries?: Array<{ kind?: string; event?: Record<string, unknown> }> } }; error?: { code: string; message: string } }

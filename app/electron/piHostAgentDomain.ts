@@ -9,6 +9,7 @@ type AgentDomainInput = {
   sessions: readonly SessionRecord[]
   queue: readonly PiQueuedRun[]
   activeSessionIds: ReadonlySet<string>
+  activeRunIds?: ReadonlyMap<string, string>
 }
 
 function errorResponse(id: string | number, message: string): PiHostMessage {
@@ -25,6 +26,7 @@ export function handlePiHostAgentDomain(input: AgentDomainInput): PiHostMessage[
     sessions: input.sessions,
     queue: input.queue,
     activeSessionIds: input.activeSessionIds,
+    activeRunIds: input.activeRunIds,
     rootAgentId,
     agentId,
   })

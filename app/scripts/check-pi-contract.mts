@@ -278,7 +278,7 @@ const expandScript = (name: string, seen = new Set<string>()): string => {
   }
   return body
 }
-const gateBody = ['smoke', 'build', 'dist', 'dist:mac', 'dist:win', 'dist:all']
+const gateBody = ['smoke', 'check']
   .filter((name) => packageScripts[name])
   .map((name) => expandScript(name))
   .join(' ')

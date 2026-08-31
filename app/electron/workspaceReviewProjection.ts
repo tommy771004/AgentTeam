@@ -308,7 +308,18 @@ export class WorkspaceReviewProjection {
 
   async refresh(target: ReviewTarget, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<ReviewTargetDescription> {
     if (target.kind !== 'live-working-tree' && target.kind !== 'staged') throw new WorkspaceReviewProjectionError('invalid', 'Immutable review targets cannot be refreshed')
-    return (await bounded(this.load(target, true), options.signal, options.timeoutMs)).description
+    this.cache.delete(targetKey(target))
+    return bounded(this.refreshMutable(target), options.signal, options.timeoutMs)
+  }
+
+  private async refreshMutable(target: Extract<ReviewTarget, { kind: 'live-working-tree' | 'staged' }>): Promise<ReviewTargetDescription> {
+    const workspace = await this.options.resolveWorkspace(target.workspaceId)
+    if (!workspace) throw new WorkspaceReviewProjectionError('missing', 'Workspace binding is missing')
+    const current = await captureReviewWorkspaceAdmission({ runId: `refresh:${target.workspaceId}`, projectRoot: workspace.projectRoot, runnerKind: 'builtin' })
+    if (!current.canonical || current.status === 'failed' || !current.baseline) throw new WorkspaceReviewProjectionError('unavailable', 'Workspace refresh failed')
+    const nextTarget = { ...target, revision: target.kind === 'staged' ? current.baseline.indexRevision : current.baseline.workingRevision }
+    // Loading still checks CAS: a concurrent edit during refresh must fail closed.
+    return (await this.load(nextTarget, true)).description
   }
 
   async listFiles(target: ReviewTarget, input: { cursor?: string; limit?: number; query?: string; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<ReviewPageEnvelope<ReviewFileManifestEntry>> {

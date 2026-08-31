@@ -60,9 +60,10 @@ assert.match(
   /thr\.clearRunPlan\(tid\)[\s\S]{0,240}bindRun\(opts\.runId, tid\)/,
   'a new run clears the previous plan before binding the new run identity',
 )
-const evidenceRoot = resolve(appRoot, '../.scratch/adaptive-agent-run-status-surface/evidence/ui-2026-08-30')
+// Disposable smoke captures must not overwrite committed qualification evidence.
+const evidenceRoot = resolve(appRoot, 'test-results/run-status-surface')
 await mkdir(evidenceRoot, { recursive: true })
-const followUpEvidenceRoot = resolve(appRoot, '../.scratch/interactive-follow-up-queue-and-steer/evidence/rendered')
+const followUpEvidenceRoot = resolve(appRoot, 'test-results/follow-up-composer')
 await mkdir(followUpEvidenceRoot, { recursive: true })
 const [{ createServer }, { default: react }, { default: tailwindcss }, { chromium }] = await Promise.all([
   import('vite'), import('@vitejs/plugin-react'), import('@tailwindcss/vite'), import('playwright'),

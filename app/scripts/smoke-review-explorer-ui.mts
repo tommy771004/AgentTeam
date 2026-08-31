@@ -8,6 +8,8 @@ assert.match(explorer, /listFiles\(\{ target, limit: 200,[\s\S]*query/, 'file na
 assert.match(explorer, /nextCursor[\s\S]*載入更多/, 'large manifests expose a real continuation action')
 assert.match(explorer, /readFileDiff\(\{ target, path: file\.path, maxBytes: 64 \* 1024 \}\)/, 'hunks enter through bounded Host paging')
 assert.match(explorer, /controller\.abort\(\)/, 'target and file changes cancel stale requests')
+assert.match(explorer, /onOpenTarget\(reviewTargetDescription\.target,/, 'refresh adopts the new Host revision instead of reloading the old target')
+assert.match(explorer, /刷新失敗：/, 'refresh failures stay visible instead of silently reusing cached content')
 assert.match(explorer, /搜尋路徑[\s\S]*依狀態篩選[\s\S]*排序變更檔案/)
 assert.match(explorer, /Unified[\s\S]*Split/)
 assert.match(explorer, /折疊 context/)

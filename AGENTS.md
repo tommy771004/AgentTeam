@@ -6,7 +6,7 @@ The product is `app/` (Electron + React 19 + TypeScript + Vite + zustand); every
 
 Commands, all from `app/`: `npm run dev`, `npm run build` (this is the typecheck), `npm run smoke`, `npx oxlint src`, `npm run dist:mac`.
 
-- Every run enters through `agent/taskRunCoordinator.ts` `runTask`. **Never call `dispatchThreadTask` or `startExecution` from UI code** — a drift guard fails the build.
+- Every run enters through `agent/taskRunCoordinator.ts` `runTask`. **Never call `dispatchThreadTask` or `startExecution` from UI code** — a drift guard fails `npm run check` / smoke qualification.
 - Different conversation threads execute independently up to `maxConcurrentRuns`; same-thread follow-ups remain ordered. `agentStore.isRunning` is derived from the run registry rather than being a sole lock (ADR-0003).
 - **Time-based** requires a claimed `ScheduledJob` trigger snapshot and **Proactive** requires event matcher evidence, both asserted fail-closed at admission. Cron/event wording in chat produces a suggestion, never a run.
 - Runner capability matrix: builtin is `executionKind: 'loop'` with parse/DoD/iterate/continueGoal; external CLI is `'external'` with parse/DoD/iterate false. Its `continueGoal` exists only through the explicit prompt contract in `runners/types.ts`, and CLI success is never DoD met.

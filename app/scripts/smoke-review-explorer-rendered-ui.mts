@@ -3,7 +3,8 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const appRoot = new URL('..', import.meta.url).pathname
-const evidenceRoot = resolve(appRoot, '../.scratch/run-review-workspace/evidence/ui-release-2026-08-30')
+// Disposable smoke captures must not overwrite committed qualification evidence.
+const evidenceRoot = resolve(appRoot, 'test-results/review-explorer')
 await mkdir(evidenceRoot, { recursive: true })
 const [{ createServer }, { default: react }, { default: tailwindcss }, { chromium }] = await Promise.all([
   import('vite'), import('@vitejs/plugin-react'), import('@tailwindcss/vite'), import('playwright'),

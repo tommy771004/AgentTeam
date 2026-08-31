@@ -30,6 +30,7 @@ import { captureRunReviewSnapshot, type TrustedReviewMutation } from './reviewSn
 import { WorkspaceReviewProjection, type ReviewDiffHunk, type ReviewTargetDescription } from './workspaceReviewProjection.ts'
 import type { ReviewFileManifestEntry, ReviewPageEnvelope, ReviewTarget, ReviewWorkspaceBinding } from '../src/agent/reviewContract.ts'
 import { InMemoryReviewStateStore, type ReviewStateStore } from './reviewStateStore.ts'
+import { exportReviewArtifact, importReviewArtifact, previewReviewArtifactImport } from './reviewArtifactTransfer.ts'
 import type { ReviewComment, ReviewFileState } from '../src/agent/reviewStateContract.ts'
 import { InMemoryReviewVerificationStore, type ReviewVerificationStore } from './reviewVerificationStore.ts'
 import { projectReviewVerification, type ReviewVerificationKind, type ReviewVerificationProjection } from '../src/agent/reviewVerificationContract.ts'
@@ -3834,11 +3835,11 @@ function lifecycleSnapshotId(params: Record<string, unknown>): string {
 
 async function exportReviewArtifactLifecycle(state: HostState, params: Record<string, unknown>, id: string | number): Promise<PiHostMessage[]> {
   const snapshotId = lifecycleSnapshotId(params)
-  return snapshotId ? [{ id, result: { reviewArtifactExport: await state.reviewArtifactStore.exportArtifact(snapshotId) } }] : [errorResponse(id, 'invalid_request', 'snapshotId is required')]
+  return snapshotId ? [{ id, result: { reviewArtifactExport: await exportReviewArtifact(state.reviewArtifactStore, state.reviewStateStore, snapshotId) } }] : [errorResponse(id, 'invalid_request', 'snapshotId is required')]
 }
 
 async function previewReviewArtifactLifecycle(state: HostState, bundle: unknown, id: string | number): Promise<PiHostMessage[]> {
-  const preview = await state.reviewArtifactStore.previewImport(bundle)
+  const preview = await previewReviewArtifactImport(state.reviewArtifactStore, bundle)
   if (preview.status === 'ready' && preview.bundleHash) state.reviewImportPreviews.add(preview.bundleHash)
   return [{ id, result: { reviewArtifactImportPreview: preview } }]
 }
@@ -3848,7 +3849,7 @@ async function importReviewArtifactLifecycle(state: HostState, params: Record<st
   if (!expectedBundleHash || !state.reviewImportPreviews.has(expectedBundleHash)) return [errorResponse(id, 'conflict', 'Review import requires an unconsumed Host preview')]
   state.reviewImportPreviews.delete(expectedBundleHash)
   if (!await approveReviewLifecycle({ action: 'import', identity: expectedBundleHash, detail: { bundleHash: expectedBundleHash } })) return [errorResponse(id, 'forbidden', 'Review import was denied')]
-  const reviewArtifact = await state.reviewArtifactStore.importArtifact(params.bundle, expectedBundleHash)
+  const reviewArtifact = await importReviewArtifact(state.reviewArtifactStore, state.reviewStateStore, params.bundle, expectedBundleHash)
   const workspace = reviewArtifact.admission.workspace
   if (workspace) state.reviewWorkspaces.set(workspace.workspaceId, workspace)
   return [{ id, result: { reviewArtifact } }]
@@ -4651,6 +4652,7 @@ function handleAgentRequest(state: HostState, input: Partial<InternalPiHostReque
     return handlePiHostAgentDomain({
       method: input.method, params: input.params, id, sessions: state.snapshot.sessions,
       queue: state.snapshot.queue, activeSessionIds: new Set(activeSessionRuns.keys()),
+      activeRunIds: new Map([...activeSessionRuns].map(([sessionId, run]) => [sessionId, run.runId])),
     })
   }
   if (!state.agentCollaborationNegotiated) return [errorResponse(id, 'protocol_mismatch', 'agent-collaboration-v1 capability was not negotiated')]

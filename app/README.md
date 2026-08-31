@@ -37,6 +37,10 @@ This starts Vite + Electron. The UI also works in the browser at `http://localho
 
 ## Build installers
 
+`build` and `dist:*` are compilation/packaging-only. Run `npm run check` or
+`npm run smoke` separately when qualification is required; installer builds do
+not launch Electron E2E.
+
 ```bash
 # Current platform
 npm run dist

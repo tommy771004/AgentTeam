@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { canTransitionReviewSnapshot } from '../src/agent/reviewContract.ts'
+import { parseReviewStateSnapshot, type ReviewStateSnapshot } from './reviewStateSnapshot.ts'
 import type {
   AttributionFidelity,
   ReviewAdmissionSnapshot,
@@ -48,7 +49,7 @@ export type ReviewArtifactProjection = {
 }
 
 export type ReviewArtifactExportBundle = {
-  schemaVersion: 1
+  schemaVersion: 1 | 2
   kind: 'agentstudio-review-artifact'
   exportedAt: string
   artifact: ReviewArtifactProjection
@@ -56,6 +57,8 @@ export type ReviewArtifactExportBundle = {
   refs: { comments: string[]; reviewState: string[] }
   totalBytes: number
   bundleHash: string
+  /** v2 carries the durable state, not just references into another Host. */
+  reviewState?: ReviewStateSnapshot
 }
 
 export type ReviewArtifactImportPreview = {
@@ -177,19 +180,23 @@ function cloneProjection(record: StoredRecord): ReviewArtifactProjection {
   return structuredClone(projection)
 }
 
-function bundleHash(bundle: Omit<ReviewArtifactExportBundle, 'bundleHash'>): string {
+export function reviewArtifactBundleHash(bundle: Omit<ReviewArtifactExportBundle, 'bundleHash'>): string {
   return sha256(JSON.stringify(bundle))
 }
 
-function parseImportBundle(value: unknown): ReviewArtifactExportBundle {
+export function parseReviewArtifactImportBundle(value: unknown): ReviewArtifactExportBundle {
   if (!value || typeof value !== 'object') throw new ReviewArtifactStoreError('invalid_input', 'Review import bundle must be an object')
   const bundle = structuredClone(value) as Partial<ReviewArtifactExportBundle>
-  if (bundle.schemaVersion !== 1 || bundle.kind !== 'agentstudio-review-artifact') throw new ReviewArtifactStoreError('unsupported_schema', 'Review import bundle schema is unsupported')
+  if ((bundle.schemaVersion !== 1 && bundle.schemaVersion !== 2) || bundle.kind !== 'agentstudio-review-artifact') throw new ReviewArtifactStoreError('unsupported_schema', 'Review import bundle schema is unsupported')
   if (!bundle.artifact?.snapshotId || bundle.artifact.schemaVersion !== 1 || !Array.isArray(bundle.payloads) || !bundle.refs || typeof bundle.bundleHash !== 'string') {
     throw new ReviewArtifactStoreError('invalid_input', 'Review import bundle is incomplete')
   }
   const { bundleHash: claimed, ...unsigned } = bundle as ReviewArtifactExportBundle
-  if (bundleHash(unsigned) !== claimed) throw new ReviewArtifactStoreError('corrupt', 'Review import bundle hash mismatch')
+  if (reviewArtifactBundleHash(unsigned) !== claimed) throw new ReviewArtifactStoreError('corrupt', 'Review import bundle hash mismatch')
+  if (bundle.schemaVersion === 2) {
+    const state = parseReviewStateSnapshot(bundle.reviewState, bundle.artifact.snapshotId)
+    if (JSON.stringify(bundle.refs) !== JSON.stringify({ comments: state.comments.map((item) => item.id), reviewState: state.fileStates.map((item) => item.path) })) throw new ReviewArtifactStoreError('corrupt', 'Review state references mismatch')
+  } else if (bundle.reviewState !== undefined) throw new ReviewArtifactStoreError('invalid_input', 'Review state requires bundle schema v2')
   let totalBytes = 0
   for (const payload of bundle.payloads) {
     const content = Buffer.from(payload.contentBase64, 'base64')
@@ -227,7 +234,7 @@ function classifyImportPreview(
   hasCollision: (snapshotId: string) => boolean,
 ): ReviewArtifactImportPreview {
   try {
-    const bundle = parseImportBundle(value)
+    const bundle = parseReviewArtifactImportBundle(value)
     importedRecord(bundle)
     const collision = hasCollision(bundle.artifact.snapshotId)
     return { status: collision ? 'collision' : 'ready', snapshotId: bundle.artifact.snapshotId, bundleHash: bundle.bundleHash, totalBytes: bundle.totalBytes, collisions: collision ? [bundle.artifact.snapshotId] : [], diagnostics: [] }
@@ -403,7 +410,7 @@ export class InMemoryReviewArtifactStore implements ReviewArtifactStore {
       schemaVersion: 1, kind: 'agentstudio-review-artifact', exportedAt: new Date().toISOString(), artifact: cloneProjection(record), payloads,
       refs: { comments: [...record.commentRefs], reviewState: [...record.reviewStateRefs] }, totalBytes: record.payloadBytes,
     }
-    return { ...unsigned, bundleHash: bundleHash(unsigned) }
+    return { ...unsigned, bundleHash: reviewArtifactBundleHash(unsigned) }
   }
 
   async previewImport(value: unknown): Promise<ReviewArtifactImportPreview> {
@@ -413,7 +420,7 @@ export class InMemoryReviewArtifactStore implements ReviewArtifactStore {
 
   async importArtifact(value: unknown, expectedBundleHash: string) {
     this.ensureOpen()
-    const bundle = parseImportBundle(value)
+    const bundle = parseReviewArtifactImportBundle(value)
     if (bundle.bundleHash !== expectedBundleHash) throw new ReviewArtifactStoreError('conflict', 'Review import changed after preview')
     if (this.records.has(bundle.artifact.snapshotId)) throw new ReviewArtifactStoreError('conflict', 'Review import snapshot identity already exists')
     const record = importedRecord(bundle)
@@ -665,7 +672,7 @@ export class SqliteReviewArtifactStore implements ReviewArtifactStore {
       schemaVersion: 1, kind: 'agentstudio-review-artifact', exportedAt: new Date().toISOString(), artifact, payloads,
       refs: { comments: [...artifact.commentRefs], reviewState: [...artifact.reviewStateRefs] }, totalBytes: artifact.payloadBytes,
     }
-    return { ...unsigned, bundleHash: bundleHash(unsigned) }
+    return { ...unsigned, bundleHash: reviewArtifactBundleHash(unsigned) }
   }
 
   async previewImport(value: unknown): Promise<ReviewArtifactImportPreview> {
@@ -675,7 +682,7 @@ export class SqliteReviewArtifactStore implements ReviewArtifactStore {
 
   async importArtifact(value: unknown, expectedBundleHash: string) {
     this.ensureOpen()
-    const bundle = parseImportBundle(value)
+    const bundle = parseReviewArtifactImportBundle(value)
     if (bundle.bundleHash !== expectedBundleHash) throw new ReviewArtifactStoreError('conflict', 'Review import changed after preview')
     const record = importedRecord(bundle)
     this.db.exec('BEGIN IMMEDIATE')

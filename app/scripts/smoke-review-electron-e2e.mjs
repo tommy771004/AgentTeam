@@ -9,6 +9,8 @@ import { ensureElectronExecutable } from './electron-executable.mjs'
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = path.resolve(appRoot, '..')
 const evidenceDir = path.join(repoRoot, '.scratch', 'run-review-workspace', 'evidence')
+// Keep release smoke screenshots separate from the historical review evidence.
+const screenshotDir = path.join(appRoot, 'test-results', 'review-electron')
 const qualifyRealRunners = process.env.SUBAGENTS_REVIEW_REAL_RUNNERS === '1'
 const realRunnerEvidence = []
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agentstudio-review-electron-'))
@@ -16,6 +18,7 @@ const projectRoot = path.join(fixtureRoot, 'project')
 const userDataDir = path.join(fixtureRoot, 'profile')
 fs.mkdirSync(projectRoot, { recursive: true })
 fs.mkdirSync(evidenceDir, { recursive: true })
+fs.mkdirSync(screenshotDir, { recursive: true })
 
 const git = (...args) => execFileSync('git', ['-C', projectRoot, ...args], { stdio: 'pipe' })
 git('init')
@@ -171,7 +174,7 @@ try {
   assert.match(await page.evaluate(() => document.activeElement?.textContent || ''), /審查 B/)
   await page.getByRole('tab', { name: /審查 A/ }).click()
   await page.waitForSelector('text=source.ts')
-  await page.screenshot({ path: path.join(evidenceDir, 'review-desktop.png'), fullPage: true })
+  await page.screenshot({ path: path.join(screenshotDir, 'review-desktop.png'), fullPage: true })
   await running.app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0]
     window.setMinimumSize(320, 600)
@@ -187,7 +190,7 @@ try {
     return Boolean(panel?.contains(document.elementFromPoint(20, 100)))
   }), true, 'narrow Review panel is painted above the navigation sidebar')
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'narrow Review has no document-level horizontal overflow')
-  await page.screenshot({ path: path.join(evidenceDir, 'review-narrow.png'), fullPage: true })
+  await page.screenshot({ path: path.join(screenshotDir, 'review-narrow.png'), fullPage: true })
 
   await running.app.close()
   running = await launch()

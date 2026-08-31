@@ -85,6 +85,7 @@ fs.rmSync(replacementFinalizeGateMarkerPath, { force: true })
 fs.rmSync(finalizeGateReleasePath, { force: true })
 
 const sse = (payload) => `data: ${JSON.stringify(payload)}\n\n`
+const toolStartedPath = (token) => path.join(launcherDir, `${token}.tool-started`)
 const modelTurns = new Map()
 const modelServer = createServer(async (request, response) => {
   if (request.url !== '/v1/chat/completions' || request.method !== 'POST') {
@@ -135,7 +136,8 @@ const modelServer = createServer(async (request, response) => {
     // Keep the active reattach case alive longer than the bounded E2E timeout;
     // otherwise a missed projection can turn into a natural terminal answer
     // at exactly the same moment the diagnostic wait expires.
-    const command = 'sleep 600'
+    const marker = toolStartedPath(token).replaceAll("'", "'\\''")
+    const command = `printf ready > '${marker}'; sleep 600`
     response.write(chunk({ role: 'assistant', content: '我先執行一個可觀測的工具。' }))
     response.write(chunk({ tool_calls: [{
       index: 0,
@@ -318,6 +320,30 @@ const startScenario = async (page, kind, iteration) => {
   return { attachment, token }
 }
 
+// Admission and a positive latestSeq do not prove bash executed: a denied
+// tool also writes entries and can settle before the renderer reloads.
+const waitForRunningTool = async (page, attachment, token) => {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    const { page: record } = await page.evaluate(async ({ runId, sessionId }) => {
+      const attached = await window.subagents.piHost.runs.attach(runId, undefined, 200)
+      if (attached.page) return attached
+      return window.subagents.piHost.sessions.record(sessionId, undefined, 200)
+    }, attachment)
+    const entries = record?.entries || []
+    const result = entries.find((entry) => entry.kind === 'tool-result' && entry.callId === `call_${token}`)
+    if (result || record?.attachment?.status === 'terminal') {
+      throw new Error(`Long-running bash did not stay active: ${JSON.stringify({ runId: attachment.runId, status: record?.attachment?.status, result })}`)
+    }
+    if (fs.existsSync(toolStartedPath(token))) {
+      assert.equal(record?.attachment?.status, 'active', 'tool execution marker belongs to an active Host run')
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error(`Long-running bash never wrote its execution marker for ${attachment.runId}`)
+}
+
 const readRecoveredRun = async ({ id, sessionId }) => {
   const runs = window.subagents.piHost.runs
   const { activeRuns = [], terminalRuns = [] } = await runs.active()
@@ -350,6 +376,7 @@ const runScenario = async (page, kind, iteration) => {
   let terminalGateId
   let oldGateMarker
 
+  await waitForRunningTool(page, attachment, token)
   if (kind === 'active') {
     const initial = await waitForHostStatus(page, runId, 'active', 'active tool boundary')
     assert.ok(initial.latestSeq > 0, 'active scenario reached a recorded tool boundary')
@@ -529,7 +556,9 @@ try {
   await page.evaluate(async () => {
     await window.subagents?.piHost?.settings?.update?.({
       approvalMode: 'full',
-      unattended: true,
+      // A composer run is interactive. Full + unattended intentionally becomes
+      // auto in Host policy and denies bash, so it cannot hold a live tool.
+      unattended: false,
       bashRequireAsk: false,
       thinkingLevel: 'off',
     })

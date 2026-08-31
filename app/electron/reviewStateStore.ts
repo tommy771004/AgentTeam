@@ -11,6 +11,7 @@ import {
   type ReviewFeedbackBundle,
 } from '../src/agent/reviewStateContract.ts'
 import type { ReviewFileManifestEntry, ReviewWorkspaceBinding } from '../src/agent/reviewContract.ts'
+import { assertReviewStateCompatible, parseReviewStateSnapshot, type ReviewStateSnapshot } from './reviewStateSnapshot.ts'
 
 export class ReviewStateStoreError extends Error {
   readonly code: 'not_found' | 'conflict' | 'invalid' | 'closed' | 'unsupported_schema'
@@ -28,6 +29,7 @@ export interface ReviewStateStore {
   listComments(snapshotId: string): Promise<ReviewComment[]>
   markReviewed(input: { snapshotId: string; path: string; contentHash: string; now?: string }): Promise<ReviewFileState>
   listFileStates(snapshotId: string): Promise<ReviewFileState[]>
+  importSnapshot(snapshot: ReviewStateSnapshot): Promise<void>
   inheritSnapshot(input: { fromSnapshotId: string; toSnapshotId: string; nextManifest: ReviewFileManifestEntry[]; anchorCandidates: ReviewCommentAnchor[]; now?: string }): Promise<{ comments: ReviewComment[]; fileStates: ReviewFileState[] }>
   referencedSnapshotIds(): Promise<string[]>
   hardDeleteSnapshot(snapshotId: string): Promise<void>
@@ -75,6 +77,14 @@ export class InMemoryReviewStateStore implements ReviewStateStore {
     this.fileStates.set(`${item.snapshotId}\0${item.path}`, item); return structuredClone(item)
   }
   async listFileStates(snapshotId: string) { this.ensureOpen(); return [...this.fileStates.values()].filter((item) => item.snapshotId === snapshotId).map((item) => structuredClone(item)) }
+  async importSnapshot(snapshot: ReviewStateSnapshot) {
+    this.ensureOpen()
+    const parsed = parseReviewStateSnapshot(snapshot, snapshot.snapshotId)
+    for (const item of parsed.comments) assertReviewStateCompatible(this.comments.get(item.id), item)
+    for (const item of parsed.fileStates) assertReviewStateCompatible(this.fileStates.get(`${item.snapshotId}\0${item.path}`), item)
+    for (const item of parsed.comments) this.comments.set(item.id, item)
+    for (const item of parsed.fileStates) this.fileStates.set(`${item.snapshotId}\0${item.path}`, item)
+  }
   async inheritSnapshot(input: { fromSnapshotId: string; toSnapshotId: string; nextManifest: ReviewFileManifestEntry[]; anchorCandidates: ReviewCommentAnchor[]; now?: string }) {
     this.ensureOpen(); const now = input.now || new Date().toISOString()
     const fileStates = inheritReviewedFiles({ ...input, reviewed: await this.listFileStates(input.fromSnapshotId), now })
@@ -132,6 +142,30 @@ export class SqliteReviewStateStore implements ReviewStateStore {
   async listComments(snapshotId: string) { this.ensureOpen(); return (this.db.prepare('SELECT * FROM review_comments WHERE snapshot_id = ? ORDER BY created_at,id').all(snapshotId) as CommentRow[]).map((row) => this.rowComment(row)) }
   async markReviewed(input: { snapshotId: string; path: string; contentHash: string; now?: string }) { this.ensureOpen(); if (!input.snapshotId || !input.path || !input.contentHash) throw new ReviewStateStoreError('invalid', 'snapshot, path, and content hash are required'); const item: ReviewFileState = { snapshotId: input.snapshotId, path: input.path, contentHash: input.contentHash, state: 'reviewed', reviewedAt: input.now || new Date().toISOString() }; this.db.prepare('INSERT INTO review_file_states(snapshot_id,path,content_hash,state,reviewed_at) VALUES(?,?,?,?,?) ON CONFLICT(snapshot_id,path) DO UPDATE SET content_hash=excluded.content_hash,state=excluded.state,reviewed_at=excluded.reviewed_at').run(item.snapshotId, item.path, item.contentHash, item.state, item.reviewedAt); return item }
   async listFileStates(snapshotId: string) { this.ensureOpen(); return (this.db.prepare('SELECT * FROM review_file_states WHERE snapshot_id = ? ORDER BY path').all(snapshotId) as FileStateRow[]).map((row) => ({ snapshotId: row.snapshot_id, path: row.path, contentHash: row.content_hash, state: row.state, reviewedAt: row.reviewed_at, ...(row.inherited_from_snapshot_id ? { inheritedFromSnapshotId: row.inherited_from_snapshot_id } : {}) })) }
+  async importSnapshot(snapshot: ReviewStateSnapshot) {
+    this.ensureOpen()
+    const parsed = parseReviewStateSnapshot(snapshot, snapshot.snapshotId)
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.insertImportedState(parsed)
+      this.db.exec('COMMIT')
+    } catch (error) { this.db.exec('ROLLBACK'); throw error }
+  }
+  private insertImportedState(snapshot: ReviewStateSnapshot) {
+    for (const item of snapshot.comments) {
+      const row = this.db.prepare('SELECT * FROM review_comments WHERE id = ?').get(item.id) as CommentRow | undefined
+      assertReviewStateCompatible(row ? this.rowComment(row) : undefined, item)
+      this.db.prepare('INSERT OR IGNORE INTO review_comments(id,snapshot_id,path,anchor_json,body,status,created_at,updated_at,rebased_from_json,source_comment_id) VALUES(?,?,?,?,?,?,?,?,?,?)')
+        .run(item.id, item.anchor.snapshotId, item.anchor.path, JSON.stringify(item.anchor), item.body, item.status, item.createdAt, item.updatedAt, item.rebasedFrom ? JSON.stringify(item.rebasedFrom) : null, item.sourceCommentId || null)
+    }
+    for (const item of snapshot.fileStates) {
+      const row = this.db.prepare('SELECT * FROM review_file_states WHERE snapshot_id = ? AND path = ?').get(item.snapshotId, item.path) as FileStateRow | undefined
+      const current = row ? { snapshotId: row.snapshot_id, path: row.path, contentHash: row.content_hash, state: row.state, reviewedAt: row.reviewed_at, ...(row.inherited_from_snapshot_id ? { inheritedFromSnapshotId: row.inherited_from_snapshot_id } : {}) } : undefined
+      assertReviewStateCompatible(current, item)
+      this.db.prepare('INSERT OR IGNORE INTO review_file_states(snapshot_id,path,content_hash,state,reviewed_at,inherited_from_snapshot_id) VALUES(?,?,?,?,?,?)')
+        .run(item.snapshotId, item.path, item.contentHash, item.state, item.reviewedAt, item.inheritedFromSnapshotId || null)
+    }
+  }
   async inheritSnapshot(input: { fromSnapshotId: string; toSnapshotId: string; nextManifest: ReviewFileManifestEntry[]; anchorCandidates: ReviewCommentAnchor[]; now?: string }) {
     this.ensureOpen(); const memory = new InMemoryReviewStateStore(); for (const item of await this.listFileStates(input.fromSnapshotId)) await memory.markReviewed(item); for (const comment of await this.listComments(input.fromSnapshotId)) await memory.saveDraft({ id: comment.id, anchor: comment.anchor, body: comment.body, now: comment.createdAt }).then(async () => { let status: ReviewCommentStatus = 'draft'; for (const next of ['submitted','acknowledged'] as const) { if (comment.status === status) break; await memory.transitionComment(comment.id, next, comment.updatedAt); status = next } })
     const inherited = await memory.inheritSnapshot(input)
