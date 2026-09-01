@@ -768,6 +768,8 @@ export interface LlmSettings {
   approvalMode: ApprovalMode
   /** Automation runs are denied on HITL timeout instead of waiting forever. */
   unattended: boolean
+  /** Keep builtin subscription OAuth aligned with the currently logged-in CLI account. */
+  followCliOAuthAccount: boolean
   /**
    * Capability progressive disclosure (Pydantic AI 2.0–style).
    * When true, FC only exposes a catalog + load_capability until the model loads a bundle.

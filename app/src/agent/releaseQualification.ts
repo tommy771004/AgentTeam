@@ -60,6 +60,14 @@ export type ReleaseQualificationInput = {
     sbom: boolean
     provenance: boolean
   }
+  hardening: {
+    releasePromotion: boolean
+    credentialBoundary: boolean
+    settingsRecovery: boolean
+    deterministicGuards: boolean
+    mergeBaseComplexity: boolean
+    shippedRuntimeCiCoverage: boolean
+  }
   warnings: Array<{ id: string; summary: string; owner: string; mitigation: string }>
 }
 
@@ -99,6 +107,14 @@ function criteria(input: ReleaseQualificationInput): Criterion[] {
   addGroup('entitlement', input.entitlement, { freeCore: 'Free Core', activePro: 'Active Pro', offlineGrace: 'Offline grace', expired: 'Expired entitlement', cancelled: 'Cancelled entitlement', packRollback: 'Feature-pack rollback' })
   addGroup('workflow', input.workflow, { spec: 'Spec', tickets: 'Tickets', tdd: 'TDD', review: 'Review', artifactIndex: 'Artifact Index', handoff: 'Handoff', userApprovalBeforeRelease: 'User approval before release action' })
   addGroup('trust', input.trust, { privacy: 'Privacy', security: 'Security', eula: 'EULA', terms: 'Terms', refund: 'Refund', support: 'Support', releaseNotes: 'Release notes', checksums: 'Checksums', sbom: 'SBOM', provenance: 'Provenance' })
+  addGroup('hardening', input.hardening, {
+    releasePromotion: 'Verified channel promotion contract',
+    credentialBoundary: 'Main-only credential boundary',
+    settingsRecovery: 'Atomic settings recovery',
+    deterministicGuards: 'Deterministic repository guards',
+    mergeBaseComplexity: 'Merge-base complexity qualification',
+    shippedRuntimeCiCoverage: 'Shipped-runtime CI coverage',
+  })
   return checks
 }
 
@@ -107,6 +123,10 @@ export function buildReleaseQualification(input: ReleaseQualificationInput, eval
   const failedCriteria = all.filter((criterion) => !criterion.passed).map((criterion) => `${criterion.id}: ${criterion.detail}`)
   const warningFailures = input.warnings.filter((warning) => !warning.owner.trim() || !warning.mitigation.trim())
   if (warningFailures.length) failedCriteria.push(...warningFailures.map((warning) => `${warning.id}: warning lacks owner or mitigation`))
+  const hardeningChecks = all.filter((criterion) => criterion.id.startsWith('hardening-'))
+  const hardeningPassed = hardeningChecks.filter((criterion) => criterion.passed).length
+  const externalBlocked = all.some((criterion) => !criterion.id.startsWith('hardening-') && !criterion.passed)
+    || warningFailures.length > 0
   const ready = failedCriteria.length === 0
   const decision = ready ? 'GO' : 'NO-GO'
   const lines = [
@@ -116,6 +136,8 @@ export function buildReleaseQualification(input: ReleaseQualificationInput, eval
     `- Evaluated: ${evaluatedAt}`,
     `- Owner: ${input.owner}`,
     `- Criteria: ${all.length - failedCriteria.length}/${all.length} passed`,
+    `- Automated repository hardening: ${hardeningPassed === hardeningChecks.length ? 'PASS' : 'BLOCKED'} (${hardeningPassed}/${hardeningChecks.length})`,
+    `- External release evidence: ${externalBlocked ? 'BLOCKED' : 'COMPLETE'}`,
     '',
     '## Failed criteria',
     ...(failedCriteria.length ? failedCriteria.map((item) => `- ${item}`) : ['- None']),

@@ -2,19 +2,29 @@
 
 截至 2026-09-01。
 
+## 本日收口：Release qualification hardening（repository resolved；Paid Beta NO-GO）
+
+`.scratch/release-qualification-hardening` 20/20 tickets 已完成 repository qualification：verified promotion receipt、main-only credential vault、atomic settings recovery、merge-base complexity、shipped-runtime CI coverage、route lazy chunks、四個 control-flow prefactors、smoke ownership registry 與 production unused-code zero budget 均已接入 owning gates。Readiness 固定為 `compile success` → `deterministic qualification` → `platform qualification` → `release-ready` → `Paid Beta GO`；前一階段綠燈不得推導後一階段。
+
+`npm run build`／`dist:*` 仍是 compilation/packaging-only；`npm run qualify:deterministic` 不啟動 Electron App、不要求 signing credentials；`npm run smoke` 是完整 repository qualification；macOS/Windows signed installer、notarization、clean-machine 與 update lifecycle 是 explicit platform qualification。plain-browser 只供 UI/degraded preview，不是 production Pi Core Host execution。
+
+Paid Beta qualifier 已重跑並保存在 `app/release-evidence/paid-beta-qualification.md`，目前為 **NO-GO（0/49）**：Automated repository hardening 因本機沒有 workflow-owned coherent receipt 為 BLOCKED（0/6），external signed-platform evidence 亦為 BLOCKED。Repository effort resolved 不會覆蓋這個 release blocker，也不得宣稱 release-ready 或 Paid Beta GO。
+
 ## 本日進展：Release qualification deterministic gate
+
+CLI subscription OAuth rotation follow-up 已收口為 `.scratch/cli-subscription-pi-loop` #07。Pi Host 現在以 persisted `followCliOAuthAccount` policy（預設開啟）在 startup、Settings 與 pre-turn 邊界跟隨同一 Codex／Claude CLI authority 的 token rotation／帳號切換；opt-out 時跨帳號仍 fail-closed。credential refresh 序列化且 atomic temp path 以 UUID 隔離。真機隔離 E2E 先重現 invalidated OAuth，再在同一長駐 Host 更新目前 CLI credential 後取得 answered settlement；build、oxlint、focused smokes 與 Electron Settings lifecycle E2E 全綠。
 
 `.scratch/release-qualification-hardening` #05–#09 resolved。新增共享 `npm run qualify:deterministic`，在 PR CI 與 release package build 前 blocking 執行 single Task ingress、Pi ownership／contract、Host-owned collaboration、security drift、settings durability 與既有 stable guards。Command-level smoke 於無 display、無 signing credentials 環境執行完整 graph，並透過 child-process sentinel 證明沒有 Electron App launch；invalid build-flavor fixture 證明失敗可辨識且 fail closed。`check` 委派此 owner 後仍保留 icons、compile 與 built lifecycle，`build`／`dist:*` 仍是純 compilation／packaging contract。
 
 Telegram、Webhook 與 custom-tool credentials 現在以 stable `credential:*` refs 儲存於 main-process OS-backed vault；renderer settings、localStorage、bundle、Pi catalog 與 MCP session metadata 只保留設定狀態或 placeholder。Custom-tool HTTP、bash、MCP 於 main execution seam 最後一刻解析，成功／失敗回應、結構化值與截斷輸出均不反射 raw token；credential rotate／clear／legacy import 會失效既有 MCP session 並刷新 metadata projection。
 
-舊 flat／encrypted custom-tool fields 僅由 vault-first migration ingress 接受，寫入與讀回驗證完成後才 scrub；safeStorage unavailable、disk write failure 與 parse failure 均保留唯一舊 copy 並 fail closed。一般 settings 已改由 main-process `SettingsPersistence` 以 0600 temp、fsync、atomic rename、directory flush 與 0600 last-good 儲存；讀取能區分 no-settings、corrupt-primary 與 recovered-last-good，metadata-only diagnostics 不包含設定內容或路徑，startup recovery evidence 亦不會被後續 primary read 抹除。temp write 前／中、rename 前／後與 preparation failure matrix 加上 fresh restart，證明只會恢復完整舊／新 generation；credential migration 的 last-good 同步 scrub raw secret。Focused deterministic/security/release evidence、`npm run build` 與完整 `npm run smoke` 全綠。下一 frontier 為 #10 merge-base complexity qualification；Paid Beta 仍是 NO-GO（0/43）。
+舊 flat／encrypted custom-tool fields 僅由 vault-first migration ingress 接受，寫入與讀回驗證完成後才 scrub；safeStorage unavailable、disk write failure 與 parse failure 均保留唯一舊 copy 並 fail closed。一般 settings 已改由 main-process `SettingsPersistence` 以 0600 temp、fsync、atomic rename、directory flush 與 0600 last-good 儲存；讀取能區分 no-settings、corrupt-primary 與 recovered-last-good，metadata-only diagnostics 不包含設定內容或路徑，startup recovery evidence 亦不會被後續 primary read 抹除。temp write 前／中、rename 前／後與 preparation failure matrix 加上 fresh restart，證明只會恢復完整舊／新 generation；credential migration 的 last-good 同步 scrub raw secret。Focused deterministic/security/release evidence、`npm run build` 與完整 `npm run smoke` 全綠；後續 #10 merge-base complexity qualification 亦已隨本 effort 收口。Paid Beta 仍是 NO-GO（0/49）。
 
 ## 本日資格重跑：External CLI 與 release gate
 
 `app/scripts/qualify-external-cli-real.mts` 已從 shipped admission／adapter owner 重跑並保存 metadata-only evidence。Codex CLI 0.150.1 process exit 0，active checkpoint、restart projection 與 Turn Record 通過，但原生 `AGENTS.md` marker 未出現，因此仍為 `native_discovery_unproven`；Claude Code 2.1.246 實際啟動後回報 `auth_unavailable`。兩者皆維持 unqualified，未由 process success 推導 DoD。本輪依使用者指示未做 Linux bwrap，也未安裝或登入 Grok／Gemini／Cursor。
 
-Paid Beta release qualifier 同日重跑為 **NO-GO（0/43）**：沒有 signed/notarized artifact、clean-machine install、N-1→N、entitlement、workflow 與 trust publication evidence。報告保存在 `release-evidence/paid-beta-qualification.md`；不得發佈或宣稱 ready。
+Paid Beta release qualifier 最新重跑為 **NO-GO（0/49）**：沒有 signed/notarized artifact、clean-machine install、N-1→N、entitlement、workflow、trust publication 與 coherent hardening receipt evidence。報告保存在 `app/release-evidence/paid-beta-qualification.md`；不得發佈或宣稱 ready。
 
 ## 本日收口：Host-owned Agent Collaboration
 

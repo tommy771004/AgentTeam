@@ -86,10 +86,20 @@ try {
     last_refresh: '2026-08-15T12:00:00.000Z',
   }))
   const conflict = await bootstrapPiUserConfig()
-  assert.deepEqual(conflict.oauth.conflicts, ['openai-codex'])
-  const conflictPreservedAuth = JSON.parse(await readFile(join(nativeDir, 'auth.json'), 'utf8')) as Record<string, Record<string, unknown>>
-  assert.equal(conflictPreservedAuth['openai-codex'].accountId, 'acct-smoke')
-  assert.equal(conflictPreservedAuth['openai-codex'].refresh, 'refresh-two')
+  assert.deepEqual(conflict.oauth.importedProviders, ['openai-codex'])
+  const followedAuth = JSON.parse(await readFile(join(nativeDir, 'auth.json'), 'utf8')) as Record<string, Record<string, unknown>>
+  assert.equal(followedAuth['openai-codex'].accountId, 'acct-other')
+  assert.equal(followedAuth['openai-codex'].refresh, 'refresh-other')
+
+  await writeFile(codexAuthPath, JSON.stringify({
+    tokens: { access_token: secondAccess, refresh_token: 'refresh-two', account_id: 'acct-smoke' },
+    last_refresh: '2026-08-15T13:00:00.000Z',
+  }))
+  const optedOut = await bootstrapPiUserConfig({ followCliAccount: false })
+  assert.deepEqual(optedOut.oauth.conflicts, ['openai-codex'])
+  const optedOutAuth = JSON.parse(await readFile(join(nativeDir, 'auth.json'), 'utf8')) as Record<string, Record<string, unknown>>
+  assert.equal(optedOutAuth['openai-codex'].accountId, 'acct-other')
+  assert.equal(optedOutAuth['openai-codex'].refresh, 'refresh-other')
 } finally {
   for (const key of envKeys) {
     const value = previousEnv[key]

@@ -1,6 +1,6 @@
 # CLI 訂閱 OAuth 餵進 Pi Core loop：訂閱模型成為 builtin 的一等連線
 
-Status: 可交給代理
+Status: resolved
 
 Source：ADR-0052（accepted，`docs/adr/0052-route-cli-subscription-oauth-into-the-pi-core-loop.md`）與 2026-08-26 的程式碼調查。本規格是該 ADR 的實作。
 
@@ -21,7 +21,7 @@ Source：ADR-0052（accepted，`docs/adr/0052-route-cli-subscription-oauth-into-
 
 **訂閱連線 = builtin loop 的原生 provider 連線。** 使用者在 Settings 選擇 subscription 連線（provider id 直接為 `openai-codex` / `anthropic`），不需要 baseUrl 與 apiKey；run 仍走 Pi Core Host 的 tool loop、approvals、settlement 與 Turn Record，`executionKind: 'loop'`、DoD 語意、能力矩陣全部不變。
 
-**Fail-closed 選擇。** 同步衝突（兩個不同帳號）或無憑證的 provider 一律呈現為明確不可用並附原因；不靜默退回 env key、不換 provider、Host 不仲裁——衝突必須由使用者在 Settings 明確解決。
+**CLI account authority 是明確的 Host policy。** `followCliOAuthAccount` 預設開啟；同一 CLI source 的 token rotation 與帳號切換會在 startup、Settings refresh/update 與 pre-turn 邊界同步，長駐 Host 不需重啟。使用者可關閉此 policy，關閉後跨帳號切換 fail-closed 為 conflict。非同 source credential、未登入 provider 與 ambient key fallback 仍不會被自動採用。
 
 **模型列舉來自 Host。** 訂閱 provider 的可選模型由 Host 端 ModelRuntime 投影為 bounded list（id、label、context window、reasoning flag），不再打 HTTP `/v1/models`；離線時退回最後快取的 catalog 並如實標示。
 
@@ -35,7 +35,7 @@ Source：ADR-0052（accepted，`docs/adr/0052-route-cli-subscription-oauth-into-
 4. As a 使用者，I want 訂閱 provider 的模型清單直接列出, so that 我不用猜 model id 字串。
 5. As a 重度使用者，I want 訂閱 run 與 API-key run 有完全相同的 approval／gate／record 行為, so that 切換連線不改變治理語意。
 6. As a 維護者，I want token 永遠不跨 IPC 進 renderer, so that 安全模型不被這次功能破壞。
-7. As a 維護者，I want 衝突由使用者解決而非系統自動挑選帳號, so that 不會出現「默默換了帳號」的事故。
+7. As a 使用者，I want 明確選擇是否跟隨目前 CLI 登入帳號, so that 預設可無重啟接續 CLI rotation，opt-out 時仍保有 account identity 的 fail-closed 邊界。
 8. As a 使用者，I want UI 如實區分「Pi loop + 訂閱模型」與「vendor agent」, so that 我對工具行為的期待是正確的。
 9. As a 離線使用者，I want Host 無法更新 catalog 時仍能看到最後快取清單並標示過期, so that 選擇面不會整個消失。
 10. As a 貢獻者，I want fail-closed 規則集中在單一純投影模組, so that 未來新增 native provider 時複製的是同一份決策而不是散落的 if。
@@ -84,3 +84,4 @@ Source：ADR-0052（accepted，`docs/adr/0052-route-cli-subscription-oauth-into-
 | 04 | [模型列舉整合 + fail-closed 狀態呈現](issues/04-model-picker-failclosed.md) | 03 |
 | 05 | [誠實標示 drift guards](issues/05-honest-labeling-guards.md) | 03 |
 | 06 | [qualification](issues/06-qualification.md) | 01–05 |
+| 07 | [CLI OAuth rotation 與帳號跟隨政策](issues/07-cli-oauth-rotation-and-account-following.md) | 06 |

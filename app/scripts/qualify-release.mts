@@ -13,8 +13,11 @@ const input = await buildQualificationInputFromEvidence({
   releaseVersion: argument('--version', process.env.RELEASE_VERSION || ''),
   owner: argument('--owner', process.env.RELEASE_OWNER || 'release-engineering'),
   repoRoot: path.resolve(process.cwd(), '..'),
+  hardeningTrust: {
+    publicKeyPem: String(process.env.RELEASE_HARDENING_PUBLIC_KEY ?? ''),
+    keyId: String(process.env.RELEASE_HARDENING_KEY_ID ?? ''),
+  },
 })
 const qualification = await writeQualificationReport(input, reportPath)
 console.log(qualification.report)
 if (qualification.decision !== 'GO') process.exitCode = 1
-

@@ -44,6 +44,12 @@ import { clampContinueFreshnessMs, isSnapshotFresh } from './autoContinueFreshne
 import { applyComposerApprovalHandoff } from './composerApprovalHandoff.ts'
 import { followUpActionForRunner, submitHostInteractiveFollowUp } from './interactiveFollowUp.ts'
 import {
+  decideBusyPolicy,
+  decideExternalQueueSnapshotAdmission,
+  decideInitialTaskRunAdmission,
+  initialTaskRunAdmissionResult,
+} from './taskRunAdmission.ts'
+import {
   nonCanonicalReviewAdmission,
   type ReviewAdmissionSnapshot,
   type ReviewFileManifestEntry,
@@ -1929,13 +1935,6 @@ async function persistArtifactIndexForRun(args: {
   }
 }
 
-function isUnexpectedQueuedDuplicate(
-  opts: ExternalRunOpts,
-  queued: { id: string } | undefined,
-): queued is { id: string } {
-  return Boolean(queued && !opts._fromQueue)
-}
-
 function activeSameThreadRunId(opts: ExternalRunOpts, busyRunId: string | null | undefined, activeRunIds: readonly string[]): string | undefined {
   return opts.reuseThreadId && busyRunId && activeRunIds.includes(busyRunId) ? busyRunId : undefined
 }
@@ -1943,24 +1942,6 @@ function activeSameThreadRunId(opts: ExternalRunOpts, busyRunId: string | null |
 function admittedObjective(opts: ExternalRunOpts): string {
   const objective = opts.objective.trim()
   return objective || (opts.attachments?.length ? '請分析我附上的圖片或檔案。' : '')
-}
-
-function frozenBusyPolicy(opts: ExternalRunOpts): BusyPolicy | undefined {
-  if (opts.followUpAction === 'queue') return 'queue'
-  if (opts.followUpAction === 'takeover') return 'steer'
-  return undefined
-}
-
-function busyPolicyForRun(input: {
-  opts: ExternalRunOpts
-  followUpMode: LlmSettings['followUpMode']
-  resolve: (sourceKind: NonNullable<ExternalRunOpts['sourceKind']>, followUpMode: LlmSettings['followUpMode']) => BusyPolicy
-  shouldEnqueue: (opts: ExternalRunOpts) => boolean
-}): BusyPolicy {
-  const frozen = frozenBusyPolicy(input.opts)
-  if (frozen) return frozen
-  if (input.opts.sourceKind) return input.resolve(input.opts.sourceKind, input.followUpMode)
-  return input.shouldEnqueue(input.opts) ? 'queue' : 'reject'
 }
 
 function queuedFollowUpCount(queue: unknown, threadId: string): number {
@@ -2096,13 +2077,18 @@ async function coordinateTaskRun(
   opts = normalizeTaskRunInput(opts)
   const runId = opts.runId || `run_${uuid().slice(0, 12)}`
   const objective = admittedObjective(opts)
-  if (!objective) {
-    return {
-      path: 'builtin',
-      status: 'failed',
-      error: 'empty objective',
-      threadId: null,
-    }
+  const objectiveAdmission = decideInitialTaskRunAdmission({
+    objective,
+    runId,
+    hasExplicitRunId: Boolean(opts.runId),
+    reuseThreadId: opts.reuseThreadId,
+    sourceKind: opts.sourceKind,
+    fromQueue: opts._fromQueue === true,
+    delegateEnabled: true,
+    activeRunIds: [],
+  })
+  if (objectiveAdmission.kind !== 'proceed') {
+    return initialTaskRunAdmissionResult(objectiveAdmission, { runId, originalRunId: opts.runId, reuseThreadId: opts.reuseThreadId })
   }
 
   const [
@@ -2142,45 +2128,19 @@ async function coordinateTaskRun(
   } = lifecycleHelpers
 
   const queuedDuplicate = listQueuedRuns().find((queued) => queued.runId === runId)
-  if (isUnexpectedQueuedDuplicate(opts, queuedDuplicate)) {
-    return {
-      path: 'builtin',
-      status: 'skipped',
-      error: `runId ${runId} 已在佇列中，略過重入。`,
-      threadId: opts.reuseThreadId || null,
-      runId,
-      skipped: true,
-      skipReason: 'duplicate',
-      queued: true,
-      queueId: queuedDuplicate.id,
-    }
-  }
-
-  // Background delegates can sit in the queue while Settings changes. Recheck
-  // the opt-in at drain time so disabling Sub Agent cannot start a stale child run.
-  if (
-    opts.sourceKind === 'delegate' &&
-    useSettingsStore.getState().settings.subAgentsEnabled !== true
-  ) {
-    return {
-      path: 'builtin',
-      status: 'failed',
-      error: 'Sub Agent 功能目前已關閉，委派未啟動。',
-      threadId: null,
-      runId: opts.runId,
-    }
-  }
-
-  if (opts.runId && useAgentStore.getState().activeRunIds.includes(runId)) {
-    return {
-      path: 'builtin',
-      status: 'skipped',
-      error: `runId ${runId} 已在執行中，略過重入。`,
-      threadId: opts.reuseThreadId || null,
-      runId,
-      skipped: true,
-      skipReason: 'duplicate',
-    }
+  const initialAdmission = decideInitialTaskRunAdmission({
+    objective,
+    runId,
+    hasExplicitRunId: Boolean(opts.runId),
+    reuseThreadId: opts.reuseThreadId,
+    sourceKind: opts.sourceKind,
+    fromQueue: opts._fromQueue === true,
+    queuedDuplicateId: queuedDuplicate?.id,
+    delegateEnabled: useSettingsStore.getState().settings.subAgentsEnabled === true,
+    activeRunIds: useAgentStore.getState().activeRunIds,
+  })
+  if (initialAdmission.kind !== 'proceed') {
+    return initialTaskRunAdmissionResult(initialAdmission, { runId, originalRunId: opts.runId, reuseThreadId: opts.reuseThreadId })
   }
 
   const scheduleTriggerResolution = resolveScheduleTrigger(opts)
@@ -2273,7 +2233,12 @@ async function coordinateTaskRun(
   }
   const admissionSettings = useSettingsStore.getState().settings
   if (opts.runner && opts.runner !== 'builtin') {
-    if (opts._fromQueue && !Array.isArray(opts.overrides?.externalCliRequiredConnectors)) {
+    const queueSnapshotAdmission = decideExternalQueueSnapshotAdmission({
+      runner: opts.runner,
+      fromQueue: opts._fromQueue === true,
+      hasConnectorSnapshot: Array.isArray(opts.overrides?.externalCliRequiredConnectors),
+    })
+    if (queueSnapshotAdmission.kind === 'missing-connector-snapshot') {
       const rejected: ExternalRunResult = {
         path: 'cli',
         status: 'failed',
@@ -2301,11 +2266,13 @@ async function coordinateTaskRun(
   const agent = useAgentStore.getState()
   let capacity = await checkRunCapacity(runId, opts.reuseThreadId)
   if (!capacity.allowed) {
-    const policy = busyPolicyForRun({
-      opts,
-      followUpMode: useSettingsStore.getState().settings.followUpMode,
-      resolve: resolveBusyPolicy,
-      shouldEnqueue: shouldEnqueueWhenBusy,
+    const policy: BusyPolicy = decideBusyPolicy({
+      followUpAction: opts.followUpAction,
+      sourceKind: opts.sourceKind,
+      resolvedSourcePolicy: opts.sourceKind
+        ? resolveBusyPolicy(opts.sourceKind, useSettingsStore.getState().settings.followUpMode)
+        : undefined,
+      shouldEnqueue: shouldEnqueueWhenBusy(opts),
     })
 
     const thrBusy = useThreadStore.getState()

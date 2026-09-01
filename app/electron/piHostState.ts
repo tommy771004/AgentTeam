@@ -52,6 +52,7 @@ function normalizeStoredSettings(settings: PiSettings): PiSettings {
     approvalMode: settings.approvalMode === 'always' || settings.approvalMode === 'full' ? settings.approvalMode : DEFAULT_PI_SETTINGS.approvalMode,
     bashRequireAsk: settings.bashRequireAsk !== false,
     unattended: settings.unattended === true,
+    followCliOAuthAccount: settings.followCliOAuthAccount !== false,
     workspaceTextSearch: settings.workspaceTextSearch === true,
   }
 }
@@ -65,6 +66,7 @@ function hasRuntimeOverride(settings: PiSettings): boolean {
     || settings.approvalMode !== DEFAULT_PI_SETTINGS.approvalMode
     || settings.bashRequireAsk !== DEFAULT_PI_SETTINGS.bashRequireAsk
     || settings.unattended !== DEFAULT_PI_SETTINGS.unattended
+    || settings.followCliOAuthAccount !== DEFAULT_PI_SETTINGS.followCliOAuthAccount
     || settings.workspaceTextSearch !== DEFAULT_PI_SETTINGS.workspaceTextSearch
 }
 

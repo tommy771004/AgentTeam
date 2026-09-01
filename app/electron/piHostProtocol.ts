@@ -341,7 +341,11 @@ export type PiHostEvent =
     }
   | {
       event: 'host/approval-requested'
-      payload: { runId: string; sessionId: string; tool: string; callId: string; args?: Record<string, unknown>; reason?: string; timeoutMs: number }
+      payload: { runId: string; sessionId: string; threadId?: string; tool: string; callId: string; args?: Record<string, unknown>; reason?: string; timeoutMs: number }
+    }
+  | {
+      event: 'host/approval-resolved'
+      payload: { runId: string; sessionId: string; callId: string; decision: 'allow' | 'deny' | 'timeout' | 'cancel' }
     }
   | {
       event: 'host/extension'
@@ -473,6 +477,7 @@ import { PiAgentCommunicationDomain, type PiAgentCommunicationState } from './pi
 import { agentLifecycleEventForSession, hasRecordedAgentLifecycle, recordAgentCollaborationEvent, recordAgentLifecycle } from './piAgentLifecycleRecord.ts'
 import { handlePiHostSessionDomain } from './piHostSessionDomain.ts'
 import { handlePiHostToolDomain } from './piHostToolDomain.ts'
+import { handlePiHostTurnDomain, type PiHostTurnInterruptReason } from './piHostTurnDomain.ts'
 import { validatePiToolArguments } from './piToolArguments.ts'
 import { writeToolOutputSpill } from './attachmentStore.ts'
 import { revokeBuiltinShellSandboxEvidence, verifyBuiltinShellSandbox, type BuiltinShellSandboxVerification } from './piBuiltinShellSandbox.ts'
@@ -826,6 +831,7 @@ const errorResponse = (
 /** A session is the serialization boundary for Pi turns. */
 const activeSessionRuns = new Map<string, { runId: string; cancelled: boolean; interrupt?: PiTurnInterruptReason }>()
 let packageMutationInFlight = false
+
 const PI_HOST_TOOL_UPDATE_MAX_BYTES = 16_384
 
 async function prepareHostLlmEgress(input: {
@@ -4864,6 +4870,1037 @@ function handlePiHostRequestWithFollowUpDedupe(
     ?? handlePiHostRequest(state, request, emit, checkpointWriter)
 }
 
+function admittedTurnContextPolicy(session: SessionRecord, input: Partial<InternalPiHostRequest>, cwd: string) {
+  const requested = parsePiTurnContextPolicy(input.params?.contextPolicy)
+  if (!session.agentAdmission) return requested
+  return {
+    ...requested,
+    memoryEnabled: false,
+    memoryWriteEnabled: false,
+    referenceChatHistory: false,
+    temporary: true,
+    project: cwd,
+    outboundShellMode: session.agentAdmission.policy.outbound || 'off',
+  }
+}
+
+function canonicalTurnWorkspace(cwd: string, project: string | undefined) {
+  try {
+    const value = canonicalProjectId(cwd)
+    if (project && canonicalProjectId(project) !== value) return { error: 'Memory project must match the admitted workspace' }
+    return { value }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Invalid admitted workspace' }
+  }
+}
+
+function resolveTurnInstructionSnapshot(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  canonicalWorkspace: ReturnType<typeof canonicalProjectId>,
+  cwd: string,
+  emit?: (message: PiHostMessage) => void,
+) {
+  return Promise.all([
+    state.instructionRepository.read(),
+    state.instructionRepository.listAuthorizedIncludeTargets(),
+  ]).then(async ([instructions, authorizedIncludeTargets]) =>
+    observeInstructionProjection(state, await resolveInstructionSnapshot({
+      globalRevision: instructions.revision,
+      globalCustomInstructions: instructions.globalCustomInstructions,
+      advancedPersonalityInstructions: instructions.advancedPersonalityInstructions,
+      globalCustomInstructionsPresence: instructions.globalCustomInstructionsPresence,
+      advancedPersonalityInstructionsPresence: instructions.advancedPersonalityInstructionsPresence,
+      personality: instructions.personality,
+      aboutUser: instructions.aboutUser,
+      responseStyle: instructions.responseStyle,
+      projectRoot: canonicalWorkspace,
+      workPath: cwd,
+      fallbackFilenames: Array.isArray(input.params?.instructionFallbackFilenames)
+        ? input.params.instructionFallbackFilenames.filter((item): item is string => typeof item === 'string')
+        : undefined,
+      authorizedIncludeTargets,
+    }), emit),
+  )
+}
+
+function admitPiHostTurnRequest(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+) {
+  if (packageMutationInFlight) return { response: [errorResponse(id, 'busy', 'A Pi package mutation is in progress')] }
+  const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
+  const prompt = typeof input.params?.prompt === 'string' ? input.params.prompt : ''
+  const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
+  if (!session || !prompt.trim()) return { response: [errorResponse(id, 'invalid_request', 'sessionId and prompt are required')] }
+  const runId = typeof input.params?.runId === 'string' ? input.params.runId : `pi-run-${Date.now()}`
+  if (state.attachmentJournal.get(runId)) {
+    return { response: [errorResponse(id, 'invalid_request', `Pi run already exists: ${runId}`)] }
+  }
+  const activeRun = activeSessionRuns.get(sessionId)
+  if (activeRun && activeRun.runId !== runId) {
+    return { response: handleActiveTurnSubmission({ state, request: input, id, sessionId, runId, prompt, activeRun, emit }) }
+  }
+  const explicitWorkspaceRoot = typeof input.params?.cwd === 'string' && input.params.cwd.trim()
+    ? input.params.cwd
+    : undefined
+  const workspaceAdmission = admittedTurnWorkspace(session, explicitWorkspaceRoot)
+  if ('error' in workspaceAdmission) return { response: [errorResponse(id, 'forbidden', workspaceAdmission.error)] }
+  const cwd = workspaceAdmission.cwd
+  const contextPolicy = admittedTurnContextPolicy(session, input, cwd)
+  const workspace = canonicalTurnWorkspace(cwd, contextPolicy.project)
+  if (workspace.error) return { response: [errorResponse(id, 'invalid_request', workspace.error)] }
+  const canonicalWorkspace = workspace.value!
+  const memoryAccess: MemoryAccessContext = {
+    origin: 'runtime', runId, sessionId,
+    memoryReadEnabled: contextPolicy.memoryEnabled,
+    memoryWriteEnabled: contextPolicy.memoryEnabled && contextPolicy.memoryWriteEnabled,
+    temporary: contextPolicy.temporary,
+    canonicalProject: canonicalWorkspace,
+  }
+  const rawInstructionSnapshotPromise = resolveTurnInstructionSnapshot(state, input, canonicalWorkspace, cwd, emit)
+  return { value: { sessionId, prompt, session, runId, explicitWorkspaceRoot, cwd, contextPolicy, canonicalWorkspace, memoryAccess, rawInstructionSnapshotPromise } }
+}
+
+function compileAdmittedTurnSettings(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  session: SessionRecord,
+) {
+  let settings = session.agentAdmission
+    ? compileEffectiveAgentProfile(state.snapshot.settings, session.profile as Partial<PiSettings>, {})
+    : state.snapshot.settings
+  if (input.params?.profile && typeof input.params.profile === 'object') {
+    try {
+      settings = compileEffectiveAgentProfile(settings, validatePiSettingsPatch(input.params.profile as Record<string, unknown>), {})
+    } catch (error) {
+      return { response: [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid Pi turn profile')] }
+    }
+  }
+  if (session.agentAdmission) {
+    const policy = admittedChildTurnPolicy(session.agentAdmission, settings)
+    if (!policy || !isRestrictiveAgentPolicy(session.agentAdmission.policy, policy)) {
+      return { response: [errorResponse(id, 'forbidden', 'Child turn profile would widen its Host-admitted policy')] }
+    }
+  }
+  return { value: settings }
+}
+
+function configurePiHostTurn(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  session: SessionRecord,
+  runId: string,
+  contextPolicy: ReturnType<typeof parsePiTurnContextPolicy>,
+  rawInstructionSnapshotPromise: ReturnType<typeof resolveTurnInstructionSnapshot>,
+) {
+  const patternValue = input.params?.pattern
+  const pattern: PiLoopPattern = ['Goal-based', 'Time-based', 'Proactive'].includes(String(patternValue))
+    ? patternValue as PiLoopPattern
+    : 'Turn-based'
+  const maxIterations = typeof input.params?.maxIterations === 'number' ? input.params.maxIterations : 1
+  const iterationLimit = clampPiIterations(maxIterations)
+  const definitionOfDone = admittedDefinitionOfDone(input.params?.definitionOfDone)
+  const requestedAgentMode = admittedAgentMode(input.params?.profile)
+  const planCompletionAction = admittedPlanCompletionAction(input.params?.profile)
+  const requestedProfile = admittedProfileObject(input.params?.profile)
+  const admittedProfile = session.agentAdmission
+    ? { ...(session.profile || {}), ...requestedProfile }
+    : requestedProfile
+  const compiled = compileAdmittedTurnSettings(state, input, id, session)
+  if (compiled.response) return { response: compiled.response }
+  const turnSettings = compiled.value!
+  const turnActiveToolsRestricted = turnSettings.activeTools.length > 0
+    || Object.prototype.hasOwnProperty.call(admittedProfile, 'activeTools')
+    || Boolean(session.agentAdmission)
+  const instructionSnapshotPromise = rawInstructionSnapshotPromise.then((snapshot) =>
+    sanitizeInstructionSnapshotForProvider({
+      snapshot,
+      mode: contextPolicy.outboundShellMode,
+      connectionId: contextPolicy.outboundConnectionId,
+      provider: turnSettings.provider,
+      runId,
+    }),
+  )
+  return { value: {
+    pattern, maxIterations, iterationLimit, definitionOfDone, requestedAgentMode, planCompletionAction,
+    admittedProfile, turnSettings, turnActiveToolsRestricted, instructionSnapshotPromise,
+  } }
+}
+
+function loadTurnCapabilities(input: {
+  state: HostState
+  request: Partial<InternalPiHostRequest>
+  session: SessionRecord
+  sessionId: string
+  runId: string
+  settings: PiSettings
+  explicitWorkspaceRoot?: string
+  turnEvents: PiHostEvent[]
+  emit?: (message: PiHostMessage) => void
+}) {
+  const workspaceTextSearchRun = bindWorkspaceTextSearchRun(input.sessionId, {
+    runId: input.runId,
+    enabled: input.settings.workspaceTextSearch === true,
+    workspaceRoot: input.explicitWorkspaceRoot,
+  })
+  const preloaded = Array.isArray(input.request.params?.preloadedCapabilities)
+    ? input.request.params.preloadedCapabilities
+    : []
+  for (const capabilityId of preloaded) {
+    if (typeof capabilityId !== 'string') continue
+    if (isWorkspaceTextSearchCapability(capabilityId) && !workspaceTextSearchRun.available) continue
+    try { input.state.capabilities.load(capabilityId, input.sessionId) } catch { /* unknown ids remain unavailable */ }
+  }
+  const unlockedTools = input.state.capabilities.activeTools(input.sessionId)
+    .filter((tool) => workspaceTextSearchRun.available || !isWorkspaceTextSearchTool(tool))
+  const mcpCapabilityLoaded = input.state.capabilities.catalog(input.sessionId)
+    .find((capability) => capability.id === 'mcp-bridge')?.deferred === false
+  const visibleSkills = discoveredPiSkills().skills.filter((skill) => skill.name && !skill.disableModelInvocation)
+  const readActive = input.settings.activeTools.length === 0 || input.settings.activeTools.includes('read')
+  if (visibleSkills.length > 0 && !readActive) {
+    recordTurnEntry(input.sessionId, {
+      kind: 'notice', source: 'host', topic: 'skills-unavailable',
+      text: `技能在此 run 不可用：read 工具未啟用，系統提示無法列出 ${visibleSkills.length} 個技能（${visibleSkills.slice(0, 3).map((skill) => skill.name).join('、')}${visibleSkills.length > 3 ? ' 等' : ''}）。重新啟用 read 後即自動恢復。`,
+    })
+    const event: PiHostEvent = { event: 'host/context', payload: { runId: input.runId, sessionId: input.sessionId, phase: 'skills-unavailable', recalled: visibleSkills.length } }
+    if (input.emit) input.emit(event)
+    else input.turnEvents.push(event)
+  }
+  return { workspaceTextSearchRun, unlockedTools, mcpCapabilityLoaded }
+}
+
+function prepareTurnWorkingState(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  session: SessionRecord,
+  runId: string,
+  prompt: string,
+  checkpointWriter?: CompactionCheckpointWriter,
+) {
+  const goalAdmission = admitRequestedWorkingGoals(session, input)
+  if (goalAdmission.error) return { response: [errorResponse(id, 'invalid_request', goalAdmission.error)] }
+  if (input.params?.resumeFromRunId !== undefined
+    && (requestedWorkingGoal(input) !== undefined || goalAdmission.goals !== undefined)) {
+    return { response: [errorResponse(id, 'invalid_request', 'resume cannot replace checkpoint Working State goals')] }
+  }
+  const resumed = resumeWorkingState({
+    request: input, session, runId, checkpoints: checkpointWriter, packages: state.memoryControlPackages,
+  })
+  if (resumed.error) return { response: [errorResponse(id, 'invalid_request', resumed.error)] }
+  const initialWorkingState = resumed.state
+    || workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input), goalAdmission.goals)
+  const admittedPackage = admitTurnMemoryControlPackage(state, input.params, resumed.governingPackage)
+  const governingPackage = memoryControlPackageIdentity(admittedPackage)
+  const memoryControl = compileMemoryControlRuntime(admittedPackage, initialWorkingState.goals.length)
+  return { value: { resumed, initialWorkingState, governingPackage, memoryControl } }
+}
+
+function interruptPiHostTurnRequest(
+  id: string | number,
+  runId: string,
+  reason: PiHostTurnInterruptReason,
+): PiHostMessage[] {
+  const orchestrationRun = [...activeSessionRuns.values()].find((run) => run.runId === runId)
+  if (orchestrationRun) orchestrationRun.interrupt = reason
+  const parked = interruptPiTurn(runId, reason)
+  return parked || orchestrationRun
+    ? [{ id, result: { runId, settlement: 'interrupted' as const, interruptReason: reason } }]
+    : [errorResponse(id, 'invalid_request', `Unknown Pi run: ${runId}`)]
+}
+
+function cancelPiHostTurnRequest(id: string | number, runId: string): Promise<PiHostMessage[]> {
+  const orchestrationRun = [...activeSessionRuns.values()].find((run) => run.runId === runId)
+  if (orchestrationRun) orchestrationRun.cancelled = true
+  const codeCancelled = cancelPiCodeMode(runId)
+  if (codeCancelled) cancelPiApprovalsForRun(runId)
+  const providerCancelled = cancelSubDesignProviderRun(runId)
+  return Promise.all([cancelPiTurn(runId), Promise.resolve(cancelPiTool(runId))])
+    .then(([turnCancelled, toolCancelled]) =>
+      turnCancelled || toolCancelled || codeCancelled || providerCancelled || Boolean(orchestrationRun)
+        ? [{ id, result: { runId, settlement: 'cancelled' as const } }]
+        : [errorResponse(id, 'invalid_request', `Unknown Pi run: ${runId}`)])
+}
+
+function submitPiHostTurn(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+  checkpointWriter?: CompactionCheckpointWriter,
+): PiHostMessage[] | Promise<PiHostMessage[]> {
+  const admission = admitPiHostTurnRequest(state, input, id, emit)
+  if (admission.response) return admission.response
+  const {
+    sessionId, prompt, session, runId, explicitWorkspaceRoot, cwd, contextPolicy,
+    canonicalWorkspace, memoryAccess, rawInstructionSnapshotPromise,
+  } = admission.value!
+  const configuration = configurePiHostTurn(state, input, id, session, runId, contextPolicy, rawInstructionSnapshotPromise)
+  if (configuration.response) return configuration.response
+  let {
+    turnSettings, turnActiveToolsRestricted,
+  } = configuration.value!
+  const {
+    pattern, maxIterations, iterationLimit, definitionOfDone, requestedAgentMode, planCompletionAction,
+    admittedProfile, instructionSnapshotPromise,
+  } = configuration.value!
+  let effectiveAgentMode: PiAgentMode = requestedAgentMode
+  let effectiveSettingsRevision = state.snapshot.cursor
+  const turnEvents: PiHostEvent[] = []
+  // Reloads advance this key, but the value is frozen here for the whole
+  // logical Host turn (including retries/iterations). Existing registered
+  // native tools therefore cannot change underneath an in-flight turn.
+  const mcpTurnGenerationKey = piMcpGenerationKey(
+    state.extensions.list().filter((extension) => extension.kind === 'mcp').map((extension) => extension.id),
+  )
+  // Per-thread prefs ride in as preloaded capabilities (issue 12): the
+  // renderer persists what last run loaded, and this run starts with those
+  // already active. The authority on what is active is still the Host —
+  // preload goes through capabilities/load, not a side door.
+  // One turn, one record. Opened here so every later entry — the model's,
+  // the tools', the approvals' — lands in the order it actually happened.
+  const working = prepareTurnWorkingState(state, input, id, session, runId, prompt, checkpointWriter)
+  if (working.response) return working.response
+  const { resumed, initialWorkingState, governingPackage, memoryControl } = working.value!
+  const recorder: ActiveTurnRecorder = {
+    cwd,
+    turn: nextTurnNumber(session.record),
+    step: 1,
+    entries: [],
+    toolIdentities: new Map(),
+    stateProposals: new Map(),
+    proposalState: initialWorkingState,
+    governingPackage,
+    memoryControl,
+    pendingMemoryControlAudits: new Set(),
+    memoryControlAuditsClosed: false,
+    seqBase: nextTurnRecordSeq(session.record),
+    reasoning: [],
+    // Only when there is a live stream to feed. A batch caller receives the
+    // whole committed slice in the turn's result, so republishing each entry
+    // there would be a second copy of the same account, not a live view.
+    ...(emit ? { publish: (entry: TurnRecordEntry) => emit({ event: 'host/record-append', payload: { runId, sessionId, entries: [entry] } }) } : {}),
+    onAppend: (entry) => state.attachmentJournal.append(runId, [entry], entry.seq),
+  }
+  state.attachmentJournal.begin({
+    runId,
+    sessionId,
+    threadId: session.threadId,
+    turn: recorder.turn,
+    learning: frozenRunLearningCandidate({
+      prompt,
+      runId,
+      sessionId,
+      canonicalProject: canonicalWorkspace,
+      memoryAccess,
+      automaticLearning: contextPolicy.memoryWriteEnabled,
+    }),
+  })
+  activeTurnRecorders.set(sessionId, recorder)
+  clearPiPlanGateCandidate(sessionId)
+  clearPiContinuationItems(sessionId)
+  restoreContinuationItems(sessionId, runId, resumed.continuationItems)
+  recordTurnEntry(sessionId, {
+    kind: 'turn-start',
+    source: 'host',
+    runner: 'builtin',
+    capabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
+    instructionDelivery: { mode: 'explicit', exactSnapshot: true, detail: 'Pi Host admission snapshot' },
+  })
+  recordRunningAgentLifecycle(state, sessionId, runId)
+  recordTurnEntry(sessionId, {
+    kind: 'notice',
+    source: 'host',
+    topic: 'agent-mode',
+    text: JSON.stringify({ requested: requestedAgentMode, effective: effectiveAgentMode, planCompletionAction }),
+  })
+  recordGoverningMemoryControlPackage(state, sessionId, governingPackage)
+  let workingState = initialWorkingState
+  recordTurnEntry(sessionId, { kind: 'working-state', source: 'host', state: workingState })
+  // Trusted Host verification starts from the admitted run/view. No field in
+  // contextPolicy, model text, or tool args can supply or deserialize it.
+  const shellSandboxVerification: Promise<BuiltinShellSandboxVerification> | undefined =
+    contextPolicy.outboundShellMode === 'required'
+      ? verifyBuiltinShellSandbox({ runId, viewRoot: contextPolicy.viewRoot || '' })
+      : undefined
+  const { workspaceTextSearchRun, unlockedTools, mcpCapabilityLoaded } = loadTurnCapabilities({
+    state, request: input, session, sessionId, runId, settings: turnSettings,
+    explicitWorkspaceRoot, turnEvents, emit,
+  })
+  const previousModel = typeof session.profile?.model === 'string' ? session.profile.model : undefined
+  const nextProfile: Record<string, unknown> = {
+    ...(session.profile || {}),
+    provider: turnSettings.provider,
+    model: turnSettings.model,
+    thinkingLevel: turnSettings.thinkingLevel,
+  }
+  let profileCommitted = false
+  let contractRevision: number | undefined
+  let contractDigest: string | undefined
+  let memoryContext = ''
+  let executionPrompt = childExecutionPrompt(session, prompt)
+  let contextPreflightComplete = false
+  let resolvedContextWindow = contextPolicy.contextWindowTokens
+  activeSessionRuns.set(sessionId, { runId, cancelled: false })
+  // In-turn pack tools read their coordinates and approval policy from this
+  // binding; it is cleared when the run ends so a stale policy can never
+  // answer for the next one.
+  bindPiSessionRun(sessionId, {
+    runId,
+    memoryControlPackage: governingPackage,
+    approvalMode: turnSettings.approvalMode,
+    unattended: turnSettings.unattended,
+    temporaryChat: contextPolicy.temporary,
+    memoryAccess,
+    frozenPolicy: freezePiRunPolicy({
+      agentMode: requestedAgentMode,
+      planCompletionAction,
+      approvalMode: turnSettings.approvalMode,
+      unattended: turnSettings.unattended,
+      projectRoot: cwd,
+      outboundMode: contextPolicy.outboundShellMode,
+      restrictedViewRoot: contextPolicy.viewRoot,
+      deniedTools: contextPolicy.deniedTools,
+      approvalTools: contextPolicy.approvalTools,
+      ...(contextPolicy.approvalTimeoutMs ? { approvalTimeoutMs: contextPolicy.approvalTimeoutMs } : {}),
+    }),
+    ...(resumed.state ? {
+      completedFileEffects: resumed.state.goals.flatMap((goal) =>
+        goal.status === 'done' && goal.completionPredicate?.kind === 'file-content'
+          ? [{ path: goal.completionPredicate.path, sha256: goal.completionPredicate.sha256 }]
+          : []),
+    } : {}),
+    ...(contextPolicy.gitPolicy ? { gitPolicy: contextPolicy.gitPolicy } : {}),
+    ...(contextPolicy.outboundShellMode ? { shellPolicy: {
+      effectiveMode: contextPolicy.outboundShellMode,
+      viewRoot: contextPolicy.viewRoot,
+      ...(shellSandboxVerification ? { sandboxVerification: shellSandboxVerification } : {}),
+    } } : {}),
+  })
+  // A stuck turn must not hold the conversation forever. Expiry walks the
+  // same safe-park path as a user's stop, so an in-flight tool still lands.
+  const timeoutMs = clampTurnTimeout(input.params?.timeoutMs)
+  const deadline = timeoutMs
+    ? armTurnDeadline(timeoutMs, () => {
+        const run = activeSessionRuns.get(sessionId)
+        if (run?.runId === runId && !run.interrupt) run.interrupt = 'timeout'
+        interruptPiTurn(runId, 'timeout')
+        const event: PiHostEvent = {
+          event: 'host/orchestration',
+          payload: { runId, sessionId, phase: 'cancelled', pattern, detail: 'interrupted:timeout' },
+        }
+        if (emit) emit(event)
+        else turnEvents.push(event)
+      }, turnDeadlineClock)
+    : undefined
+  const publishOrchestration = (phase: 'parse' | 'iterate' | 'dod' | 'replan' | 'settlement' | 'cancelled', iteration?: number, detail?: string) => {
+    const event: PiHostEvent = { event: 'host/orchestration', payload: { runId, sessionId, phase, iteration, pattern, detail } }
+    if (emit) emit(event)
+    else turnEvents.push(event)
+  }
+  publishOrchestration('parse', undefined, definitionOfDone || 'Pi turn settlement is the default DoD')
+  let providerHistory = session.messages
+  return instructionSnapshotPromise.then(async (instructionSnapshot) => {
+    // The immutable snapshot is admitted and recorded before any provider
+    // stage starts, including stages that stop the turn early.
+    recordTurnEntry(sessionId, { kind: 'instruction-snapshot', source: 'host', snapshot: instructionSnapshot })
+    if (contextPolicy.outboundShellMode && contextPolicy.outboundShellMode !== 'off') {
+      providerHistory = await Promise.all(session.messages.map(async (message) => ({
+        ...message,
+        content: await prepareHostLlmEgress({
+          text: message.content,
+          mode: contextPolicy.outboundShellMode,
+          connectionId: contextPolicy.outboundConnectionId,
+          provider: turnSettings.provider,
+          runId,
+        }),
+      })))
+      // Pi owns a persistent native conversation. Recreate it from the
+      // sanitized Host history so an older unprotected turn cannot re-enter
+      // a newly protected provider request through Pi's hidden history.
+      await disposePiSession(sessionId)
+      session.piSessionFile = undefined
+    }
+    // Keep the exact persistent context handed to Pi beside the admitted
+    // snapshot.  The session record must be able to reconstruct what the
+    // provider saw after history egress protection, rather than rereading
+    // the mutable session messages later.
+    recordTurnEntry(sessionId, {
+      kind: 'provider-history',
+      source: 'host',
+      messages: providerHistory.map((message) => ({ ...message })),
+    })
+    const pluginExecution = input.params?.pluginExecution
+      ? await executeSubDesignProviderStage({
+        request: input.params.pluginExecution,
+        runId,
+        threadId: session.threadId || sessionId,
+        projectRoot: cwd,
+        onEvent: (stageEvent) => {
+          const event: PiHostEvent = { event: 'host/pipeline-stage', payload: { ...stageEvent, sessionId } }
+          if (emit) emit(event)
+          else turnEvents.push(event)
+        },
+        onStreamEvent: (streamEvent) => {
+          const event: PiHostEvent = {
+            event: 'host/pipeline-stream',
+            payload: {
+              runId: streamEvent.runId,
+              sessionId,
+              stageId: streamEvent.stageId,
+              providerId: streamEvent.providerId,
+              update: streamEvent.update,
+            },
+          }
+          if (emit) emit(event)
+          else turnEvents.push(event)
+        },
+        })
+      : undefined
+    return { pluginExecution, instructionSnapshot }
+  }).then(async ({ pluginExecution, instructionSnapshot }) => {
+    if (pluginExecution && shouldStopForProviderProjection(pluginExecution)) {
+      const settlement = pluginExecution.state === 'cancelled' ? 'cancelled' as const : 'failed' as const
+      publishOrchestration(settlement === 'cancelled' ? 'cancelled' : 'settlement', 0, pluginExecution.state)
+      // A turn stopped by its provider stage is still a turn: it closes on
+      // the record like any other, so the account has no silent gap.
+      recordTurnEntry(sessionId, { kind: 'turn-end', source: 'host', settlement })
+      session.record = appendTurnRecord(session.record, recorder.entries)
+      const stoppedRecord: TurnRecord = {
+        version: session.record.version,
+        entries: session.record.entries.slice(-recorder.entries.length),
+      }
+      state.snapshot.cursor += 1
+      state.attachmentJournal.settle(runId, settlement, pluginExecution.summary, session.record.entries.at(-1)?.seq)
+      return [...turnEvents, {
+        id,
+        result: {
+          sessionId,
+          runId,
+          settlement,
+          items: [{ type: 'assistant_message', content: pluginExecution.summary }],
+          record: stoppedRecord,
+          workingState,
+          pluginExecution,
+          orchestration: { pattern, iterations: 0, maxIterations: iterationLimit, definitionOfDone, dodMet: false },
+        },
+      }]
+    }
+    const requestWithInstructions = instructionSnapshot.effectiveText
+      ? `${instructionSnapshot.effectiveText}\n\n## 當前請求\n${prompt}`
+      : prompt
+    const baseOrchestrationPrompt = [
+      instructionSnapshot.effectiveText,
+      pluginExecution ? `## Trusted provider stage result\n${JSON.stringify(pluginExecution)}` : '',
+      `## 當前請求\n${prompt}`,
+    ].filter(Boolean).join('\n\n')
+    const goalAwarePrompt = pattern === 'Goal-based'
+      ? goalContinuationPrompt(baseOrchestrationPrompt)
+      : baseOrchestrationPrompt
+    const orchestrationPrompt = requestedAgentMode === 'plan'
+      ? planPhasePrompt(goalAwarePrompt, planCompletionAction)
+      : goalAwarePrompt
+    let priorContinuationSignature = ''
+    let repeatedContinuationCount = 0
+    const recalledResult = memoryAccess.memoryReadEnabled && !memoryAccess.temporary
+      ? await state.memoryStore.recall({ access: memoryAccess, query: prompt, limit: 5 })
+      : undefined
+    const lowerAuthorityAvailableBytes = instructionSnapshot.usage.lowerAuthorityAvailableBytes
+      ?? Math.max(0, instructionSnapshot.usage.budgetBytes - instructionSnapshot.usage.totalBytes)
+    const selectedMemory = selectPiMemoryContextWithinBytes(
+      recalledResult?.items.map(piMemoryProjection) || [],
+      Math.min(3 * 1024, lowerAuthorityAvailableBytes),
+    )
+    const recalledItems = recalledResult?.items.slice(0, selectedMemory.memories.length) || []
+    memoryContext = selectedMemory.context
+    executionPrompt = memoryContext ? `${memoryContext}\n${requestWithInstructions}` : requestWithInstructions
+    recordTurnEntry(sessionId, {
+      kind: 'notice',
+      source: 'host',
+      topic: 'instruction-context-budget',
+      text: JSON.stringify({
+        totalBudgetBytes: instructionSnapshot.usage.budgetBytes,
+        globalPersonalization: {
+          includedBytes: instructionSnapshot.usage.personalizationBytes,
+          budgetBytes: instructionSnapshot.usage.personalizationBudgetBytes,
+        },
+        projectInstructions: {
+          includedBytes: instructionSnapshot.usage.projectInstructionBytes,
+          budgetBytes: instructionSnapshot.usage.projectInstructionBudgetBytes,
+        },
+        learnedMemory: {
+          requestedBytes: selectedMemory.requestedBytes,
+          includedBytes: selectedMemory.includedBytes,
+          droppedBytes: selectedMemory.droppedBytes,
+        },
+        totalIncludedBytes: instructionSnapshot.usage.totalBytes + selectedMemory.includedBytes,
+      }),
+    })
+    if (recalledItems.length && recalledResult) {
+      recordTurnEntry(sessionId, {
+        kind: 'memory-recall',
+        source: 'host',
+        revision: recalledResult.revision,
+        items: recalledItems.map((item) => ({
+          id: item.id,
+          logicalKey: item.logicalKey,
+          scope: item.scope.kind,
+          memoryKind: item.kind,
+          revision: item.revision,
+        })),
+      })
+      const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'memory-recalled', recalled: recalledItems.length } }
+      if (emit) emit(event)
+      else turnEvents.push(event)
+    }
+    return runPiOrchestration({
+    pattern,
+    prompt: orchestrationPrompt,
+    maxIterations,
+    interrupted: () => activeSessionRuns.get(sessionId)?.interrupt,
+    turn: async (iterationPrompt, iteration) => {
+      const activeRunState = activeSessionRuns.get(sessionId)
+      if (activeRunState?.interrupt) {
+        return { settlement: 'interrupted' as const, interruptReason: activeRunState.interrupt, result: '' }
+      }
+      if (activeRunState?.cancelled) return { settlement: 'cancelled' as const, result: '' }
+      const refreshedSettings = refreshIterationSettings({
+        current: turnSettings,
+        latest: state.snapshot.settings,
+        effectiveRevision: effectiveSettingsRevision,
+        latestRevision: state.snapshot.cursor,
+        admittedProfile,
+        sessionId,
+        runId,
+        iteration,
+        freezeUnattended: Boolean(session.agentAdmission),
+      })
+      turnSettings = refreshedSettings.settings
+      effectiveSettingsRevision = refreshedSettings.revision
+      turnActiveToolsRestricted = turnActiveToolsRestricted || turnSettings.activeTools.length > 0
+      publishOrchestration('iterate', iteration)
+      recorder.step = iteration
+      recorder.proposalState = workingState
+      // Whether this step recorded any assistant message of its own; if the
+      // stream carried none, the settled answer stands in for them.
+      let spokenThisStep = false
+      const pendingStateSettlements: Array<{
+        proposal: WorkingStateProposal
+        callId: string
+        settlement: WorkingToolSettlement
+        canonicalPath?: string
+      }> = []
+      recordTurnEntry(sessionId, { kind: 'step-start', source: 'host' })
+      const iterationConfiguredActiveTools = turnSettings.activeTools
+        .filter((tool) => workspaceTextSearchRun.available || !isWorkspaceTextSearchTool(tool))
+      const iterationVisibleActiveTools = turnSettings.activeTools.length > 0 && iterationConfiguredActiveTools.length === 0
+        ? ['load_capability']
+        : iterationConfiguredActiveTools
+      const iterationControlTools = iterationControlToolNames(effectiveAgentMode, pattern)
+      const iterationUnlockedTools = [...new Set([...unlockedTools, ...iterationControlTools])]
+      // This is the last Host-owned boundary before Pi dispatches to a
+      // remote model. Sanitize the complete iteration and recalled memory,
+      // not only project files prepared earlier by the renderer.
+      const providerPrompt = await prepareHostLlmEgress({
+        text: iterationPrompt,
+        mode: contextPolicy.outboundShellMode,
+        connectionId: contextPolicy.outboundConnectionId,
+        provider: turnSettings.provider,
+        runId,
+      })
+      const providerMemoryContext = await prepareHostLlmEgress({
+        text: memoryContext,
+        mode: contextPolicy.outboundShellMode,
+        connectionId: contextPolicy.outboundConnectionId,
+        provider: turnSettings.provider,
+        runId,
+      })
+      // Persist the exact bounded prompt sent to Pi.  The raw orchestration
+      // prompt may contain protected instruction text that must not be
+      // written to the Turn Record after provider sanitization.
+      const providerUserText = await prepareHostLlmEgress({
+        // The conversation projection is the user's request, while the
+        // provider-prompt entry below preserves the complete model payload.
+        // Keeping these separate prevents standing instructions from being
+        // rendered as if the user had typed them.
+        text: prompt,
+        mode: contextPolicy.outboundShellMode,
+        connectionId: contextPolicy.outboundConnectionId,
+        provider: turnSettings.provider,
+        runId,
+      })
+      recordTurnEntry(sessionId, { kind: 'user-text', source: 'user', content: providerUserText })
+      recordTurnEntry(sessionId, { kind: 'provider-prompt', source: 'host', content: providerPrompt })
+      const turn = await runPiTurn(sessionId, cwd, providerPrompt, providerHistory, (event) => {
+        const executionIdleLeaseMs = piTurnEventDeadlineLeaseMs(event)
+        // A tool call is the model asking; the audit records what the Host
+        // then decided and did (ADR-0048).
+        // Each assistant message is recorded where it happened, so the
+        // opening narration keeps its place before the tool it preceded.
+        // Recording only the settled answer left everything the model said
+        // on the way there unreconstructable from the record (ADR-0049).
+        // Thinking arrives as a stream of deltas on the same channel as
+        // text. It is collected here and written at the next boundary, so
+        // the record answers «它跑那個指令之前在想什麼» instead of only
+        // «它跑了那個指令» (model-visible means logged).
+        const streamedEvent = (event as { assistantMessageEvent?: { type?: unknown; delta?: unknown } }).assistantMessageEvent
+        if (streamedEvent?.type === 'thinking_delta' && typeof streamedEvent.delta === 'string') {
+          recordReasoningDelta(sessionId, streamedEvent.delta)
+        }
+        if (event.type === 'message_end') {
+          flushReasoning(sessionId)
+          const message = (event as { message?: { role?: unknown; content?: unknown } }).message
+          if (message?.role === 'assistant') {
+            const segments = piAssistantTextSegments(message.content)
+            if (segments.length > 0) {
+              spokenThisStep = true
+              for (const segment of segments) {
+                recordTurnEntry(sessionId, {
+                  kind: 'assistant-text',
+                  source: 'model',
+                  content: segment.content,
+                  ...(segment.phase ? { phase: segment.phase } : {}),
+                })
+              }
+            }
+          }
+        }
+        if (event.type === 'tool_execution_start') {
+          // Before the call, never after: the reasoning is the answer to
+          // «為什麼是這個指令», and an entry recorded afterwards would read
+          // as a reaction to a result it never saw.
+          flushReasoning(sessionId)
+          const callId = typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`
+          const toolName = typeof event.toolName === 'string' ? event.toolName : 'tool'
+          const identity = modelToolContractIdentity(state, sessionId, toolName)
+          if (identity) recorder.toolIdentities.set(callId, identity)
+          recordTurnEntry(sessionId, {
+            kind: 'tool-call',
+            source: 'model',
+            tool: toolName,
+            callId,
+            // A tool the model named that this turn's contract never
+            // described — an inactive capability tool, or an unknown name.
+            // Saying so is the point: an absent identity would otherwise be
+            // indistinguishable from a record that dropped one (issue 19).
+            ...(identity ? {} : { contractStatus: 'not-in-turn-contract' as const }),
+            // The arguments travel with the call so a replay can re-derive
+            // the tool's declared presentation (ADR-0050) — a diff card
+            // needs the edit pairs, not the tool's name.
+            ...(event.args !== undefined ? { args: event.args } : {}),
+            ...(identity || {}),
+          })
+          recordFileWriteStateProposal({ sessionId, recorder, workingState: recorder.proposalState, tool: toolName, callId, args: event.args })
+          // Issue 16: an in-turn call gets the same observable lifecycle as
+          // a direct-protocol one — start, decision, exactly one terminal.
+          // Previously only the DENY path published anything terminal, so an
+          // allowed call left the UI holding a decision that never resolved.
+          publishInTurnToolEvent(state, sessionId, emit, {
+            event: 'host/tool-start',
+            payload: { runId, tool: toolName, callId, idleLeaseMs: executionIdleLeaseMs, ...(identity || {}) },
+          })
+        }
+        if (event.type === 'tool_execution_end') {
+          // Pi executes in-turn tools inside this process, so its own report
+          // is the Host's account of what ran — not the model's claim. A
+          // call the Approval Decision blocked settles as `denied`, never as
+          // an ordinary failure: "the agent could not" and "the gate said
+          // no" are different facts.
+          const toolCallId = typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`
+          const toolName = typeof event.toolName === 'string' ? event.toolName : 'tool'
+          const { notExecutedReason, denialReason } = consumeModelToolInterception(sessionId, toolCallId)
+          const toolFailed = piToolExecutionFailed(event, toolName)
+          settlePiModelBuiltinInvocation({
+            sessionId,
+            callId: toolCallId,
+            failed: toolFailed,
+            detail: denialReason,
+          })
+          const identity = recorder.toolIdentities.get(toolCallId)
+          const proposal = recorder.stateProposals.get(toolCallId)
+          // The in-turn denial audit already emitted and durably recorded
+          // its one terminal result. Pi's blocked execution_end confirms the
+          // gate held, but must not create a second terminal result.
+          const terminalSettlement = publishModelToolTerminal({
+            state,
+            sessionId,
+            emit,
+            runId,
+            tool: toolName,
+            callId: toolCallId,
+            denialReason,
+            notExecutedReason,
+            toolFailed,
+            identity,
+            proposal,
+            workingState,
+            trustedResult: event.result,
+            eventIsError: event.isError === true,
+          })
+          const canonicalPath = consumePiWorkingWriteCanonicalPath(runId, toolCallId)
+          if (proposal) pendingStateSettlements.push({ proposal, callId: toolCallId, settlement: terminalSettlement, ...(canonicalPath ? { canonicalPath } : {}) })
+          recorder.toolIdentities.delete(toolCallId)
+          recorder.stateProposals.delete(toolCallId)
+        }
+        /* Events are collected below so the response remains ordered after them. */
+        // Real progress resets the budget: a turn still emitting work is
+        // working, not stuck, and long tasks are the point of this feature.
+        deadline?.extendFor(executionIdleLeaseMs)
+        const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event, iteration } }
+        if (emit) emit(turnEvent)
+        else turnEvents.push(turnEvent)
+      }, runId, session.piSessionFile, {
+        ...turnSettings,
+        temporaryChat: contextPolicy.temporary === true,
+        // A restricted allowlist unions the unlocked capability tools; an
+        // empty list already means everything is on.
+        activeTools: turnActiveToolsRestricted
+          ? [...new Set([...iterationVisibleActiveTools, ...iterationUnlockedTools])]
+          : turnSettings.activeTools,
+        activeToolsRestricted: turnActiveToolsRestricted,
+        unlockedTools: iterationUnlockedTools,
+        mcpGenerationKey: mcpTurnGenerationKey,
+        mcpCapabilityActive: mcpCapabilityLoaded,
+      }, providerMemoryContext, contextPolicy.referenceChatHistory, (registryContextWindow, runtimeSession) => {
+        const liveSession = runtimeSession as { getAllTools?: () => readonly unknown[]; getActiveToolNames?: () => readonly string[] } | undefined
+        if (liveSession && typeof liveSession.getAllTools === 'function' && typeof liveSession.getActiveToolNames === 'function') {
+          const publishContract = () => {
+            const contract = state.toolContracts.publish(sessionId, liveSession as never)
+            contractRevision = contract.revision
+            contractDigest = contract.contractDigest
+            session.toolContracts = [...state.toolContracts.list(sessionId)]
+          }
+          publishContract()
+          // load_capability calls this after Pi's native active-tool update,
+          // so the next model request receives a fresh immutable revision.
+          setPiPackSessionContractRefresh(sessionId, publishContract)
+        }
+        if (contextPreflightComplete) return
+        contextPreflightComplete = true
+        resolvedContextWindow = registryContextWindow || contextPolicy.contextWindowTokens
+        if (resolvedContextWindow) nextProfile.contextWindowTokens = resolvedContextWindow
+        runAutoCompactionPreflight({
+          state,
+          session,
+          runId,
+          prompt,
+          executionPrompt,
+          compaction: turnSettings.compaction,
+          contextWindow: resolvedContextWindow,
+          checkpointWriter,
+          emit,
+          turnEvents,
+        })
+      })
+      settleDelegatedGoalAdoption(state, sessionId, recorder)
+      workingState = adoptDelegatedWorkingState(workingState, recorder)
+      // Arbitrate only after every sibling effect in this model step has
+      // settled. A later write may invalidate an earlier read-back receipt;
+      // that stale evidence is rejected rather than leaving a false `done`.
+      const arbitratedStateSettlements = pendingStateSettlements
+        .map((pending, index) => ({
+          ...pending,
+          index,
+          evidenceStillApplicable: proposalEvidenceStillApplies(pending.canonicalPath, pending.proposal),
+        }))
+        .sort((left, right) => {
+          const leftPriority = left.settlement === 'success' && left.evidenceStillApplicable ? 0 : 1
+          const rightPriority = right.settlement === 'success' && right.evidenceStillApplicable ? 0 : 1
+          return leftPriority - rightPriority || left.index - right.index
+        })
+      for (const pending of arbitratedStateSettlements) {
+        const { canonicalPath: _canonicalPath, index: _index, ...checked } = pending
+        workingState = commitCheckedWorkingState({
+          sessionId,
+          recorder,
+          workingState,
+          ...checked,
+          executionRunId: runId,
+        })
+      }
+      workingState = revalidateCompletedGoals(sessionId, recorder, workingState)
+      session.piSessionFile ||= getPiSessionFile(sessionId)
+      // A completed model call records its round; only an answered one has
+      // text to join the conversation history.
+      if (isCompletedModelCall(turn.settlement)) {
+        if (!profileCommitted) {
+          session.profile = nextProfile
+          profileCommitted = true
+          if (previousModel && previousModel !== turnSettings.model) {
+            const event: PiHostEvent = {
+              event: 'host/context',
+              payload: {
+                runId,
+                sessionId,
+                phase: 'model-switched',
+                previousModel,
+                model: turnSettings.model,
+                provider: turnSettings.provider,
+                contextWindowTokens: resolvedContextWindow,
+              },
+            }
+            if (emit) emit(event)
+            else turnEvents.push(event)
+          }
+        }
+        const answer = piTurnFinalAnswer(turn.items)
+        if (turn.settlement === 'answered' && !spokenThisStep) {
+          recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: answer, phase: 'final_answer' })
+        }
+        // A step whose thinking was never followed by a message or a tool
+        // still thought; closing the step is the last ordered boundary it has.
+        flushReasoning(sessionId)
+        recordTurnEntry(sessionId, { kind: 'step-end', source: 'host', ...('timing' in turn && turn.timing ? { timing: turn.timing } : {}) })
+        // History is derived from the record, never accumulated beside it:
+        // one write path means the model's context and the record cannot
+        // drift apart. Derived AFTER this round's entries, so the next round
+        // sees what this one just did. The prompt is on the record either
+        // way — it was model-visible — while only an answered turn recorded
+        // an answer.
+        session.messages = derivePiHistory(appendTurnRecord(session.record, recorder.entries))
+        preparePiCompaction(session, runId, prompt, resolvedContextWindow)
+        // Learning is only a frozen candidate here. The renderer's unique
+        // app-finalization claim supplies the final status/DoD evidence and
+        // the Host commits it atomically with finalization completion.
+        const done = isPiHostDefinitionOfDoneMet(
+          definitionOfDone,
+          turn.settlement,
+          workingState,
+        )
+        const control = settleIterationControl({
+          pattern,
+          done,
+          state: { effectiveAgentMode, priorContinuationSignature, repeatedContinuationCount },
+          plan: {
+            sessionId, runId, settlement: turn.settlement, answer,
+            action: planCompletionAction, orchestrationPrompt, goalAwarePrompt,
+            approvalMode: turnSettings.approvalMode, iteration, publish: publishOrchestration,
+          },
+          continuation: {
+            sessionId, runId, settlement: turn.settlement, answer,
+            goalAwarePrompt, iteration, publish: publishOrchestration,
+          },
+        })
+        effectiveAgentMode = control.effectiveAgentMode
+        priorContinuationSignature = control.priorContinuationSignature
+        repeatedContinuationCount = control.repeatedContinuationCount
+        if (control.outcome) return control.outcome
+        publishDefinitionOfDone({ definitionOfDone, done, iteration, iterationLimit, publish: publishOrchestration })
+        return { settlement: turn.settlement, result: answer, ...(done === undefined ? {} : { done }) }
+      }
+      const stoppedText = piTurnResultText(turn.settlement, turn.items)
+      if (turn.settlement === 'interrupted' && stoppedText && !spokenThisStep) {
+        recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: stoppedText })
+      }
+      flushReasoning(sessionId)
+      recordTurnEntry(sessionId, { kind: 'step-end', source: 'host', ...('timing' in turn && turn.timing ? { timing: turn.timing } : {}) })
+      return {
+        settlement: turn.settlement,
+        ...(turn.settlement === 'interrupted' && 'interruptReason' in turn
+          ? { interruptReason: (turn as { interruptReason?: PiTurnInterruptReason }).interruptReason }
+          : {}),
+        result: stoppedText,
+      }
+    },
+    }).then(async (orchestration) => {
+    recorder.memoryControlAuditsClosed = true
+    await Promise.all([...recorder.pendingMemoryControlAudits])
+    publishOrchestration(
+      orchestration.settlement === 'cancelled' || orchestration.settlement === 'interrupted' ? 'cancelled' : 'settlement',
+      orchestration.iterations,
+      orchestration.settlement === 'interrupted'
+        ? `interrupted:${orchestration.interruptReason || 'user'}`
+        : orchestration.settlement,
+    )
+    recorder.step = orchestration.iterations || recorder.step
+    recordTerminalAgentLifecycle(state, sessionId, runId, orchestration.settlement, recorder.entries)
+    recordTurnEntry(sessionId, {
+      kind: 'turn-end',
+      source: 'host',
+      settlement: orchestration.settlement,
+      ...(orchestration.settlement === 'interrupted'
+        ? { interruptReason: orchestration.interruptReason || ('user' as PiTurnInterruptReason) }
+        : {}),
+    })
+    session.record = appendTurnRecord(session.record, recorder.entries)
+    // The turn's own slice travels with its result so the renderer projects
+    // the conversation from the Host's account instead of authoring one.
+    const turnRecordSlice: TurnRecord = {
+      version: session.record.version,
+      entries: session.record.entries.slice(-recorder.entries.length),
+    }
+    state.snapshot.cursor += 1
+    state.attachmentJournal.settle(
+      runId,
+      orchestration.settlement,
+      orchestration.result,
+      turnRecordSlice.entries.at(-1)?.seq,
+    )
+    flushDeferredAgentLifecycle(state, sessionId, recorder, emit)
+    return [...turnEvents, {
+      id,
+        result: {
+          sessionId,
+          runId,
+          settlement: orchestration.settlement,
+          ...(contractRevision !== undefined ? { contractRevision, contractDigest } : {}),
+        ...(orchestration.settlement === 'interrupted'
+          ? { interruptReason: orchestration.interruptReason || ('user' as PiTurnInterruptReason) }
+          : {}),
+        items: orchestration.result ? [{ type: 'assistant_message', content: orchestration.result }] : [],
+        record: turnRecordSlice,
+        workingState,
+        orchestration: {
+          pattern: orchestration.pattern,
+          iterations: orchestration.iterations,
+          maxIterations: iterationLimit,
+          definitionOfDone,
+          dodMet: orchestration.dodMet,
+        },
+        ...(pluginExecution ? { pluginExecution } : {}),
+      },
+    }]
+    })
+    }).catch(async (error) => {
+      recorder.memoryControlAuditsClosed = true
+      await Promise.all([...recorder.pendingMemoryControlAudits])
+      // Async storage failures must close the same record/attachment as a
+      // normal settlement, not just release the in-memory run lock.
+      const reason = error instanceof Error ? error.message : 'Pi Host turn failed'
+      flushReasoning(sessionId)
+      recordTurnEntry(sessionId, { kind: 'notice', source: 'host', topic: 'host-error', text: reason })
+      const failedLifecycle = agentLifecycleEventForSession(state.snapshot.sessions, sessionId, 'failed', runId, reason, recorder.entries)
+      if (failedLifecycle) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event: failedLifecycle })
+      recordTurnEntry(sessionId, { kind: 'turn-end', source: 'host', settlement: 'failed' })
+      session.record = appendTurnRecord(session.record, recorder.entries)
+      const terminalSeq = session.record.entries.at(-1)?.seq
+      flushDeferredAgentLifecycle(state, sessionId, recorder, emit)
+      state.snapshot.cursor += 1
+      state.attachmentJournal.settle(runId, 'failed', reason, terminalSeq)
+      return [...turnEvents, errorResponse(id, 'runtime_error', reason)]
+    }).finally(() => {
+    deadline?.cancel()
+    cancelPiApprovalsForRun(runId)
+    if (shellSandboxVerification) {
+      void shellSandboxVerification.then((verification) => {
+        if (verification.status === 'supported+verified') revokeBuiltinShellSandboxEvidence(verification.evidence)
+      })
+    }
+      unbindWorkspaceTextSearchRun(sessionId, runId)
+      unbindPiSessionRun(sessionId)
+    clearPiPlanGateCandidate(sessionId, runId)
+    clearPiContinuationItems(sessionId, runId)
+    setPiPackSessionContractRefresh(sessionId)
+    if (activeTurnRecorders.get(sessionId) === recorder) activeTurnRecorders.delete(sessionId)
+    if (activeSessionRuns.get(sessionId)?.runId === runId) activeSessionRuns.delete(sessionId)
+  })
+}
+
 export function handlePiHostRequest(
   state: HostState,
   request: unknown,
@@ -5012,953 +6049,15 @@ export function handlePiHostRequest(
     commit: (extensions) => { state.snapshot.extensions = extensions; state.snapshot.cursor += 1 },
   })
   if (extensionResponse) return extensionResponse
-  if (input.method === 'turn/interrupt') {
-    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
-    if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
-    const reason: PiTurnInterruptReason = input.params?.reason === 'timeout' ? 'timeout' : 'user'
-    // Safe park: the orchestration loop stops after the current iteration and
-    // the session aborts at its next tool boundary. In-flight tools are never
-    // severed, so anything already started still reports its own evidence.
-    const orchestrationRun = [...activeSessionRuns.values()].find((run) => run.runId === runId)
-    if (orchestrationRun) orchestrationRun.interrupt = reason
-    const parked = interruptPiTurn(runId, reason)
-    return parked || orchestrationRun
-      ? [{ id, result: { runId, settlement: 'interrupted' as const, interruptReason: reason } }]
-      : [errorResponse(id, 'invalid_request', `Unknown Pi run: ${runId}`)]
-  }
-  if (input.method === 'turn/cancel') {
-    const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
-    if (!runId) return [errorResponse(id, 'invalid_request', 'runId is required')]
-    const orchestrationRun = [...activeSessionRuns.values()].find((run) => run.runId === runId)
-    if (orchestrationRun) orchestrationRun.cancelled = true
-    const codeCancelled = cancelPiCodeMode(runId)
-    if (codeCancelled) cancelPiApprovalsForRun(runId)
-    const providerCancelled = cancelSubDesignProviderRun(runId)
-    return Promise.all([cancelPiTurn(runId), Promise.resolve(cancelPiTool(runId))]).then(([turnCancelled, toolCancelled]) => (turnCancelled || toolCancelled || codeCancelled || providerCancelled || Boolean(orchestrationRun))
-      ? [{ id, result: { runId, settlement: 'cancelled' as const } }]
-      : [errorResponse(id, 'invalid_request', `Unknown Pi run: ${runId}`)])
-  }
-  if (input.method === 'turn/submit') {
-    if (packageMutationInFlight) return [errorResponse(id, 'busy', 'A Pi package mutation is in progress')]
-    const sessionId = typeof input.params?.sessionId === 'string' ? input.params.sessionId : ''
-    const prompt = typeof input.params?.prompt === 'string' ? input.params.prompt : ''
-    const session = state.snapshot.sessions.find((candidate) => candidate.id === sessionId)
-    if (!session || !prompt.trim()) return [errorResponse(id, 'invalid_request', 'sessionId and prompt are required')]
-    const runId = typeof input.params?.runId === 'string' ? input.params.runId : `pi-run-${Date.now()}`
-    const existingAttachment = state.attachmentJournal.get(runId)
-    if (existingAttachment) {
-      return [errorResponse(id, 'invalid_request', `Pi run already exists: ${runId}`)]
-    }
-    const activeRun = activeSessionRuns.get(sessionId)
-    if (activeRun && activeRun.runId !== runId) {
-      return handleActiveTurnSubmission({ state, request: input, id, sessionId, runId, prompt, activeRun, emit })
-    }
-    const explicitWorkspaceRoot = typeof input.params?.cwd === 'string' && input.params.cwd.trim()
-      ? input.params.cwd
-      : undefined
-    const workspaceAdmission = admittedTurnWorkspace(session, explicitWorkspaceRoot)
-    if ('error' in workspaceAdmission) return [errorResponse(id, 'forbidden', workspaceAdmission.error)]
-    const cwd = workspaceAdmission.cwd
-    // Validate memory scope before opening an attachment/recorder. A failed
-    // realpath must not leave an active run that can never settle or retry.
-    const requestedContextPolicy = parsePiTurnContextPolicy(input.params?.contextPolicy)
-    const contextPolicy = session.agentAdmission
-      ? {
-          ...requestedContextPolicy,
-          memoryEnabled: false,
-          memoryWriteEnabled: false,
-          referenceChatHistory: false,
-          temporary: true,
-          project: cwd,
-          outboundShellMode: session.agentAdmission.policy.outbound || 'off',
-        }
-      : requestedContextPolicy
-    let canonicalWorkspace
-    try {
-      canonicalWorkspace = canonicalProjectId(cwd)
-      if (contextPolicy.project && canonicalProjectId(contextPolicy.project) !== canonicalWorkspace) {
-        return [errorResponse(id, 'invalid_request', 'Memory project must match the admitted workspace')]
-      }
-    } catch (error) {
-      return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid admitted workspace')]
-    }
-    const memoryAccess: MemoryAccessContext = {
-      origin: 'runtime', runId, sessionId,
-      memoryReadEnabled: contextPolicy.memoryEnabled,
-      memoryWriteEnabled: contextPolicy.memoryEnabled && contextPolicy.memoryWriteEnabled,
-      temporary: contextPolicy.temporary,
-      canonicalProject: canonicalWorkspace,
-    }
-    // Admission starts resolution now and the resulting immutable value is
-    // captured by this closure for every iteration. Later saves/filesystem
-    // changes can only affect a separately admitted run.
-    const rawInstructionSnapshotPromise = Promise.all([
-      state.instructionRepository.read(),
-      state.instructionRepository.listAuthorizedIncludeTargets(),
-    ]).then(async ([instructions, authorizedIncludeTargets]) =>
-      observeInstructionProjection(state, await resolveInstructionSnapshot({
-        globalRevision: instructions.revision,
-        globalCustomInstructions: instructions.globalCustomInstructions,
-        advancedPersonalityInstructions: instructions.advancedPersonalityInstructions,
-        globalCustomInstructionsPresence: instructions.globalCustomInstructionsPresence,
-        advancedPersonalityInstructionsPresence: instructions.advancedPersonalityInstructionsPresence,
-        personality: instructions.personality,
-        aboutUser: instructions.aboutUser,
-        responseStyle: instructions.responseStyle,
-        projectRoot: canonicalWorkspace,
-        workPath: cwd,
-        fallbackFilenames: Array.isArray(input.params?.instructionFallbackFilenames)
-          ? input.params.instructionFallbackFilenames.filter((item): item is string => typeof item === 'string')
-          : undefined,
-        authorizedIncludeTargets,
-      }), emit),
-    )
-    const patternValue = input.params?.pattern
-    const pattern: PiLoopPattern = patternValue === 'Goal-based' || patternValue === 'Time-based' || patternValue === 'Proactive'
-      ? patternValue
-      : 'Turn-based'
-    const maxIterations = typeof input.params?.maxIterations === 'number' ? input.params.maxIterations : 1
-    const definitionOfDone = admittedDefinitionOfDone(input.params?.definitionOfDone)
-    // Same shared clamp as the renderer's config builder (loopBounds.ts):
-    // both sides must agree or a requested budget silently diverges.
-    const iterationLimit = clampPiIterations(maxIterations)
-    const requestedAgentMode = admittedAgentMode(input.params?.profile)
-    const planCompletionAction = admittedPlanCompletionAction(input.params?.profile)
-    let effectiveAgentMode: PiAgentMode = requestedAgentMode
-    const requestedProfile = admittedProfileObject(input.params?.profile)
-    const admittedProfile = session.agentAdmission
-      ? { ...(session.profile || {}), ...requestedProfile }
-      : requestedProfile
-    let effectiveSettingsRevision = state.snapshot.cursor
-    let turnSettings = session.agentAdmission
-      ? compileEffectiveAgentProfile(state.snapshot.settings, session.profile as Partial<PiSettings>, {})
-      : state.snapshot.settings
-    if (input.params?.profile && typeof input.params.profile === 'object') {
-      try {
-        const profilePatch = validatePiSettingsPatch(input.params.profile as Record<string, unknown>)
-        turnSettings = compileEffectiveAgentProfile(turnSettings, profilePatch, {})
-      } catch (error) {
-        return [errorResponse(id, 'invalid_request', error instanceof Error ? error.message : 'Invalid Pi turn profile')]
-      }
-    }
-    if (session.agentAdmission) {
-      const turnPolicy = admittedChildTurnPolicy(session.agentAdmission, turnSettings)
-      if (!turnPolicy || !isRestrictiveAgentPolicy(session.agentAdmission.policy, turnPolicy)) {
-        return [errorResponse(id, 'forbidden', 'Child turn profile would widen its Host-admitted policy')]
-      }
-    }
-    // Pi historically interprets an empty activeTools array as unrestricted.
-    // Keep a separate admission fact so a profile-less settings intersection
-    // that becomes empty remains restrictive instead of widening to all tools.
-    let turnActiveToolsRestricted = turnSettings.activeTools.length > 0
-      || Object.prototype.hasOwnProperty.call(admittedProfile, 'activeTools')
-      || Boolean(session.agentAdmission)
-    const instructionSnapshotPromise = rawInstructionSnapshotPromise.then((snapshot) =>
-      sanitizeInstructionSnapshotForProvider({
-        snapshot,
-        mode: contextPolicy.outboundShellMode,
-        connectionId: contextPolicy.outboundConnectionId,
-        provider: turnSettings.provider,
-        runId,
-      }),
-    )
-    const turnEvents: PiHostEvent[] = []
-    // Reloads advance this key, but the value is frozen here for the whole
-    // logical Host turn (including retries/iterations). Existing registered
-    // native tools therefore cannot change underneath an in-flight turn.
-    const mcpTurnGenerationKey = piMcpGenerationKey(
-      state.extensions.list().filter((extension) => extension.kind === 'mcp').map((extension) => extension.id),
-    )
-    // Per-thread prefs ride in as preloaded capabilities (issue 12): the
-    // renderer persists what last run loaded, and this run starts with those
-    // already active. The authority on what is active is still the Host —
-    // preload goes through capabilities/load, not a side door.
-    const preloaded = Array.isArray(input.params?.preloadedCapabilities) ? input.params?.preloadedCapabilities : []
-    // One turn, one record. Opened here so every later entry — the model's,
-    // the tools', the approvals' — lands in the order it actually happened.
-    const workingGoalAdmission = admitRequestedWorkingGoals(session, input)
-    if (workingGoalAdmission.error) return [errorResponse(id, 'invalid_request', workingGoalAdmission.error)]
-    const admittedWorkingGoals = workingGoalAdmission.goals
-    if (input.params?.resumeFromRunId !== undefined
-      && (requestedWorkingGoal(input) !== undefined || admittedWorkingGoals !== undefined)) {
-      return [errorResponse(id, 'invalid_request', 'resume cannot replace checkpoint Working State goals')]
-    }
-    const resumed = resumeWorkingState({
-      request: input, session, runId, checkpoints: checkpointWriter, packages: state.memoryControlPackages,
-    })
-    if (resumed.error) return [errorResponse(id, 'invalid_request', resumed.error)]
-    const initialWorkingState = resumed.state
-      || workingStateForAdmittedTurn(session, runId, prompt, requestedWorkingGoal(input), admittedWorkingGoals)
-    const admittedPackage = admitTurnMemoryControlPackage(state, input.params, resumed.governingPackage)
-    const governingPackage = memoryControlPackageIdentity(admittedPackage)
-    const memoryControl = compileMemoryControlRuntime(admittedPackage, initialWorkingState.goals.length)
-    const recorder: ActiveTurnRecorder = {
-      cwd,
-      turn: nextTurnNumber(session.record),
-      step: 1,
-      entries: [],
-      toolIdentities: new Map(),
-      stateProposals: new Map(),
-      proposalState: initialWorkingState,
-      governingPackage,
-      memoryControl,
-      pendingMemoryControlAudits: new Set(),
-      memoryControlAuditsClosed: false,
-      seqBase: nextTurnRecordSeq(session.record),
-      reasoning: [],
-      // Only when there is a live stream to feed. A batch caller receives the
-      // whole committed slice in the turn's result, so republishing each entry
-      // there would be a second copy of the same account, not a live view.
-      ...(emit ? { publish: (entry: TurnRecordEntry) => emit({ event: 'host/record-append', payload: { runId, sessionId, entries: [entry] } }) } : {}),
-      onAppend: (entry) => state.attachmentJournal.append(runId, [entry], entry.seq),
-    }
-    state.attachmentJournal.begin({
-      runId,
-      sessionId,
-      threadId: session.threadId,
-      turn: recorder.turn,
-      learning: frozenRunLearningCandidate({
-        prompt,
-        runId,
-        sessionId,
-        canonicalProject: canonicalWorkspace,
-        memoryAccess,
-        automaticLearning: contextPolicy.memoryWriteEnabled,
-      }),
-    })
-    activeTurnRecorders.set(sessionId, recorder)
-    clearPiPlanGateCandidate(sessionId)
-    clearPiContinuationItems(sessionId)
-    restoreContinuationItems(sessionId, runId, resumed.continuationItems)
-    recordTurnEntry(sessionId, {
-      kind: 'turn-start',
-      source: 'host',
-      runner: 'builtin',
-      capabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
-      instructionDelivery: { mode: 'explicit', exactSnapshot: true, detail: 'Pi Host admission snapshot' },
-    })
-    recordRunningAgentLifecycle(state, sessionId, runId)
-    recordTurnEntry(sessionId, {
-      kind: 'notice',
-      source: 'host',
-      topic: 'agent-mode',
-      text: JSON.stringify({ requested: requestedAgentMode, effective: effectiveAgentMode, planCompletionAction }),
-    })
-    recordGoverningMemoryControlPackage(state, sessionId, governingPackage)
-    let workingState = initialWorkingState
-    recordTurnEntry(sessionId, { kind: 'working-state', source: 'host', state: workingState })
-    // Trusted Host verification starts from the admitted run/view. No field in
-    // contextPolicy, model text, or tool args can supply or deserialize it.
-    const shellSandboxVerification: Promise<BuiltinShellSandboxVerification> | undefined =
-      contextPolicy.outboundShellMode === 'required'
-        ? verifyBuiltinShellSandbox({ runId, viewRoot: contextPolicy.viewRoot || '' })
-        : undefined
-    const workspaceTextSearchRun = bindWorkspaceTextSearchRun(sessionId, {
-      runId,
-      enabled: turnSettings.workspaceTextSearch === true,
-      workspaceRoot: explicitWorkspaceRoot,
-    })
-    for (const capabilityId of preloaded) {
-      if (typeof capabilityId !== 'string') continue
-      if (isWorkspaceTextSearchCapability(capabilityId) && !workspaceTextSearchRun.available) continue
-      try {
-        state.capabilities.load(capabilityId, sessionId)
-      } catch {
-        /* an unknown preloaded id is skipped; the catalog still reports truth */
-      }
-    }
-    // Capability-unlocked tools join the turn's active set: loading a
-    // capability changes what this turn can call, immediately.
-    const unlockedTools = state.capabilities.activeTools(sessionId)
-      .filter((tool) => workspaceTextSearchRun.available || !isWorkspaceTextSearchTool(tool))
-    const mcpCapabilityLoaded = state.capabilities.catalog(sessionId)
-      .find((capability) => capability.id === 'mcp-bridge')?.deferred === false
-    const previousModel = typeof session.profile?.model === 'string' ? session.profile.model : undefined
-    const nextProfile: Record<string, unknown> = {
-      ...(session.profile || {}),
-      provider: turnSettings.provider,
-      model: turnSettings.model,
-      thinkingLevel: turnSettings.thinkingLevel,
-    }
-    let profileCommitted = false
-    let contractRevision: number | undefined
-    let contractDigest: string | undefined
-    // Skills ride Pi's `<available_skills>` block, which is only appended
-    // when the `read` tool is active. A capability configuration that turns
-    // `read` off would otherwise make EVERY skill vanish silently — exactly
-    // the failure mode this effort exists to kill (issue 17), so the
-    // dependency is reported instead.
-    const visibleSkills = discoveredPiSkills().skills.filter((skill) => skill.name && !skill.disableModelInvocation)
-    const readActive = turnSettings.activeTools.length === 0 || turnSettings.activeTools.includes('read')
-    if (visibleSkills.length > 0 && !readActive) {
-      recordTurnEntry(sessionId, {
-        kind: 'notice',
-        source: 'host',
-        topic: 'skills-unavailable',
-        text: `技能在此 run 不可用：read 工具未啟用，系統提示無法列出 ${visibleSkills.length} 個技能（${visibleSkills.slice(0, 3).map((skill) => skill.name).join('、')}${visibleSkills.length > 3 ? ' 等' : ''}）。重新啟用 read 後即自動恢復。`,
-      })
-      const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'skills-unavailable', recalled: visibleSkills.length } }
-      if (emit) emit(event)
-      else turnEvents.push(event)
-    }
-    let memoryContext = ''
-    let executionPrompt = childExecutionPrompt(session, prompt)
-    let contextPreflightComplete = false
-    let resolvedContextWindow = contextPolicy.contextWindowTokens
-    activeSessionRuns.set(sessionId, { runId, cancelled: false })
-    // In-turn pack tools read their coordinates and approval policy from this
-    // binding; it is cleared when the run ends so a stale policy can never
-    // answer for the next one.
-    bindPiSessionRun(sessionId, {
-      runId,
-      memoryControlPackage: governingPackage,
-      approvalMode: turnSettings.approvalMode,
-      unattended: turnSettings.unattended,
-      temporaryChat: contextPolicy.temporary,
-      memoryAccess,
-      frozenPolicy: freezePiRunPolicy({
-        agentMode: requestedAgentMode,
-        planCompletionAction,
-        approvalMode: turnSettings.approvalMode,
-        unattended: turnSettings.unattended,
-        projectRoot: cwd,
-        outboundMode: contextPolicy.outboundShellMode,
-        restrictedViewRoot: contextPolicy.viewRoot,
-        deniedTools: contextPolicy.deniedTools,
-        approvalTools: contextPolicy.approvalTools,
-        ...(contextPolicy.approvalTimeoutMs ? { approvalTimeoutMs: contextPolicy.approvalTimeoutMs } : {}),
-      }),
-      ...(resumed.state ? {
-        completedFileEffects: resumed.state.goals.flatMap((goal) =>
-          goal.status === 'done' && goal.completionPredicate?.kind === 'file-content'
-            ? [{ path: goal.completionPredicate.path, sha256: goal.completionPredicate.sha256 }]
-            : []),
-      } : {}),
-      ...(contextPolicy.gitPolicy ? { gitPolicy: contextPolicy.gitPolicy } : {}),
-      ...(contextPolicy.outboundShellMode ? { shellPolicy: {
-        effectiveMode: contextPolicy.outboundShellMode,
-        viewRoot: contextPolicy.viewRoot,
-        ...(shellSandboxVerification ? { sandboxVerification: shellSandboxVerification } : {}),
-      } } : {}),
-    })
-    // A stuck turn must not hold the conversation forever. Expiry walks the
-    // same safe-park path as a user's stop, so an in-flight tool still lands.
-    const timeoutMs = clampTurnTimeout(input.params?.timeoutMs)
-    const deadline = timeoutMs
-      ? armTurnDeadline(timeoutMs, () => {
-          const run = activeSessionRuns.get(sessionId)
-          if (run?.runId === runId && !run.interrupt) run.interrupt = 'timeout'
-          interruptPiTurn(runId, 'timeout')
-          const event: PiHostEvent = {
-            event: 'host/orchestration',
-            payload: { runId, sessionId, phase: 'cancelled', pattern, detail: 'interrupted:timeout' },
-          }
-          if (emit) emit(event)
-          else turnEvents.push(event)
-        }, turnDeadlineClock)
-      : undefined
-    const publishOrchestration = (phase: 'parse' | 'iterate' | 'dod' | 'replan' | 'settlement' | 'cancelled', iteration?: number, detail?: string) => {
-      const event: PiHostEvent = { event: 'host/orchestration', payload: { runId, sessionId, phase, iteration, pattern, detail } }
-      if (emit) emit(event)
-      else turnEvents.push(event)
-    }
-    publishOrchestration('parse', undefined, definitionOfDone || 'Pi turn settlement is the default DoD')
-    let providerHistory = session.messages
-    return instructionSnapshotPromise.then(async (instructionSnapshot) => {
-      // The immutable snapshot is admitted and recorded before any provider
-      // stage starts, including stages that stop the turn early.
-      recordTurnEntry(sessionId, { kind: 'instruction-snapshot', source: 'host', snapshot: instructionSnapshot })
-      if (contextPolicy.outboundShellMode && contextPolicy.outboundShellMode !== 'off') {
-        providerHistory = await Promise.all(session.messages.map(async (message) => ({
-          ...message,
-          content: await prepareHostLlmEgress({
-            text: message.content,
-            mode: contextPolicy.outboundShellMode,
-            connectionId: contextPolicy.outboundConnectionId,
-            provider: turnSettings.provider,
-            runId,
-          }),
-        })))
-        // Pi owns a persistent native conversation. Recreate it from the
-        // sanitized Host history so an older unprotected turn cannot re-enter
-        // a newly protected provider request through Pi's hidden history.
-        await disposePiSession(sessionId)
-        session.piSessionFile = undefined
-      }
-      // Keep the exact persistent context handed to Pi beside the admitted
-      // snapshot.  The session record must be able to reconstruct what the
-      // provider saw after history egress protection, rather than rereading
-      // the mutable session messages later.
-      recordTurnEntry(sessionId, {
-        kind: 'provider-history',
-        source: 'host',
-        messages: providerHistory.map((message) => ({ ...message })),
-      })
-      const pluginExecution = input.params?.pluginExecution
-        ? await executeSubDesignProviderStage({
-          request: input.params.pluginExecution,
-          runId,
-          threadId: session.threadId || sessionId,
-          projectRoot: cwd,
-          onEvent: (stageEvent) => {
-            const event: PiHostEvent = { event: 'host/pipeline-stage', payload: { ...stageEvent, sessionId } }
-            if (emit) emit(event)
-            else turnEvents.push(event)
-          },
-          onStreamEvent: (streamEvent) => {
-            const event: PiHostEvent = {
-              event: 'host/pipeline-stream',
-              payload: {
-                runId: streamEvent.runId,
-                sessionId,
-                stageId: streamEvent.stageId,
-                providerId: streamEvent.providerId,
-                update: streamEvent.update,
-              },
-            }
-            if (emit) emit(event)
-            else turnEvents.push(event)
-          },
-          })
-        : undefined
-      return { pluginExecution, instructionSnapshot }
-    }).then(async ({ pluginExecution, instructionSnapshot }) => {
-      if (pluginExecution && shouldStopForProviderProjection(pluginExecution)) {
-        const settlement = pluginExecution.state === 'cancelled' ? 'cancelled' as const : 'failed' as const
-        publishOrchestration(settlement === 'cancelled' ? 'cancelled' : 'settlement', 0, pluginExecution.state)
-        // A turn stopped by its provider stage is still a turn: it closes on
-        // the record like any other, so the account has no silent gap.
-        recordTurnEntry(sessionId, { kind: 'turn-end', source: 'host', settlement })
-        session.record = appendTurnRecord(session.record, recorder.entries)
-        const stoppedRecord: TurnRecord = {
-          version: session.record.version,
-          entries: session.record.entries.slice(-recorder.entries.length),
-        }
-        state.snapshot.cursor += 1
-        state.attachmentJournal.settle(runId, settlement, pluginExecution.summary, session.record.entries.at(-1)?.seq)
-        return [...turnEvents, {
-          id,
-          result: {
-            sessionId,
-            runId,
-            settlement,
-            items: [{ type: 'assistant_message', content: pluginExecution.summary }],
-            record: stoppedRecord,
-            workingState,
-            pluginExecution,
-            orchestration: { pattern, iterations: 0, maxIterations: iterationLimit, definitionOfDone, dodMet: false },
-          },
-        }]
-      }
-      const requestWithInstructions = instructionSnapshot.effectiveText
-        ? `${instructionSnapshot.effectiveText}\n\n## 當前請求\n${prompt}`
-        : prompt
-      const baseOrchestrationPrompt = [
-        instructionSnapshot.effectiveText,
-        pluginExecution ? `## Trusted provider stage result\n${JSON.stringify(pluginExecution)}` : '',
-        `## 當前請求\n${prompt}`,
-      ].filter(Boolean).join('\n\n')
-      const goalAwarePrompt = pattern === 'Goal-based'
-        ? goalContinuationPrompt(baseOrchestrationPrompt)
-        : baseOrchestrationPrompt
-      const orchestrationPrompt = requestedAgentMode === 'plan'
-        ? planPhasePrompt(goalAwarePrompt, planCompletionAction)
-        : goalAwarePrompt
-      let priorContinuationSignature = ''
-      let repeatedContinuationCount = 0
-      const recalledResult = memoryAccess.memoryReadEnabled && !memoryAccess.temporary
-        ? await state.memoryStore.recall({ access: memoryAccess, query: prompt, limit: 5 })
-        : undefined
-      const lowerAuthorityAvailableBytes = instructionSnapshot.usage.lowerAuthorityAvailableBytes
-        ?? Math.max(0, instructionSnapshot.usage.budgetBytes - instructionSnapshot.usage.totalBytes)
-      const selectedMemory = selectPiMemoryContextWithinBytes(
-        recalledResult?.items.map(piMemoryProjection) || [],
-        Math.min(3 * 1024, lowerAuthorityAvailableBytes),
-      )
-      const recalledItems = recalledResult?.items.slice(0, selectedMemory.memories.length) || []
-      memoryContext = selectedMemory.context
-      executionPrompt = memoryContext ? `${memoryContext}\n${requestWithInstructions}` : requestWithInstructions
-      recordTurnEntry(sessionId, {
-        kind: 'notice',
-        source: 'host',
-        topic: 'instruction-context-budget',
-        text: JSON.stringify({
-          totalBudgetBytes: instructionSnapshot.usage.budgetBytes,
-          globalPersonalization: {
-            includedBytes: instructionSnapshot.usage.personalizationBytes,
-            budgetBytes: instructionSnapshot.usage.personalizationBudgetBytes,
-          },
-          projectInstructions: {
-            includedBytes: instructionSnapshot.usage.projectInstructionBytes,
-            budgetBytes: instructionSnapshot.usage.projectInstructionBudgetBytes,
-          },
-          learnedMemory: {
-            requestedBytes: selectedMemory.requestedBytes,
-            includedBytes: selectedMemory.includedBytes,
-            droppedBytes: selectedMemory.droppedBytes,
-          },
-          totalIncludedBytes: instructionSnapshot.usage.totalBytes + selectedMemory.includedBytes,
-        }),
-      })
-      if (recalledItems.length && recalledResult) {
-        recordTurnEntry(sessionId, {
-          kind: 'memory-recall',
-          source: 'host',
-          revision: recalledResult.revision,
-          items: recalledItems.map((item) => ({
-            id: item.id,
-            logicalKey: item.logicalKey,
-            scope: item.scope.kind,
-            memoryKind: item.kind,
-            revision: item.revision,
-          })),
-        })
-        const event: PiHostEvent = { event: 'host/context', payload: { runId, sessionId, phase: 'memory-recalled', recalled: recalledItems.length } }
-        if (emit) emit(event)
-        else turnEvents.push(event)
-      }
-      return runPiOrchestration({
-      pattern,
-      prompt: orchestrationPrompt,
-      maxIterations,
-      interrupted: () => activeSessionRuns.get(sessionId)?.interrupt,
-      turn: async (iterationPrompt, iteration) => {
-        const activeRunState = activeSessionRuns.get(sessionId)
-        if (activeRunState?.interrupt) {
-          return { settlement: 'interrupted' as const, interruptReason: activeRunState.interrupt, result: '' }
-        }
-        if (activeRunState?.cancelled) return { settlement: 'cancelled' as const, result: '' }
-        const refreshedSettings = refreshIterationSettings({
-          current: turnSettings,
-          latest: state.snapshot.settings,
-          effectiveRevision: effectiveSettingsRevision,
-          latestRevision: state.snapshot.cursor,
-          admittedProfile,
-          sessionId,
-          runId,
-          iteration,
-          freezeUnattended: Boolean(session.agentAdmission),
-        })
-        turnSettings = refreshedSettings.settings
-        effectiveSettingsRevision = refreshedSettings.revision
-        turnActiveToolsRestricted = turnActiveToolsRestricted || turnSettings.activeTools.length > 0
-        publishOrchestration('iterate', iteration)
-        recorder.step = iteration
-        recorder.proposalState = workingState
-        // Whether this step recorded any assistant message of its own; if the
-        // stream carried none, the settled answer stands in for them.
-        let spokenThisStep = false
-        const pendingStateSettlements: Array<{
-          proposal: WorkingStateProposal
-          callId: string
-          settlement: WorkingToolSettlement
-          canonicalPath?: string
-        }> = []
-        recordTurnEntry(sessionId, { kind: 'step-start', source: 'host' })
-        const iterationConfiguredActiveTools = turnSettings.activeTools
-          .filter((tool) => workspaceTextSearchRun.available || !isWorkspaceTextSearchTool(tool))
-        const iterationVisibleActiveTools = turnSettings.activeTools.length > 0 && iterationConfiguredActiveTools.length === 0
-          ? ['load_capability']
-          : iterationConfiguredActiveTools
-        const iterationControlTools = iterationControlToolNames(effectiveAgentMode, pattern)
-        const iterationUnlockedTools = [...new Set([...unlockedTools, ...iterationControlTools])]
-        // This is the last Host-owned boundary before Pi dispatches to a
-        // remote model. Sanitize the complete iteration and recalled memory,
-        // not only project files prepared earlier by the renderer.
-        const providerPrompt = await prepareHostLlmEgress({
-          text: iterationPrompt,
-          mode: contextPolicy.outboundShellMode,
-          connectionId: contextPolicy.outboundConnectionId,
-          provider: turnSettings.provider,
-          runId,
-        })
-        const providerMemoryContext = await prepareHostLlmEgress({
-          text: memoryContext,
-          mode: contextPolicy.outboundShellMode,
-          connectionId: contextPolicy.outboundConnectionId,
-          provider: turnSettings.provider,
-          runId,
-        })
-        // Persist the exact bounded prompt sent to Pi.  The raw orchestration
-        // prompt may contain protected instruction text that must not be
-        // written to the Turn Record after provider sanitization.
-        const providerUserText = await prepareHostLlmEgress({
-          // The conversation projection is the user's request, while the
-          // provider-prompt entry below preserves the complete model payload.
-          // Keeping these separate prevents standing instructions from being
-          // rendered as if the user had typed them.
-          text: prompt,
-          mode: contextPolicy.outboundShellMode,
-          connectionId: contextPolicy.outboundConnectionId,
-          provider: turnSettings.provider,
-          runId,
-        })
-        recordTurnEntry(sessionId, { kind: 'user-text', source: 'user', content: providerUserText })
-        recordTurnEntry(sessionId, { kind: 'provider-prompt', source: 'host', content: providerPrompt })
-        const turn = await runPiTurn(sessionId, cwd, providerPrompt, providerHistory, (event) => {
-          const executionIdleLeaseMs = piTurnEventDeadlineLeaseMs(event)
-          // A tool call is the model asking; the audit records what the Host
-          // then decided and did (ADR-0048).
-          // Each assistant message is recorded where it happened, so the
-          // opening narration keeps its place before the tool it preceded.
-          // Recording only the settled answer left everything the model said
-          // on the way there unreconstructable from the record (ADR-0049).
-          // Thinking arrives as a stream of deltas on the same channel as
-          // text. It is collected here and written at the next boundary, so
-          // the record answers «它跑那個指令之前在想什麼» instead of only
-          // «它跑了那個指令» (model-visible means logged).
-          const streamedEvent = (event as { assistantMessageEvent?: { type?: unknown; delta?: unknown } }).assistantMessageEvent
-          if (streamedEvent?.type === 'thinking_delta' && typeof streamedEvent.delta === 'string') {
-            recordReasoningDelta(sessionId, streamedEvent.delta)
-          }
-          if (event.type === 'message_end') {
-            flushReasoning(sessionId)
-            const message = (event as { message?: { role?: unknown; content?: unknown } }).message
-            if (message?.role === 'assistant') {
-              const segments = piAssistantTextSegments(message.content)
-              if (segments.length > 0) {
-                spokenThisStep = true
-                for (const segment of segments) {
-                  recordTurnEntry(sessionId, {
-                    kind: 'assistant-text',
-                    source: 'model',
-                    content: segment.content,
-                    ...(segment.phase ? { phase: segment.phase } : {}),
-                  })
-                }
-              }
-            }
-          }
-          if (event.type === 'tool_execution_start') {
-            // Before the call, never after: the reasoning is the answer to
-            // «為什麼是這個指令», and an entry recorded afterwards would read
-            // as a reaction to a result it never saw.
-            flushReasoning(sessionId)
-            const callId = typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`
-            const toolName = typeof event.toolName === 'string' ? event.toolName : 'tool'
-            const identity = modelToolContractIdentity(state, sessionId, toolName)
-            if (identity) recorder.toolIdentities.set(callId, identity)
-            recordTurnEntry(sessionId, {
-              kind: 'tool-call',
-              source: 'model',
-              tool: toolName,
-              callId,
-              // A tool the model named that this turn's contract never
-              // described — an inactive capability tool, or an unknown name.
-              // Saying so is the point: an absent identity would otherwise be
-              // indistinguishable from a record that dropped one (issue 19).
-              ...(identity ? {} : { contractStatus: 'not-in-turn-contract' as const }),
-              // The arguments travel with the call so a replay can re-derive
-              // the tool's declared presentation (ADR-0050) — a diff card
-              // needs the edit pairs, not the tool's name.
-              ...(event.args !== undefined ? { args: event.args } : {}),
-              ...(identity || {}),
-            })
-            recordFileWriteStateProposal({ sessionId, recorder, workingState: recorder.proposalState, tool: toolName, callId, args: event.args })
-            // Issue 16: an in-turn call gets the same observable lifecycle as
-            // a direct-protocol one — start, decision, exactly one terminal.
-            // Previously only the DENY path published anything terminal, so an
-            // allowed call left the UI holding a decision that never resolved.
-            publishInTurnToolEvent(state, sessionId, emit, {
-              event: 'host/tool-start',
-              payload: { runId, tool: toolName, callId, idleLeaseMs: executionIdleLeaseMs, ...(identity || {}) },
-            })
-          }
-          if (event.type === 'tool_execution_end') {
-            // Pi executes in-turn tools inside this process, so its own report
-            // is the Host's account of what ran — not the model's claim. A
-            // call the Approval Decision blocked settles as `denied`, never as
-            // an ordinary failure: "the agent could not" and "the gate said
-            // no" are different facts.
-            const toolCallId = typeof event.toolCallId === 'string' ? event.toolCallId : `${runId}:${iteration}`
-            const toolName = typeof event.toolName === 'string' ? event.toolName : 'tool'
-            const { notExecutedReason, denialReason } = consumeModelToolInterception(sessionId, toolCallId)
-            const toolFailed = piToolExecutionFailed(event, toolName)
-            settlePiModelBuiltinInvocation({
-              sessionId,
-              callId: toolCallId,
-              failed: toolFailed,
-              detail: denialReason,
-            })
-            const identity = recorder.toolIdentities.get(toolCallId)
-            const proposal = recorder.stateProposals.get(toolCallId)
-            // The in-turn denial audit already emitted and durably recorded
-            // its one terminal result. Pi's blocked execution_end confirms the
-            // gate held, but must not create a second terminal result.
-            const terminalSettlement = publishModelToolTerminal({
-              state,
-              sessionId,
-              emit,
-              runId,
-              tool: toolName,
-              callId: toolCallId,
-              denialReason,
-              notExecutedReason,
-              toolFailed,
-              identity,
-              proposal,
-              workingState,
-              trustedResult: event.result,
-              eventIsError: event.isError === true,
-            })
-            const canonicalPath = consumePiWorkingWriteCanonicalPath(runId, toolCallId)
-            if (proposal) pendingStateSettlements.push({ proposal, callId: toolCallId, settlement: terminalSettlement, ...(canonicalPath ? { canonicalPath } : {}) })
-            recorder.toolIdentities.delete(toolCallId)
-            recorder.stateProposals.delete(toolCallId)
-          }
-          /* Events are collected below so the response remains ordered after them. */
-          // Real progress resets the budget: a turn still emitting work is
-          // working, not stuck, and long tasks are the point of this feature.
-          deadline?.extendFor(executionIdleLeaseMs)
-          const turnEvent: PiHostEvent = { event: 'host/turn-item', payload: { runId, sessionId, item: event, iteration } }
-          if (emit) emit(turnEvent)
-          else turnEvents.push(turnEvent)
-        }, runId, session.piSessionFile, {
-          ...turnSettings,
-          temporaryChat: contextPolicy.temporary === true,
-          // A restricted allowlist unions the unlocked capability tools; an
-          // empty list already means everything is on.
-          activeTools: turnActiveToolsRestricted
-            ? [...new Set([...iterationVisibleActiveTools, ...iterationUnlockedTools])]
-            : turnSettings.activeTools,
-          activeToolsRestricted: turnActiveToolsRestricted,
-          unlockedTools: iterationUnlockedTools,
-          mcpGenerationKey: mcpTurnGenerationKey,
-          mcpCapabilityActive: mcpCapabilityLoaded,
-        }, providerMemoryContext, contextPolicy.referenceChatHistory, (registryContextWindow, runtimeSession) => {
-          const liveSession = runtimeSession as { getAllTools?: () => readonly unknown[]; getActiveToolNames?: () => readonly string[] } | undefined
-          if (liveSession && typeof liveSession.getAllTools === 'function' && typeof liveSession.getActiveToolNames === 'function') {
-            const publishContract = () => {
-              const contract = state.toolContracts.publish(sessionId, liveSession as never)
-              contractRevision = contract.revision
-              contractDigest = contract.contractDigest
-              session.toolContracts = [...state.toolContracts.list(sessionId)]
-            }
-            publishContract()
-            // load_capability calls this after Pi's native active-tool update,
-            // so the next model request receives a fresh immutable revision.
-            setPiPackSessionContractRefresh(sessionId, publishContract)
-          }
-          if (contextPreflightComplete) return
-          contextPreflightComplete = true
-          resolvedContextWindow = registryContextWindow || contextPolicy.contextWindowTokens
-          if (resolvedContextWindow) nextProfile.contextWindowTokens = resolvedContextWindow
-          runAutoCompactionPreflight({
-            state,
-            session,
-            runId,
-            prompt,
-            executionPrompt,
-            compaction: turnSettings.compaction,
-            contextWindow: resolvedContextWindow,
-            checkpointWriter,
-            emit,
-            turnEvents,
-          })
-        })
-        settleDelegatedGoalAdoption(state, sessionId, recorder)
-        workingState = adoptDelegatedWorkingState(workingState, recorder)
-        // Arbitrate only after every sibling effect in this model step has
-        // settled. A later write may invalidate an earlier read-back receipt;
-        // that stale evidence is rejected rather than leaving a false `done`.
-        const arbitratedStateSettlements = pendingStateSettlements
-          .map((pending, index) => ({
-            ...pending,
-            index,
-            evidenceStillApplicable: proposalEvidenceStillApplies(pending.canonicalPath, pending.proposal),
-          }))
-          .sort((left, right) => {
-            const leftPriority = left.settlement === 'success' && left.evidenceStillApplicable ? 0 : 1
-            const rightPriority = right.settlement === 'success' && right.evidenceStillApplicable ? 0 : 1
-            return leftPriority - rightPriority || left.index - right.index
-          })
-        for (const pending of arbitratedStateSettlements) {
-          const { canonicalPath: _canonicalPath, index: _index, ...checked } = pending
-          workingState = commitCheckedWorkingState({
-            sessionId,
-            recorder,
-            workingState,
-            ...checked,
-            executionRunId: runId,
-          })
-        }
-        workingState = revalidateCompletedGoals(sessionId, recorder, workingState)
-        session.piSessionFile ||= getPiSessionFile(sessionId)
-        // A completed model call records its round; only an answered one has
-        // text to join the conversation history.
-        if (isCompletedModelCall(turn.settlement)) {
-          if (!profileCommitted) {
-            session.profile = nextProfile
-            profileCommitted = true
-            if (previousModel && previousModel !== turnSettings.model) {
-              const event: PiHostEvent = {
-                event: 'host/context',
-                payload: {
-                  runId,
-                  sessionId,
-                  phase: 'model-switched',
-                  previousModel,
-                  model: turnSettings.model,
-                  provider: turnSettings.provider,
-                  contextWindowTokens: resolvedContextWindow,
-                },
-              }
-              if (emit) emit(event)
-              else turnEvents.push(event)
-            }
-          }
-          const answer = piTurnFinalAnswer(turn.items)
-          if (turn.settlement === 'answered' && !spokenThisStep) {
-            recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: answer, phase: 'final_answer' })
-          }
-          // A step whose thinking was never followed by a message or a tool
-          // still thought; closing the step is the last ordered boundary it has.
-          flushReasoning(sessionId)
-          recordTurnEntry(sessionId, { kind: 'step-end', source: 'host', ...('timing' in turn && turn.timing ? { timing: turn.timing } : {}) })
-          // History is derived from the record, never accumulated beside it:
-          // one write path means the model's context and the record cannot
-          // drift apart. Derived AFTER this round's entries, so the next round
-          // sees what this one just did. The prompt is on the record either
-          // way — it was model-visible — while only an answered turn recorded
-          // an answer.
-          session.messages = derivePiHistory(appendTurnRecord(session.record, recorder.entries))
-          preparePiCompaction(session, runId, prompt, resolvedContextWindow)
-          // Learning is only a frozen candidate here. The renderer's unique
-          // app-finalization claim supplies the final status/DoD evidence and
-          // the Host commits it atomically with finalization completion.
-          const done = isPiHostDefinitionOfDoneMet(
-            definitionOfDone,
-            turn.settlement,
-            workingState,
-          )
-          const control = settleIterationControl({
-            pattern,
-            done,
-            state: { effectiveAgentMode, priorContinuationSignature, repeatedContinuationCount },
-            plan: {
-              sessionId, runId, settlement: turn.settlement, answer,
-              action: planCompletionAction, orchestrationPrompt, goalAwarePrompt,
-              approvalMode: turnSettings.approvalMode, iteration, publish: publishOrchestration,
-            },
-            continuation: {
-              sessionId, runId, settlement: turn.settlement, answer,
-              goalAwarePrompt, iteration, publish: publishOrchestration,
-            },
-          })
-          effectiveAgentMode = control.effectiveAgentMode
-          priorContinuationSignature = control.priorContinuationSignature
-          repeatedContinuationCount = control.repeatedContinuationCount
-          if (control.outcome) return control.outcome
-          publishDefinitionOfDone({ definitionOfDone, done, iteration, iterationLimit, publish: publishOrchestration })
-          return { settlement: turn.settlement, result: answer, ...(done === undefined ? {} : { done }) }
-        }
-        const stoppedText = piTurnResultText(turn.settlement, turn.items)
-        if (turn.settlement === 'interrupted' && stoppedText && !spokenThisStep) {
-          recordTurnEntry(sessionId, { kind: 'assistant-text', source: 'model', content: stoppedText })
-        }
-        flushReasoning(sessionId)
-        recordTurnEntry(sessionId, { kind: 'step-end', source: 'host', ...('timing' in turn && turn.timing ? { timing: turn.timing } : {}) })
-        return {
-          settlement: turn.settlement,
-          ...(turn.settlement === 'interrupted' && 'interruptReason' in turn
-            ? { interruptReason: (turn as { interruptReason?: PiTurnInterruptReason }).interruptReason }
-            : {}),
-          result: stoppedText,
-        }
-      },
-      }).then(async (orchestration) => {
-      recorder.memoryControlAuditsClosed = true
-      await Promise.all([...recorder.pendingMemoryControlAudits])
-      publishOrchestration(
-        orchestration.settlement === 'cancelled' || orchestration.settlement === 'interrupted' ? 'cancelled' : 'settlement',
-        orchestration.iterations,
-        orchestration.settlement === 'interrupted'
-          ? `interrupted:${orchestration.interruptReason || 'user'}`
-          : orchestration.settlement,
-      )
-      recorder.step = orchestration.iterations || recorder.step
-      recordTerminalAgentLifecycle(state, sessionId, runId, orchestration.settlement, recorder.entries)
-      recordTurnEntry(sessionId, {
-        kind: 'turn-end',
-        source: 'host',
-        settlement: orchestration.settlement,
-        ...(orchestration.settlement === 'interrupted'
-          ? { interruptReason: orchestration.interruptReason || ('user' as PiTurnInterruptReason) }
-          : {}),
-      })
-      session.record = appendTurnRecord(session.record, recorder.entries)
-      // The turn's own slice travels with its result so the renderer projects
-      // the conversation from the Host's account instead of authoring one.
-      const turnRecordSlice: TurnRecord = {
-        version: session.record.version,
-        entries: session.record.entries.slice(-recorder.entries.length),
-      }
-      state.snapshot.cursor += 1
-      state.attachmentJournal.settle(
-        runId,
-        orchestration.settlement,
-        orchestration.result,
-        turnRecordSlice.entries.at(-1)?.seq,
-      )
-      flushDeferredAgentLifecycle(state, sessionId, recorder, emit)
-      return [...turnEvents, {
-        id,
-          result: {
-            sessionId,
-            runId,
-            settlement: orchestration.settlement,
-            ...(contractRevision !== undefined ? { contractRevision, contractDigest } : {}),
-          ...(orchestration.settlement === 'interrupted'
-            ? { interruptReason: orchestration.interruptReason || ('user' as PiTurnInterruptReason) }
-            : {}),
-          items: orchestration.result ? [{ type: 'assistant_message', content: orchestration.result }] : [],
-          record: turnRecordSlice,
-          workingState,
-          orchestration: {
-            pattern: orchestration.pattern,
-            iterations: orchestration.iterations,
-            maxIterations: iterationLimit,
-            definitionOfDone,
-            dodMet: orchestration.dodMet,
-          },
-          ...(pluginExecution ? { pluginExecution } : {}),
-        },
-      }]
-      })
-      }).catch(async (error) => {
-        recorder.memoryControlAuditsClosed = true
-        await Promise.all([...recorder.pendingMemoryControlAudits])
-        // Async storage failures must close the same record/attachment as a
-        // normal settlement, not just release the in-memory run lock.
-        const reason = error instanceof Error ? error.message : 'Pi Host turn failed'
-        flushReasoning(sessionId)
-        recordTurnEntry(sessionId, { kind: 'notice', source: 'host', topic: 'host-error', text: reason })
-        const failedLifecycle = agentLifecycleEventForSession(state.snapshot.sessions, sessionId, 'failed', runId, reason, recorder.entries)
-        if (failedLifecycle) recordTurnEntry(sessionId, { kind: 'agent-lifecycle', source: 'host', event: failedLifecycle })
-        recordTurnEntry(sessionId, { kind: 'turn-end', source: 'host', settlement: 'failed' })
-        session.record = appendTurnRecord(session.record, recorder.entries)
-        const terminalSeq = session.record.entries.at(-1)?.seq
-        flushDeferredAgentLifecycle(state, sessionId, recorder, emit)
-        state.snapshot.cursor += 1
-        state.attachmentJournal.settle(runId, 'failed', reason, terminalSeq)
-        return [...turnEvents, errorResponse(id, 'runtime_error', reason)]
-      }).finally(() => {
-      deadline?.cancel()
-      cancelPiApprovalsForRun(runId)
-      if (shellSandboxVerification) {
-        void shellSandboxVerification.then((verification) => {
-          if (verification.status === 'supported+verified') revokeBuiltinShellSandboxEvidence(verification.evidence)
-        })
-      }
-        unbindWorkspaceTextSearchRun(sessionId, runId)
-        unbindPiSessionRun(sessionId)
-      clearPiPlanGateCandidate(sessionId, runId)
-      clearPiContinuationItems(sessionId, runId)
-      setPiPackSessionContractRefresh(sessionId)
-      if (activeTurnRecorders.get(sessionId) === recorder) activeTurnRecorders.delete(sessionId)
-      if (activeSessionRuns.get(sessionId)?.runId === runId) activeSessionRuns.delete(sessionId)
-    })
-  }
+  const turnResponse = handlePiHostTurnDomain({
+    method: input.method,
+    params: input.params,
+    invalid: (message) => [errorResponse(id, 'invalid_request', message)],
+    interrupt: (runId, reason) => interruptPiHostTurnRequest(id, runId, reason),
+    cancel: (runId) => cancelPiHostTurnRequest(id, runId),
+    submit: () => submitPiHostTurn(state, input, id, emit, checkpointWriter),
+  })
+  if (turnResponse) return turnResponse as PiHostMessage[] | Promise<PiHostMessage[]>
   const instructionOrReview = handleInstructionOrReviewRequest(state, input, id, emit)
   if (instructionOrReview) return instructionOrReview
   if (input.method === 'settings/get') return [{ id, result: { settings: { ...state.snapshot.settings }, config: state.snapshot.config, settingsRevision: state.snapshot.cursor } }]
@@ -6363,7 +6462,7 @@ export function createPiHostServer(
     attachments: [],
   },
   onStateChange?: (snapshot: { cursor: number; sessions: SessionRecord[]; settings: PiSettings; settingsOrigin?: 'native' | 'managed'; config?: PiHostConfigStatus; queue: PiQueuedRun[]; resources: PiResource[]; extensions: PiExtension[]; attachments: PiHostAttachment[] }) => void,
-  refreshConfig?: () => Promise<PiHostConfigStatus>,
+  refreshConfig?: (followCliAccount?: boolean) => Promise<PiHostConfigStatus>,
   checkpointWriter?: CompactionCheckpointWriter,
   suppliedMemoryStore?: DurableMemoryStore,
   suppliedMemoryControlPackages?: MemoryControlPackageReader,
@@ -6579,13 +6678,20 @@ export function createPiHostServer(
           recordInTurnAgentLifecycle(state, request.sessionId, 'waiting-approval', request.runId)
         }
       }
-      const pendingApproval = state.attachmentJournal.get(request.runId)?.pendingApproval
+      const attachment = state.attachmentJournal.get(request.runId)
+      const pendingApproval = attachment?.pendingApproval
       // Direct protocol/code-mode calls may not have a run attachment; retain
       // their existing event behavior while attached turns use the bounded
       // journal projection above.
-      send({ event: 'host/approval-requested', payload: { ...(pendingApproval || normalizePiHostPendingApproval(request) || request) } })
+      send({
+        event: 'host/approval-requested',
+        payload: {
+          ...(pendingApproval || normalizePiHostPendingApproval(request) || request),
+          ...(attachment?.threadId ? { threadId: attachment.threadId } : {}),
+        },
+      })
     },
-    resolved: (request) => {
+    resolved: (request, resolution) => {
       state.attachmentJournal.clearPendingApproval(request.runId, request.callId)
       const recorder = activeTurnRecorders.get(request.sessionId)
       if (recorder) {
@@ -6594,6 +6700,15 @@ export function createPiHostServer(
           recordInTurnAgentLifecycle(state, request.sessionId, 'running', request.runId)
         }
       }
+      send({
+        event: 'host/approval-resolved',
+        payload: {
+          runId: request.runId,
+          sessionId: request.sessionId,
+          callId: request.callId,
+          decision: resolution.decision,
+        },
+      })
     },
   }, (record) => {
     const identity = modelToolContractIdentity(state, record.sessionId, record.tool)
@@ -6738,9 +6853,13 @@ function hostRequestNeedsFreshOAuth(method: string | undefined): boolean {
 async function refreshHostConfigForRequest(
   state: HostState,
   input: Partial<PiHostRequest> | undefined,
-  refreshConfig?: () => Promise<PiHostConfigStatus>,
+  refreshConfig?: (followCliAccount?: boolean) => Promise<PiHostConfigStatus>,
 ): Promise<void> {
   if (!refreshConfig || !hostRequestNeedsFreshOAuth(input?.method)) return
-  state.snapshot.config = await refreshConfig()
+  const requestedPolicy = input?.method === 'settings/update'
+    && typeof input.params?.followCliOAuthAccount === 'boolean'
+    ? input.params.followCliOAuthAccount
+    : state.snapshot.settings.followCliOAuthAccount !== false
+  state.snapshot.config = await refreshConfig(requestedPolicy)
   state.snapshot.cursor += 1
 }

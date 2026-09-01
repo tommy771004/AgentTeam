@@ -5,15 +5,13 @@ import { ProtocolsPage } from './pages/ProtocolsPage'
 import { DocsPage } from './pages/DocsPage'
 import { SuccessPage } from './pages/SuccessPage'
 import { FailedPage } from './pages/FailedPage'
-import { SettingsPage } from './pages/SettingsPage'
 import { KnowledgePage } from './pages/KnowledgePage'
 import { DashboardPage } from './pages/DashboardPage'
 import { OpsPage } from './pages/OpsPage'
 import { RecordsPage } from './pages/RecordsPage'
 import { UsagePage } from './pages/UsagePage'
-import { LearningPage } from './pages/LearningPage'
-import { SubDesignPage } from './pages/SubDesignPage'
 import { ContentPublishingPage } from './pages/ContentPublishingPage'
+import { RouteChunkBoundary, RouteChunkLoading } from './components/RouteChunkBoundary'
 import { useSettingsStore } from './store/settingsStore'
 import { useLearningStore } from './store/learningStore'
 import { useScheduleStore } from './store/scheduleStore'
@@ -46,10 +44,29 @@ import { useRunActivityStore } from './store/runActivityStore'
 import { useWorkingStateProjectionStore } from './store/workingStateProjectionStore'
 import { isElectronPiProduction } from './agent/piProduction'
 import { startHostAgentQueuePump } from './agent/hostAgentQueuePump.ts'
+import {
+  classifyLiveExternalSessions,
+  createStartupRecoveryPhaseTracker,
+  isExternalThreadStillLive,
+} from './agent/startupRecoveryPhases.ts'
+
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })))
+const LearningPage = lazy(() => import('./pages/LearningPage').then((module) => ({ default: module.LearningPage })))
+const SubDesignPage = lazy(() => import('./pages/SubDesignPage').then((module) => ({ default: module.SubDesignPage })))
 
 const DevTrajectoryMeasurement = import.meta.env.DEV
   ? lazy(() => import('./DevTrajectoryMeasurement').then((module) => ({ default: module.DevTrajectoryMeasurement })))
   : null
+
+function DeferredRoute({ children }: { children: ReactNode }) {
+  return (
+    <RouteChunkBoundary>
+      <Suspense fallback={<RouteChunkLoading />}>
+        {children}
+      </Suspense>
+    </RouteChunkBoundary>
+  )
+}
 
 /** Restore automation queue from disk and drain when capacity is available */
 function RunQueueBootstrap() {
@@ -279,11 +296,13 @@ function RecoveryBootstrap() {
     let cancelled = false
     let recoveryUnsubscribe: (() => void) | undefined
     let recoveryUnsubscribeTimer: ReturnType<typeof setTimeout> | undefined
+    const recoveryPhases = createStartupRecoveryPhaseTracker()
     void (async () => {
       let journal: typeof import('./agent/runJournal.ts') | undefined
       try {
         const loaded = await import('./agent/runJournal.ts')
         journal = loaded
+        recoveryPhases.advance('durable-read')
       // A successful installer restart replays the bounded renderer snapshot
       // before any store hydrates, then marks the transaction complete.
       const migration = await window.subagents?.updates?.pendingMigration?.()
@@ -321,6 +340,7 @@ function RecoveryBootstrap() {
       // Electron/Pi Host owns conversation history. Reconcile against the
       // durable Host projection before applying interrupted status; otherwise
       // startup recovery only sees the temporary renderer placeholder.
+      recoveryPhases.advance('host-reconciliation')
       const piSessions = await window.subagents?.piHost?.sessions?.list?.()
       if (Array.isArray(piSessions?.sessions)) {
         const projected = piSessions.sessions.filter((item): item is PiSessionProjection => Boolean(
@@ -336,9 +356,11 @@ function RecoveryBootstrap() {
       // Pi Core Host owns active/terminal execution truth. Subscribe before
       // querying it, buffer record appends during attach, then merge by the
       // Turn Record sequence so a renderer reload cannot create a startup gap.
+      recoveryPhases.advance('cursor-replay')
       const hostTruth = await reattachPiHostRuns((unsubscribe) => {
         recoveryUnsubscribe = unsubscribe
       })
+      recoveryPhases.advance('active-reattachment')
       const journalReport = await (async () => {
         if (!journal) return null
         // Durable mirror must be wired and hydrated BEFORE reconcileStartup:
@@ -356,22 +378,12 @@ function RecoveryBootstrap() {
         (item) => item.kind === 'run' && item.action === 'marked-interrupted',
       )
       const activeExternalSessions = await window.subagents?.cli?.sessionSnapshots?.()
-      const liveExternalSessions = (Array.isArray(activeExternalSessions) ? activeExternalSessions : [])
-        .filter((session) => session && typeof session === 'object' && (session as { active?: unknown }).active === true)
-      const activeExternalRunIds = new Set(
-        liveExternalSessions
-          .map((session) => (session && typeof session === 'object' ? (session as { runId?: unknown }).runId : undefined))
-          .filter((runId): runId is string => typeof runId === 'string' && runId.length > 0),
-      )
-      const activeExternalConversations = new Set(
-        liveExternalSessions
-          .map((session) => (session && typeof session === 'object' ? (session as { conversationId?: unknown }).conversationId : undefined))
-          .filter((conversationId): conversationId is string => typeof conversationId === 'string' && conversationId.length > 0),
-      )
+      const liveExternalSessions = classifyLiveExternalSessions(activeExternalSessions)
 
       // Host checkpoints survive a renderer promise disappearing. Re-run the
       // coordinator's one-shot finalization owner before presenting recovery,
       // so archive/summary/release/queue-drain effects cannot be lost.
+      recoveryPhases.advance('terminal-finalization')
       const recoveredExternal = await window.subagents?.cli?.sessionRecovery?.()
       if (Array.isArray(recoveredExternal) && recoveredExternal.length) {
         const { finalizeRecoveredExternalRun } = await import('./agent/taskRunCoordinator')
@@ -411,10 +423,7 @@ function RecoveryBootstrap() {
         if (thread.lastStatus !== 'running') continue
         // A renderer reload must not mark a still-live Host session as
         // interrupted. The Electron registry is the authority for this case.
-        if (
-          activeExternalConversations.has(thread.id) ||
-          (thread.externalRun?.runId && activeExternalRunIds.has(thread.externalRun.runId))
-        ) continue
+        if (isExternalThreadStillLive(thread, liveExternalSessions)) continue
         threadStore.setThreadStatus(thread.id, 'interrupted')
         if (!hasRunRecovery) {
           journal.recordRecoveryNotice({
@@ -427,6 +436,7 @@ function RecoveryBootstrap() {
         }
       }
 
+      recoveryPhases.advance('queue-drain')
       const restoredQueue = queue.hydrateRunQueue()
       if (restoredQueue > 0) {
         journal.recordRecoveryNotice({
@@ -527,6 +537,8 @@ function RecoveryBootstrap() {
         if (narration.recovery) journal.recordRecoveryNotice(narration.recovery)
       }
 
+      recoveryPhases.complete()
+
       if (cancelled) return
       const reports = journal.consumeRecoveryReports()
       const items = reports.flatMap((report) => report.items)
@@ -548,6 +560,7 @@ function RecoveryBootstrap() {
         `${items.length} 項本機狀態已標記為中斷或安全補跑。`,
       )
       } catch (error) {
+        recoveryPhases.fail(error)
         useWorkingStateProjectionStore.getState().setHostAvailable(false)
         const detail = `啟動復原未完整完成，已停止隱性重跑：${error instanceof Error ? error.message : String(error)}`.slice(0, 300)
         journal?.recordRecoveryNotice({
@@ -1267,16 +1280,16 @@ export default function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<ProtocolsPage />} />
-            <Route path="subdesign/:briefId?" element={<SubDesignPage />} />
+            <Route path="subdesign/:briefId?" element={<DeferredRoute><SubDesignPage /></DeferredRoute>} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="ops" element={<OpsPage />} />
             <Route path="content-publishing" element={<ContentPublishingPage />} />
             <Route path="docs" element={<DocsPage />} />
             <Route path="records" element={<RecordsPage />} />
             <Route path="usage" element={<UsagePage />} />
-            <Route path="settings" element={<SettingsPage />} />
+            <Route path="settings" element={<DeferredRoute><SettingsPage /></DeferredRoute>} />
             <Route path="workspace" element={<Navigate to="/" replace />} />
-            <Route path="learning" element={<LearningPage />} />
+            <Route path="learning" element={<DeferredRoute><LearningPage /></DeferredRoute>} />
             <Route path="knowledge" element={<KnowledgePage />} />
             <Route path="success" element={<SuccessPage />} />
             <Route path="failed" element={<FailedPage />} />

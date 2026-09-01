@@ -3,6 +3,13 @@ import { readFile } from 'node:fs/promises'
 import {
   buildProjectGroups,
   COLLAPSED_PER_PROJECT,
+  mergeProjectOrder,
+  mergeThreadOrder,
+  moveProjectByOffset,
+  nextThreadAfterDelete,
+  parseProjectOrder,
+  reconcileProjectOrder,
+  reorderProject,
   projectThreadSidebar,
 } from '../src/lib/threadProjectGroups.ts'
 import type { Thread } from '../src/store/threadStore.ts'
@@ -49,6 +56,81 @@ assert.deepEqual(
   groups.map((group) => group.label),
   ['Taiwanrail', 'Productivity', 'AgentTeam', '未綁定專案'],
 )
+
+// Once the user has a sidebar order, selection and activity timestamps must
+// never promote a project. The same persisted order is applied after remount.
+const fixedOrder = ['/Users/me/AgentTeam', '/Users/me/Taiwanrail', '/Users/me/Productivity']
+assert.deepEqual(parseProjectOrder(JSON.stringify(fixedOrder)), fixedOrder)
+assert.deepEqual(parseProjectOrder('{broken'), [])
+const selectedElsewhere = buildProjectGroups(
+  [
+    thread({ id: 'a', projectRoot: '/Users/me/AgentTeam', updatedAt: '2026-08-01T00:00:00.000Z' }),
+    thread({ id: 't', projectRoot: '/Users/me/Taiwanrail', updatedAt: '2026-09-01T00:00:00.000Z' }),
+    thread({ id: 'p', projectRoot: '/Users/me/Productivity', updatedAt: '2026-10-01T00:00:00.000Z' }),
+  ],
+  '/Users/me/Productivity',
+  'Productivity',
+  fixedOrder,
+)
+assert.deepEqual(selectedElsewhere.map((group) => group.key), fixedOrder)
+
+const fixedThreadOrder = ['a2', 'a1', 'p1']
+const hostReordered = buildProjectGroups(
+  [
+    thread({ id: 'p1', projectRoot: '/Users/me/Productivity' }),
+    thread({ id: 'a1', projectRoot: '/Users/me/AgentTeam' }),
+    thread({ id: 'a2', projectRoot: '/Users/me/AgentTeam' }),
+  ],
+  '/Users/me/AgentTeam',
+  'AgentTeam',
+  fixedOrder,
+  fixedThreadOrder,
+)
+assert.deepEqual(
+  hostReordered.flatMap((group) => group.threads.map((item) => item.id)),
+  fixedThreadOrder,
+  'Pi Host enumeration must not replace the durable conversation order',
+)
+assert.deepEqual(
+  mergeThreadOrder(['a1', 'a2', 'dormant'], ['new', 'a2', 'a1']),
+  ['new', 'a1', 'a2', 'dormant'],
+  'new conversations lead while temporarily absent conversations remain durable',
+)
+assert.equal(nextThreadAfterDelete(['a1', 'a2', 'p1'], 'a2'), 'p1')
+assert.equal(nextThreadAfterDelete(['a1', 'a2', 'p1'], 'p1'), 'a2')
+
+// Dragging is deterministic, and lifecycle reconciliation removes vanished
+// folders while appending newly discovered folders without disturbing survivors.
+assert.deepEqual(
+  reorderProject(fixedOrder, '/Users/me/Productivity', '/Users/me/AgentTeam'),
+  ['/Users/me/Productivity', '/Users/me/AgentTeam', '/Users/me/Taiwanrail'],
+)
+assert.deepEqual(
+  reorderProject(fixedOrder, '/Users/me/AgentTeam', '/Users/me/Productivity', 'after'),
+  ['/Users/me/Taiwanrail', '/Users/me/Productivity', '/Users/me/AgentTeam'],
+)
+assert.deepEqual(
+  moveProjectByOffset(fixedOrder, '/Users/me/Taiwanrail', -1),
+  ['/Users/me/Taiwanrail', '/Users/me/AgentTeam', '/Users/me/Productivity'],
+)
+assert.deepEqual(
+  reconcileProjectOrder(
+    ['/removed', '/Users/me/Productivity', '/Users/me/AgentTeam'],
+    ['/Users/me/AgentTeam', '/Users/me/NewProject', '/Users/me/Productivity'],
+  ),
+  ['/Users/me/Productivity', '/Users/me/AgentTeam', '/Users/me/NewProject'],
+)
+// A transient pre-hydration frame must not erase dormant persisted folders.
+assert.deepEqual(
+  mergeProjectOrder(['/Users/me/AgentTeam', '/Users/me/Productivity'], ['/Users/me/AgentTeam']),
+  ['/Users/me/AgentTeam', '/Users/me/Productivity'],
+)
+const boundedDormantOrder = mergeProjectOrder(
+  Array.from({ length: 520 }, (_, index) => `/dormant/${index}`),
+  ['/live'],
+)
+assert.ok(boundedDormantOrder.length <= 512, 'dormant ordering preferences stay bounded')
+assert.ok(boundedDormantOrder.includes('/live'), 'bounding never discards a live project')
 
 // Hidden background worker threads never reach the sidebar.
 const agentTeam = groups.find((group) => group.label === 'AgentTeam')!
@@ -142,6 +224,24 @@ assert.match(threadSidebarSource, /role="status"[\s\S]*aria-label="執行中"[\s
   'the running conversation renders an accessible animated spinner')
 assert.doesNotMatch(threadSidebarSource, /t\.lastStatus === 'running'/,
   'a persisted terminal status must not leave a stale running indicator')
+assert.match(threadSidebarSource, /draggable=\{!sidebar\.searching\}/,
+  'project folders expose native drag reordering outside filtered search')
+assert.match(threadSidebarSource, /THREAD_PROJECT_ORDER_STORAGE_KEY[\s\S]*localStorage\.setItem/,
+  'project folder order survives sidebar unmount and app reload')
+assert.match(threadSidebarSource, /THREAD_ORDER_STORAGE_KEY[\s\S]*threadOrder: stableThreadOrder/,
+  'conversation order survives Host hydration and is applied to the projection')
+assert.match(threadSidebarSource, /aria-live="polite"/,
+  'keyboard and pointer reordering announce their result')
+assert.match(threadSidebarSource, /drag_indicator/,
+  'project folders expose a visible drag handle')
+assert.match(threadSidebarSource, /Alt\+ArrowUp|event\.altKey/,
+  'project folders support keyboard reordering')
+
+const threadStoreSource = await readFile(new URL('../src/store/threadStore.ts', import.meta.url), 'utf8')
+assert.match(threadStoreSource, /deleteThread:\s*\(id,\s*nextActiveId\)/,
+  'delete accepts the next visible conversation selected by the sidebar')
+assert.match(threadStoreSource, /followThreadProject\(nextActive\.projectRoot\)/,
+  'deleting the active conversation follows the replacement project context')
 
 const layoutSource = await readFile(new URL('../src/components/Layout.tsx', import.meta.url), 'utf8')
 assert.doesNotMatch(layoutSource, /開啟新任務右側 Run 面板|>執行中…</,

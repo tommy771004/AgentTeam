@@ -1,8 +1,8 @@
 # Effort 進度狀態（上下文壓縮用）
 
-更新：2026-08-26（session 4，全 effort 收口）
+更新：2026-09-01（session 5，OAuth rotation follow-up 收口）
 
-## 結論：6/6 resolved，qualification GO
+## 結論：7/7 resolved，qualification GO
 
 證據總表見 [qualification.md](qualification.md)。要點：
 
@@ -12,6 +12,7 @@
 4. 真實訂閱 E2E PASS：隔離 dir 匯入真 codex OAuth → settings/update openai-codex+gpt-5.4-mini → settlement=answered（真 Codex 訂閱後端）→ Turn Record 完整。無 vendor binary。
 5. 安全抽查：auth.json 實測 0600／dir 0700；snapshot 全文 7 種 credential 形狀零命中（探針只輸出判定）。
 6. CLAUDE.md Settings 段補一行；INDEX.md 本 effort 標 resolved。
+7. OAuth rotation follow-up：Host 預設跟隨同一 CLI authority 的 token／account 變更，opt-out 維持 conflict；真機隔離 E2E 證明同一 Host 無重啟恢復。
 
 ## 各票落點
 
@@ -23,6 +24,7 @@
 | 04 | 模型 picker fail-closed | `src/components/settings/SubscriptionModelPicker.tsx`、SettingsPage 分支、settingsStore testConnection |
 | 05 | drift guards ×3 | `scripts/smoke-subscription-labeling.mts`（已掛鏈） |
 | 06 | qualification | `qualification.md` + `qualify-subscription-snapshot.mts` + `qualify-subscription-e2e.mts`（真機專用，不進鏈） |
+| 07 | CLI OAuth rotation／account following | `piUserConfig.ts`、`piHostEntry.ts`、`piHostProtocol.ts`、`qualify-subscription-oauth-rotation-e2e.mts` |
 
 ## 給未來 session 的關鍵事實
 

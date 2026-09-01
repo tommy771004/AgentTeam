@@ -336,7 +336,7 @@ export class PiAgentCommunicationDomain {
     if (duplicate) return this.duplicateSpawnResponse(input.id, input.state, parent, duplicate)
     const prepared = this.prepareSpawnSpec(input.state, params, parent, spawnId)
     if (!prepared.ok) return this.rejectSpawn(input, parent, spawnId, prepared.reason)
-    const { objective, role, profile, context, depth, childPolicy, childProfile, workspace, rootAgentId, runId } = prepared.value
+    const { objective, role, context, depth, childPolicy, childProfile, workspace, rootAgentId, runId } = prepared.value
     let child
     try {
       child = createPiChildSession({ role, profile: childProfile, context, depth, maxDepth: MAX_TREE_DEPTH })

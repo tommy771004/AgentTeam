@@ -56,6 +56,7 @@ try {
     approvalMode: 'auto',
     bashRequireAsk: true,
     unattended: false,
+    followCliOAuthAccount: true,
     workspaceTextSearch: false,
   })
 
@@ -105,6 +106,7 @@ try {
     approvalMode: 'full',
     bashRequireAsk: true,
     unattended: true,
+    followCliOAuthAccount: true,
     workspaceTextSearch: false,
   })
 } finally {

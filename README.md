@@ -26,6 +26,17 @@ npm run dist:mac   # 僅編譯並打包 macOS DMG
 npm run dist:win   # 打包 Windows NSIS
 ```
 
+### Readiness 語意
+
+`compile success`（`npm run build`）只代表編譯成功；`deterministic qualification`
+（`npm run qualify:deterministic`）是不啟動 App、不需要簽章憑證的 repository gate；
+`platform qualification` 另由 macOS/Windows runtime、installer、signing 與
+clean-machine jobs 產生證據；`release-ready` 必須核對同一 immutable candidate；
+最後只有 Paid Beta qualifier 能宣告 **Paid Beta GO**。目前 retained report 是
+**NO-GO（0/49）**。`build`／`dist:*` 保持 compilation/packaging-only，完整驗證需
+明確執行 `npm run smoke`。plain-browser 僅是 UI/degraded preview，不是 production
+Pi Core Host execution。
+
 ### 已實作能力
 
 1. **Agent Loop Engine** — Receive → Process → Execute → Validate → Terminate/Iterate  

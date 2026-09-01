@@ -318,7 +318,7 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   const fs = await import('node:fs')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/types.ts'), 'utf8')
   const llm = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
-  const runExternal = readTaskRunRuntimeSource(fs)
+  const admission = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunAdmission.ts'), 'utf8')
   const runtime = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/runtime.ts'), 'utf8')
   const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
@@ -332,7 +332,7 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   // the gate is enforced by the approval decision + delegate seams below.
   const llmDispatch = fs.readFileSync(path.join(appRoot, 'src/agent/llm.ts'), 'utf8')
   assert.match(llmDispatch, /export async function runPrimaryAgentTask/)
-  assert.match(runExternal, /opts\.sourceKind === 'delegate'/)
+  assert.match(admission, /input\.sourceKind === 'delegate' && !input\.delegateEnabled/)
   assert.match(runtime, /capability\.id !== 'delegate'/)
   assert.match(decision, /Sub Agent 功能目前已關閉/)
   assert.match(delegate, /Renderer delegation lifecycle 已凍結/)

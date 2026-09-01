@@ -40,6 +40,7 @@ import {
   getExternalCliSession as getSupervisedExternalCliSession,
   interruptExternalCliSessions as interruptSupervisedExternalCliSessions,
 } from './externalCliSupervisor.ts'
+import { parseProviderJsonEvent } from './externalCliProviderParsers.ts'
 
 export type LocalCliKind = 'codex' | 'claude' | 'grok' | 'gemini' | 'cursor'
 export type CliApprovalMode = 'always' | 'auto' | 'full'
@@ -897,12 +898,12 @@ export function normalizePlanItems(raw: unknown): LocalCliPlanItem[] {
  * - Codex: {type:item.completed|error|turn.*, item:{type,text|message|…}}
  * - Cursor agent: similar to Claude stream-json (assistant/tool_call/result)
  */
-function createCliStreamParser(
+export function createCliStreamParser(
   kind: LocalCliKind,
   emit: (ev: Omit<LocalCliStreamEvent, 'runId'>) => void,
   onProviderSession?: (providerSessionId: string) => void,
 ) {
-  let buf = ''
+  const buffers: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' }
   let assembledText = ''
   let lastPlainEmit = 0
   let plainLineCount = 0
@@ -921,19 +922,6 @@ function createCliStreamParser(
     return data
   }
 
-  const extractTextFromContent = (content: unknown): string => {
-    if (typeof content === 'string') return content
-    if (!Array.isArray(content)) return ''
-    const parts: string[] = []
-    for (const block of content) {
-      if (!block || typeof block !== 'object') continue
-      const b = block as Record<string, unknown>
-      if (b.type === 'text' && b.text != null) parts.push(String(b.text))
-      else if (typeof b.text === 'string') parts.push(b.text)
-    }
-    return parts.join('')
-  }
-
   const handleLine = (line: string, channel: 'stdout' | 'stderr') => {
     const clean = stripAnsi(line).trim()
     if (!clean) return { textDelta: '' }
@@ -942,224 +930,19 @@ function createCliStreamParser(
     if (clean.startsWith('{') && clean.endsWith('}')) {
       try {
         const j = JSON.parse(clean) as Record<string, unknown>
+        const providerResult = parseProviderJsonEvent({
+          kind,
+          event: j,
+          assembledText,
+          appendText,
+          emit,
+          onProviderSession,
+          normalizePlanItems,
+        })
+        if (providerResult.handled) return { textDelta: providerResult.textDelta }
+
         const type = String(j.type || j.event || '')
         const subtype = String(j.subtype || '')
-        const providerSessionId = String(
-          j.session_id ?? j.sessionId ?? j.thread_id ?? j.threadId ?? j.conversation_id ?? '',
-        ).trim()
-        if (providerSessionId) onProviderSession?.(providerSessionId.slice(0, 200))
-
-        // Provider lifecycle evidence is the only source allowed to enter a
-        // waiting phase.  A wrapper's generic stderr line never fabricates
-        // this state; typed NDJSON input/approval events do.
-        const lowerType = type.toLowerCase()
-        if (lowerType.includes('question') || lowerType.includes('input_required') || lowerType.includes('ask_user') || lowerType.includes('user.wait')) {
-          emit({ kind: 'status', title: '等待你的回覆', detail: String(j.message ?? j.reason ?? j.prompt ?? '').slice(0, 400), sessionPhase: 'waiting_for_user' })
-          return { textDelta: '' }
-        }
-        if (lowerType.includes('permission') || lowerType.includes('approval_required') || lowerType.includes('approval.request')) {
-          emit({ kind: 'error', title: '等待核准', detail: String(j.message ?? j.reason ?? j.permission ?? '').slice(0, 400), ok: false, sessionPhase: 'waiting_for_approval' })
-          return { textDelta: '' }
-        }
-
-        // ── Grok ──
-        if (type === 'thought' || type === 'reasoning' || type === 'thinking') {
-          const data = String(j.data ?? j.content ?? j.delta ?? '')
-          if (data) emit({ kind: 'thought', channel: 'thought', delta: data })
-          return { textDelta: '' }
-        }
-        if (type === 'text' || type === 'content') {
-          return { textDelta: appendText(String(j.data ?? j.content ?? j.delta ?? j.text ?? '')) }
-        }
-
-        // Gemini CLI provider-json: the one-shot response is commonly exposed
-        // as `response` or `text` without a Claude-style message envelope.
-        if (kind === 'gemini' && (j.response || j.text || j.output)) {
-          return { textDelta: appendText(String(j.response ?? j.text ?? j.output ?? '')) }
-        }
-
-        // ── Claude / Cursor: assistant message ──
-        if (type === 'assistant' || type === 'message') {
-          const msg = (j.message && typeof j.message === 'object'
-            ? (j.message as Record<string, unknown>)
-            : j) as Record<string, unknown>
-          const text =
-            extractTextFromContent(msg.content) ||
-            String(j.data ?? j.delta ?? j.text ?? msg.text ?? '')
-          // Skip huge synthetic hook dumps with empty useful text
-          if (text) return { textDelta: appendText(text) }
-          return { textDelta: '' }
-        }
-
-        // ── Claude/Cursor result (final answer) ──
-        if (type === 'result') {
-          const resultText = String(j.result ?? j.data ?? '')
-          // Prefer streamed assistant text; if empty, use result field
-          if (resultText && !assembledText.trim()) {
-            appendText(resultText)
-          }
-          const err = j.is_error === true || Boolean(j.error)
-          emit({
-            kind: err ? 'error' : 'status',
-            title: err ? 'CLI 錯誤' : '回合結束',
-            detail: err
-              ? String(j.error || j.result || subtype || '').slice(0, 400)
-              : String(j.stop_reason ?? j.duration_ms ?? subtype ?? '').slice(0, 200),
-            ok: !err,
-          })
-          return { textDelta: '' }
-        }
-
-        // ── Codex JSONL ──
-        if (type === 'item.completed' || type === 'item.started' || type === 'item.updated') {
-          const item =
-            j.item && typeof j.item === 'object'
-              ? (j.item as Record<string, unknown>)
-              : ({} as Record<string, unknown>)
-          const itemType = String(item.type || '')
-          if (
-            itemType === 'agent_message' ||
-            itemType === 'message' ||
-            itemType === 'assistant_message'
-          ) {
-            const text = String(item.text ?? item.message ?? item.content ?? '')
-            return { textDelta: appendText(text) }
-          }
-          if (itemType === 'reasoning' || itemType === 'thought') {
-            const t = String(item.text ?? item.content ?? '')
-            if (t) emit({ kind: 'thought', channel: 'thought', delta: t })
-            return { textDelta: '' }
-          }
-          if (
-            itemType === 'command_execution' ||
-            itemType === 'command' ||
-            itemType === 'shell'
-          ) {
-            const cmd = String(item.command ?? item.cmd ?? item.text ?? 'command')
-            emit({
-              kind: 'tool',
-              title: type === 'item.started' ? `執行指令…` : `已執行指令`,
-              tool: 'bash',
-              detail: cmd.slice(0, 400),
-              ok: item.exit_code === undefined || item.exit_code === 0,
-            })
-            return { textDelta: '' }
-          }
-          if (
-            itemType === 'file_change' ||
-            itemType === 'file_edit' ||
-            itemType === 'patch' ||
-            itemType === 'file_change_set'
-          ) {
-            // Codex may send changes[] or single path
-            const changes = Array.isArray(item.changes)
-              ? (item.changes as Array<Record<string, unknown>>)
-              : Array.isArray(item.files)
-                ? (item.files as Array<Record<string, unknown>>)
-                : null
-            if (changes?.length) {
-              const paths: string[] = []
-              for (const c of changes) {
-                const p = String(c.path ?? c.file ?? c.filename ?? '')
-                if (!p) continue
-                paths.push(p)
-                emit({
-                  kind: 'file',
-                  title: `已編輯 ${p.split(/[\\/]/).pop()}`,
-                  detail: p,
-                  path: p,
-                  paths: [p],
-                  added: typeof c.additions === 'number' ? c.additions : typeof c.added === 'number' ? c.added : undefined,
-                  removed: typeof c.deletions === 'number' ? c.deletions : typeof c.removed === 'number' ? c.removed : undefined,
-                  action: String(c.kind || c.action || '').includes('create')
-                    ? 'create'
-                    : String(c.kind || c.action || '').includes('delete')
-                      ? 'delete'
-                      : 'edit',
-                })
-              }
-              return { textDelta: '' }
-            }
-            const p = String(item.path ?? item.file ?? item.filename ?? '')
-            if (p) {
-              emit({
-                kind: 'file',
-                title: `已編輯 ${p.split(/[\\/]/).pop()}`,
-                detail: p,
-                path: p,
-                paths: [p],
-                added: typeof item.additions === 'number' ? item.additions : undefined,
-                removed: typeof item.deletions === 'number' ? item.deletions : undefined,
-                action: 'edit',
-              })
-            }
-            return { textDelta: '' }
-          }
-          if (itemType === 'error') {
-            emit({
-              kind: 'error',
-              title: 'Codex 錯誤',
-              detail: String(item.message ?? item.text ?? '').slice(0, 400),
-              ok: false,
-            })
-            return { textDelta: '' }
-          }
-          // Codex 任務清單（plan tool）→ 右側面板同步
-          if (itemType === 'todo_list' || itemType === 'plan' || itemType === 'update_plan') {
-            const todos = normalizePlanItems(item.items ?? item.plan ?? item.todos)
-            if (todos.length) {
-              emit({ kind: 'plan', title: '任務清單更新', todos })
-            }
-            return { textDelta: '' }
-          }
-          // other item types — light status
-          if (itemType) {
-            emit({
-              kind: 'status',
-              title: itemType,
-              detail: String(item.message ?? item.text ?? '').slice(0, 200),
-            })
-          }
-          return { textDelta: '' }
-        }
-        if (type === 'turn.started') {
-          emit({ kind: 'status', title: '回合開始' })
-          return { textDelta: '' }
-        }
-        if (type === 'turn.completed' || type === 'turn.failed') {
-          emit({
-            kind: type === 'turn.failed' ? 'error' : 'status',
-            title: type === 'turn.failed' ? '回合失敗' : '回合完成',
-            detail: String(
-              (j.error as { message?: string } | undefined)?.message ?? j.message ?? '',
-            ).slice(0, 300),
-            ok: type !== 'turn.failed',
-          })
-          return { textDelta: '' }
-        }
-        if (type === 'error' || type === 'rate_limit_event') {
-          const msg =
-            typeof j.message === 'string'
-              ? j.message
-              : String(
-                  (j.rate_limit_info as { status?: string } | undefined)?.status ||
-                    j.error ||
-                    'error',
-                )
-          emit({ kind: 'error', title: type === 'rate_limit_event' ? '用量限制' : '錯誤', detail: msg.slice(0, 400), ok: false })
-          return { textDelta: '' }
-        }
-        if (type === 'thread.started' || type === 'system') {
-          // init noise — keep feed clean unless useful subtype
-          if (subtype === 'init') {
-            emit({
-              kind: 'status',
-              title: 'CLI 就緒',
-              detail: String(j.model || j.cwd || '').slice(0, 120),
-            })
-          }
-          return { textDelta: '' }
-        }
 
         // ── Generic tool events (Claude/Cursor/Grok) ──
         if (
@@ -1352,9 +1135,9 @@ function createCliStreamParser(
   return {
     push(chunk: string, channel: 'stdout' | 'stderr') {
       let textDelta = ''
-      buf += chunk
-      const parts = buf.split(/\r?\n/)
-      buf = parts.pop() ?? ''
+      buffers[channel] += chunk
+      const parts = buffers[channel].split(/\r?\n/)
+      buffers[channel] = parts.pop() ?? ''
       for (const line of parts) {
         const r = handleLine(line, channel)
         if (r.textDelta) textDelta += r.textDelta
@@ -1362,9 +1145,10 @@ function createCliStreamParser(
       return { textDelta }
     },
     flush() {
-      if (buf.trim()) {
-        handleLine(buf, 'stdout')
-        buf = ''
+      for (const channel of ['stdout', 'stderr'] as const) {
+        if (!buffers[channel].trim()) continue
+        handleLine(buffers[channel], channel)
+        buffers[channel] = ''
       }
     },
     getAssembledText() {

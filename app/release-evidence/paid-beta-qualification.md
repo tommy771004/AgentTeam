@@ -1,9 +1,11 @@
 # Paid Beta Release Qualification: NO-GO
 
 - Version: unknown
-- Evaluated: 2026-08-31T04:00:15.810Z
+- Evaluated: 2026-09-01T02:58:55.751Z
 - Owner: release-engineering
-- Criteria: 0/43 passed
+- Criteria: 0/49 passed
+- Automated repository hardening: BLOCKED (0/6)
+- External release evidence: BLOCKED
 
 ## Failed criteria
 - windows-signed-x64: Windows signed artifact
@@ -49,6 +51,12 @@
 - trust-checksums: Checksums
 - trust-sbom: SBOM
 - trust-provenance: Provenance
+- hardening-releasePromotion: Verified channel promotion contract
+- hardening-credentialBoundary: Main-only credential boundary
+- hardening-settingsRecovery: Atomic settings recovery
+- hardening-deterministicGuards: Deterministic repository guards
+- hardening-mergeBaseComplexity: Merge-base complexity qualification
+- hardening-shippedRuntimeCiCoverage: Shipped-runtime CI coverage
 
 ## Warnings and mitigations
 - None

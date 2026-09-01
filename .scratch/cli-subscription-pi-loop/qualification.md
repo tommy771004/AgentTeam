@@ -1,7 +1,14 @@
 # Qualification — cli-subscription-pi-loop（ADR-0052）
 
 日期：2026-08-26 · 機器：開發機（macOS，有真實 Codex CLI 登入；無 Claude CLI 登入）
-結論：**GO** — 六項全過，無降級。
+結論：**GO** — 原六項全過；2026-09-01 OAuth rotation follow-up 亦通過。
+
+## 2026-09-01 OAuth rotation follow-up ✅
+
+- `followCliOAuthAccount` 成為 Host persisted policy，預設開啟；同 source 的 token rotation／帳號切換會在 startup、Settings 與 pre-turn 邊界同步，opt-out 則維持 conflict。
+- credential refresh 以 Host queue 序列化；Pi auth atomic temp path 加入 UUID，避免同 process 競態。
+- `smoke-pi-user-config.mts`、`smoke-pi-host-protocol.mts`、settings／migration smokes、build、oxlint 與 Electron Settings lifecycle E2E 全綠；淨空 `SUBAGENTS_PI_SYNC_CLI_OAUTH` 後完整 `npm run smoke` 主鏈 exit 0。
+- 真機 `npm run qualify:subscription-oauth-rotation`：隔離環境先重現 invalidated OAuth，再於同一長駐 Host 換入目前 CLI credential，最終 `settlement=answered`，無需 restart。
 
 ## 1. 建置與靜態驗證 ✅
 

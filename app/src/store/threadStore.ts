@@ -246,7 +246,7 @@ interface ThreadStore {
   /** Create a new thread containing only a replay-safe user checkpoint prefix. */
   forkThreadFromCheckpoint: (id: string, bubbleId: string) => string | null
   selectThread: (id: string) => void
-  deleteThread: (id: string) => void
+  deleteThread: (id: string, nextActiveId?: string | null) => void
   renameThread: (id: string, title: string) => void
   setModel: (id: string, model: string) => void
   setThinkingDepth: (id: string, depth: ThinkingDepth) => void
@@ -877,19 +877,22 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     if (selected.projectRoot) followThreadProject(selected.projectRoot)
   },
 
-  deleteThread: (id) => {
+  deleteThread: (id, nextActiveId) => {
     const previous = get()
     // Stop the run, drop queued follow-ups, tombstone the Host session first —
     // otherwise the row disappears while the thread is still alive underneath.
     disposeThreadRuntime(id, previous.runningRunIds[id])
     let threads = previous.threads.filter((t) => t.id !== id)
     let activeId = previous.activeId
+    let nextActive: Thread | undefined
     if (threads.length === 0) {
       const t = emptyThread()
       threads = [t]
       activeId = t.id
+      nextActive = t
     } else if (activeId === id) {
-      activeId = threads[0].id
+      nextActive = threads.find((thread) => thread.id === nextActiveId) || threads[0]
+      activeId = nextActive.id
     }
     const runningRunIds = { ...previous.runningRunIds }
     delete runningRunIds[id]
@@ -900,6 +903,9 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
         : runningThreadIds.at(-1) || null
     set({ threads, activeId, runningRunIds, runningThreadIds, runningThreadId })
     persist(threads, activeId)
+    if (previous.activeId === id && nextActive?.projectRoot) {
+      followThreadProject(nextActive.projectRoot)
+    }
   },
 
   renameThread: (id, title) => {

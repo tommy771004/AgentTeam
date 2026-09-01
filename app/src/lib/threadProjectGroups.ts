@@ -4,6 +4,9 @@ import type { Thread } from '../store/threadStore'
 export const COLLAPSED_PER_PROJECT = 4
 /** Threads that never ran carry no project binding; they group under this key. */
 const UNBOUND_KEY = '\u0000unbound'
+export const THREAD_PROJECT_ORDER_STORAGE_KEY = 'agentstudio:thread-project-order:v1'
+export const THREAD_ORDER_STORAGE_KEY = 'agentstudio:thread-order:v1'
+const MAX_DURABLE_ORDER_KEYS = 512
 
 export type ProjectGroup = {
   key: string
@@ -26,6 +29,127 @@ export type ProjectThreadSidebarInput = {
   activeName?: string
   query: string
   expanded: boolean
+  /** Durable user-defined folder order. Selection/activity never mutate it. */
+  projectOrder?: readonly string[]
+  /** Durable conversation order. Pi Host enumeration never mutates it. */
+  threadOrder?: readonly string[]
+}
+
+function boundDurableOrder(order: readonly string[], liveKeys: readonly string[]): string[] {
+  const live = new Set(liveKeys)
+  const seen = new Set<string>()
+  const unique: string[] = []
+  for (const key of order) {
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    unique.push(key)
+  }
+  if (unique.length <= MAX_DURABLE_ORDER_KEYS) return unique
+  const dormantBudget = Math.max(0, MAX_DURABLE_ORDER_KEYS - live.size)
+  const retainedDormant = new Set(
+    unique.filter((key) => !live.has(key)).slice(0, dormantBudget),
+  )
+  return unique.filter((key) => live.has(key) || retainedDormant.has(key))
+}
+
+/**
+ * Keep only live folder keys, preserve the user's surviving order, then append
+ * folders discovered later. This is the lifecycle boundary for reload, archive,
+ * delete, and first-seen projects.
+ */
+export function reconcileProjectOrder(
+  order: readonly string[],
+  liveKeys: readonly string[],
+): string[] {
+  const live = new Set(liveKeys)
+  const seen = new Set<string>()
+  const next: string[] = []
+  for (const key of [...order, ...liveKeys]) {
+    if (!live.has(key) || seen.has(key)) continue
+    seen.add(key)
+    next.push(key)
+  }
+  return next
+}
+
+/**
+ * Extend the durable preference without deleting temporarily absent folders.
+ * Pi Host hydration is asynchronous, so an empty/intermediate renderer frame
+ * must not erase order entries that will become live moments later.
+ */
+export function mergeProjectOrder(
+  order: readonly string[],
+  liveKeys: readonly string[],
+): string[] {
+  const seen = new Set<string>()
+  const next: string[] = []
+  for (const key of [...order, ...liveKeys]) {
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    next.push(key)
+  }
+  return boundDurableOrder(next, liveKeys)
+}
+
+/**
+ * Preserve known conversation positions, put genuinely new conversations at
+ * the front, and retain temporarily absent Host sessions across hydration.
+ */
+export function mergeThreadOrder(
+  order: readonly string[],
+  liveKeys: readonly string[],
+): string[] {
+  const known = new Set(order)
+  const newlyDiscovered = liveKeys.filter((key) => !known.has(key))
+  return boundDurableOrder([...newlyDiscovered, ...order], liveKeys)
+}
+
+/** Move one folder immediately before or after another folder. */
+export function reorderProject(
+  order: readonly string[],
+  draggedKey: string,
+  targetKey: string,
+  position: 'before' | 'after' = 'before',
+): string[] {
+  if (draggedKey === targetKey || !order.includes(draggedKey) || !order.includes(targetKey)) {
+    return [...order]
+  }
+  const next = order.filter((key) => key !== draggedKey)
+  const targetIndex = next.indexOf(targetKey)
+  next.splice(targetIndex + (position === 'after' ? 1 : 0), 0, draggedKey)
+  return next
+}
+
+export function moveProjectByOffset(
+  order: readonly string[],
+  projectKey: string,
+  offset: -1 | 1,
+): string[] {
+  const index = order.indexOf(projectKey)
+  const target = index + offset
+  if (index < 0 || target < 0 || target >= order.length) return [...order]
+  const next = [...order]
+  ;[next[index], next[target]] = [next[target], next[index]]
+  return next
+}
+
+/** Pick the next visible row, falling back to the previous row at the end. */
+export function nextThreadAfterDelete(order: readonly string[], deletedId: string): string | null {
+  const index = order.indexOf(deletedId)
+  if (index < 0) return order[0] || null
+  return order[index + 1] || order[index - 1] || null
+}
+
+export function parseProjectOrder(raw: string | null): string[] {
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed)
+      ? parsed.filter((key): key is string => typeof key === 'string' && key.length > 0)
+      : []
+  } catch {
+    return []
+  }
 }
 
 function projectNameFromRoot(root: string): string {
@@ -37,13 +161,15 @@ function projectNameFromRoot(root: string): string {
  * Group conversations by the project they ran against.
  *
  * The active project always gets a row even with no conversations yet — that
- * empty state is what 「沒有對話」 renders. Groups are ordered active-first,
- * then by most recent activity, with the unbound group last.
+ * empty state is what 「沒有對話」 renders. A supplied user order is stable;
+ * only the first-time fallback uses active-first and recent activity.
  */
 export function buildProjectGroups(
   threads: Thread[],
   activeRoot: string,
   activeName?: string,
+  projectOrder?: readonly string[],
+  threadOrder?: readonly string[],
 ): ProjectGroup[] {
   const byKey = new Map<string, ProjectGroup>()
   const root = activeRoot.trim()
@@ -66,10 +192,28 @@ export function buildProjectGroups(
     }
     group.threads.push(thread)
   }
+  if (threadOrder) {
+    const threadRank = new Map(threadOrder.map((key, index) => [key, index] as const))
+    for (const group of byKey.values()) {
+      group.threads.sort((a, b) => {
+        const aRank = threadRank.get(a.id) ?? Number.MAX_SAFE_INTEGER
+        const bRank = threadRank.get(b.id) ?? Number.MAX_SAFE_INTEGER
+        return aRank - bRank
+      })
+    }
+  }
   const recency = (group: ProjectGroup) =>
     group.threads.reduce((latest, thread) => (thread.updatedAt > latest ? thread.updatedAt : latest), '')
+  const orderRank = projectOrder
+    ? new Map(projectOrder.map((key, index) => [key, index] as const))
+    : null
   return [...byKey.values()].sort((a, b) => {
     if (a.key === b.key) return 0
+    if (orderRank) {
+      const aRank = orderRank.get(a.key) ?? Number.MAX_SAFE_INTEGER
+      const bRank = orderRank.get(b.key) ?? Number.MAX_SAFE_INTEGER
+      if (aRank !== bRank) return aRank - bRank
+    }
     if (a.key === UNBOUND_KEY) return 1
     if (b.key === UNBOUND_KEY) return -1
     if (a.key === root) return -1
@@ -91,8 +235,10 @@ export function projectThreadSidebar({
   activeName,
   query,
   expanded,
+  projectOrder,
+  threadOrder,
 }: ProjectThreadSidebarInput): ThreadSidebarProjection {
-  const groups = buildProjectGroups(threads, activeRoot, activeName)
+  const groups = buildProjectGroups(threads, activeRoot, activeName, projectOrder, threadOrder)
   const normalizedQuery = query.trim().toLowerCase()
   const searching = normalizedQuery.length > 0
   const truncated = groups.some((group) => group.threads.length > COLLAPSED_PER_PROJECT)

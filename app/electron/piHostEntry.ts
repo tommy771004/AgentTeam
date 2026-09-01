@@ -100,7 +100,9 @@ const memoryControlEvaluationAuthority = await loadMemoryControlEvaluationAuthor
 )
 const memoryControlMaintenanceToken = process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
 delete process.env.SUBAGENTS_MEMORY_CONTROL_MAINTAINER_TOKEN
-const userConfig = await bootstrapPiUserConfig()
+const userConfig = await bootstrapPiUserConfig({
+  followCliAccount: storedState.settings.followCliOAuthAccount !== false,
+})
 const migrationPath = process.env.SUBAGENTS_PI_SETTINGS_MIGRATION_PATH || path.join(path.dirname(statePath), 'pi-settings-migration.json')
 let migratedSettings = storedState.settings
 try {
@@ -190,16 +192,19 @@ async function buildSubscriptionConfig(
 
 const config = await buildSubscriptionConfig(userConfig, storedState.config)
 let latestSubscriptionConfig = config
-let refreshSubscriptionConfigInFlight: Promise<PiHostConfigStatus> | undefined
-const refreshSubscriptionConfig = (): Promise<PiHostConfigStatus> => {
-  if (refreshSubscriptionConfigInFlight) return refreshSubscriptionConfigInFlight
-  refreshSubscriptionConfigInFlight = (async () => {
-    const refreshedUserConfig = await bootstrapPiUserConfig()
+let refreshSubscriptionConfigQueue: Promise<void> = Promise.resolve()
+const refreshSubscriptionConfig = (followCliAccount?: boolean): Promise<PiHostConfigStatus> => {
+  // Settings and turn requests can overlap. Serialize credential reads/writes
+  // so a policy toggle cannot piggyback another request's decision and two
+  // atomic auth replacements cannot race each other.
+  const pending = refreshSubscriptionConfigQueue.then(async () => {
+    const refreshedUserConfig = await bootstrapPiUserConfig({ followCliAccount })
     const refreshedConfig = await buildSubscriptionConfig(refreshedUserConfig, latestSubscriptionConfig)
     latestSubscriptionConfig = refreshedConfig
     return refreshedConfig
-  })().finally(() => { refreshSubscriptionConfigInFlight = undefined })
-  return refreshSubscriptionConfigInFlight
+  })
+  refreshSubscriptionConfigQueue = pending.then(() => undefined, () => undefined)
+  return pending
 }
 const initialSnapshot: PiHostSnapshot = { ...storedState, settings: effectiveSettings, settingsOrigin, config }
 await savePiHostState(statePath, initialSnapshot)

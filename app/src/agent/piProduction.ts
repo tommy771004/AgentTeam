@@ -30,6 +30,7 @@ export type PiSettingsPatch = {
   approvalMode?: 'always' | 'auto' | 'full'
   bashRequireAsk?: boolean
   unattended?: boolean
+  followCliOAuthAccount?: boolean
   workspaceTextSearch?: boolean
 }
 
@@ -38,6 +39,7 @@ export type PiHostSettingsProjection = {
   model: string
   approvalMode: LlmSettings['approvalMode']
   unattended: boolean
+  followCliOAuthAccount?: boolean
   workspaceTextSearch?: boolean
 }
 
@@ -49,6 +51,7 @@ export function llmSettingsFromPiHost(pi: PiHostSettingsProjection): Partial<Llm
     model: pi.model,
     approvalMode: pi.approvalMode,
     unattended: pi.unattended,
+    followCliOAuthAccount: pi.followCliOAuthAccount !== false,
     workspaceTextSearch: pi.workspaceTextSearch === true,
     ...(provider && isSubscriptionProviderPreset(provider) ? { baseUrl: '', apiKey: '' } : {}),
   }
@@ -75,6 +78,7 @@ const PI_SETTINGS_FIELD_BY_KEY = {
   approvalMode: 'approvalMode',
   bashRequireAsk: 'bashRequireAsk',
   unattended: 'unattended',
+  followCliOAuthAccount: 'followCliOAuthAccount',
   workspaceTextSearch: 'workspaceTextSearch',
 } as const satisfies Partial<Record<keyof LlmSettings, keyof PiSettingsPatch>>
 

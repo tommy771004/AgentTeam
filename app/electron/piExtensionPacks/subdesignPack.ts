@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs'
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { join, relative, resolve, isAbsolute } from 'node:path'
 import { registerPiExtensionPack, type PiPackTool, type PiToolContext } from '../piToolHost.ts'

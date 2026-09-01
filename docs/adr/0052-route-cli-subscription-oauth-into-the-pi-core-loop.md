@@ -63,12 +63,15 @@ API-key connections.
    account ids. `auth.json` stays at mode 0600 inside the agent dir; this is
    Pi's own auth storage, deliberately distinct from the connector vault,
    which continues to own connector/plugin tokens.
-2. **Fail-closed selection.** A provider whose OAuth sync reports `conflict`
-   (two different accounts) or that has no stored credential is presented as
-   unavailable with the reason; there is no silent fallback to env keys or to
-   another provider (vendored `resolveProviderAuth` already refuses ambient
-   fallback once a stored credential exists — we keep that posture). Conflicts
-   require explicit user resolution in Settings; the Host never arbitrates.
+2. **CLI account authority is explicit and Host-owned.** The persisted
+   `followCliOAuthAccount` setting defaults on. When the existing credential
+   carries the same `subagentsSource.kind` as the currently selected CLI, the
+   Host treats that CLI login as the authority and atomically adopts both token
+   rotations and account changes at startup, Settings refresh/update, and the
+   pre-turn boundary. Turning the setting off restores fail-closed account
+   identity: a different account reports `conflict` and is unavailable. A
+   credential from another source channel is never overwritten by this policy,
+   and there is no fallback to ambient keys or another provider.
 3. **Model enumeration comes from the Host**, not from an HTTP `/v1/models`
    call: the protocol exposes the `ModelRuntime` view of available models for
    native providers (bounded list: id, label, context window, reasoning flag).
@@ -103,8 +106,9 @@ API-key connections.
   buying separate API credit, while users who want vendor-native agents keep
   the external CLI runner unchanged.
 - New failure surfaces to document: subscription rate limits and program terms
-  apply to API-style usage; refresh rotation conflicts are surfaced, not
-  auto-resolved; offline startup must degrade to the last cached model catalog
+  apply to API-style usage; account changes follow the selected CLI by default
+  and conflicts remain visible when that policy is disabled; offline startup
+  must degrade to the last cached model catalog
   (the same caveat DEV_STATE records for the vendor build's remote catalog).
 - Implementation touches one renderer preset surface, one settings mapping,
   and one protocol capability; no coordinator, admission, journal, or vault

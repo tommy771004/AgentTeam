@@ -211,7 +211,21 @@ function providerSettingsPatch(providerId: ApiProviderPreset): Partial<LlmSettin
 
 function ProviderCredentialFields({ settings, set }: { settings: LlmSettings; set: SettingsPatch }) {
   const subscription = isSubscriptionProviderPreset(settings.apiProvider)
-  if (subscription) return <SubscriptionConnectionStatus />
+  if (subscription) return (
+    <>
+      <SettingsRow
+        title="跟隨 CLI 登入帳號"
+        description="每次啟動、查看設定與送出任務前，同步目前 CLI 帳號及最新 OAuth；關閉後跨帳號切換會標示衝突。"
+        control={
+          <SettingsToggle
+            checked={settings.followCliOAuthAccount !== false}
+            onChange={(value) => set({ followCliOAuthAccount: value })}
+          />
+        }
+      />
+      <SubscriptionConnectionStatus />
+    </>
+  )
   return (
     <>
       <SettingsStack title="Base URL">
@@ -485,6 +499,7 @@ export function SettingsPage() {
   const refreshPluginTokens = useLearningStore((s) => s.refreshPluginTokens)
   // Recompute secret key list when plugins change
   const pluginsTick = useLearningStore((s) => s.plugins)
+  const [customToolVaultKeys, setCustomToolVaultKeys] = useState<string[]>([])
   const approveToolPackage = useLearningStore((s) => s.approveToolPackage)
 
   /** Instant apply — no save button */
@@ -719,8 +734,20 @@ export function SettingsPage() {
     for (const { id } of listPluginSecretMeta()) {
       if (!id.startsWith('credential:')) found.add(id)
     }
+    for (const key of customToolVaultKeys) found.add(key)
     return [...found].sort()
-  }, [settings, pluginsTick])
+  }, [settings, pluginsTick, customToolVaultKeys])
+
+  useEffect(() => {
+    let cancelled = false
+    void window.subagents?.credentials?.intent({ action: 'list' }).then((result) => {
+      if (cancelled || !result.ok) return
+      setCustomToolVaultKeys(result.metadata
+        .filter((item) => item.kind === 'custom-tool')
+        .map((item) => item.ownerId))
+    })
+    return () => { cancelled = true }
+  }, [pluginsTick])
   const toolTuning = useMemo(
     () => recommendToolTuning(settings.model || settings.roleModels?.orchestrator || ''),
     [settings.model, settings.roleModels?.orchestrator],

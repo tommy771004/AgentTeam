@@ -10,6 +10,8 @@ export type PiSettings = {
   /** Segment-aware Bash policy; dangerous/unsplittable commands always ask. */
   bashRequireAsk: boolean
   unattended: boolean
+  /** Follow account changes made in the owning Codex/Claude CLI login. */
+  followCliOAuthAccount: boolean
   /**
    * Enables the Host-owned progressive workspace text-search pack.
    *
@@ -30,6 +32,7 @@ export const DEFAULT_PI_SETTINGS: PiSettings = {
   approvalMode: 'auto',
   bashRequireAsk: true,
   unattended: false,
+  followCliOAuthAccount: true,
   workspaceTextSearch: false,
 }
 
@@ -51,6 +54,8 @@ export function compileEffectiveAgentProfile(
     approvalMode: taskOverride?.approvalMode || role?.approvalMode || settings.approvalMode,
     bashRequireAsk: taskOverride?.bashRequireAsk ?? role?.bashRequireAsk ?? settings.bashRequireAsk,
     unattended: taskOverride?.unattended ?? role?.unattended ?? settings.unattended,
+    // Credential authority policy is persisted Host state, never a turn override.
+    followCliOAuthAccount: settings.followCliOAuthAccount !== false,
     // Governance root: per-turn/profile overrides cannot open this capability.
     // Only persisted Host Settings may change it, and turn admission freezes it.
     workspaceTextSearch: settings.workspaceTextSearch === true,
@@ -87,17 +92,11 @@ export function validatePiSettingsPatch(patch: Record<string, unknown>): Partial
     if (!['always', 'auto', 'full'].includes(String(patch.approvalMode))) throw new Error(`Unsupported approval mode: ${String(patch.approvalMode)}`)
     next.approvalMode = patch.approvalMode as PiSettings['approvalMode']
   }
-  if ('bashRequireAsk' in patch) {
-    if (typeof patch.bashRequireAsk !== 'boolean') throw new Error('bashRequireAsk must be a boolean')
-    next.bashRequireAsk = patch.bashRequireAsk
-  }
-  if ('unattended' in patch) {
-    if (typeof patch.unattended !== 'boolean') throw new Error('unattended must be a boolean')
-    next.unattended = patch.unattended
-  }
-  if ('workspaceTextSearch' in patch) {
-    if (typeof patch.workspaceTextSearch !== 'boolean') throw new Error('workspaceTextSearch must be a boolean')
-    next.workspaceTextSearch = patch.workspaceTextSearch
+  const booleanFields = ['bashRequireAsk', 'unattended', 'followCliOAuthAccount', 'workspaceTextSearch'] as const
+  for (const field of booleanFields) {
+    if (!(field in patch)) continue
+    if (typeof patch[field] !== 'boolean') throw new Error(`${field} must be a boolean`)
+    next[field] = patch[field]
   }
   return next
 }

@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import type { PiSettings, PiThinkingLevel } from './piAgentProfile.ts'
@@ -21,6 +22,11 @@ export type PiUserConfigBootstrap = {
   authPath?: string
   settings: Partial<Pick<PiSettings, 'provider' | 'model' | 'thinkingLevel' | 'compaction'>>
   oauth: PiOAuthSyncStatus
+}
+
+export type PiUserConfigBootstrapOptions = {
+  /** Follow a re-login performed through the same CLI credential source. */
+  followCliAccount?: boolean
 }
 
 type PiOAuthCredential = JsonObject & {
@@ -196,20 +202,24 @@ function sourceMarker(value: unknown): { kind?: string; updatedAt?: string } | u
   }
 }
 
-function shouldImportCredential(current: unknown, incoming: OAuthImport): 'import' | 'skip' | 'conflict' {
+function shouldImportCredential(
+  current: unknown,
+  incoming: OAuthImport,
+  options: PiUserConfigBootstrapOptions,
+): 'import' | 'skip' | 'conflict' {
   const existing = asObject(current)
   if (!existing) return 'import'
   if (existing.type !== 'oauth') return 'conflict'
 
-  // Account identity is a security boundary, including when both credentials
-  // came from the same CLI channel. ADR-0052 requires an explicit Settings
-  // resolution instead of treating a CLI re-login as permission to replace
-  // the credential already owned by Pi.
+  // A credential imported from this same CLI channel may follow the user's
+  // current CLI login. This is an explicit persisted Settings policy (on by
+  // default); opting out keeps account identity as a fail-closed boundary.
   const marker = sourceMarker(existing)
   const sameChannel = marker?.kind === incoming.sourceKind
 
   const existingAccountId = credentialAccountId(existing)
   if (incoming.accountId && existingAccountId && incoming.accountId !== existingAccountId) {
+    if (sameChannel && options.followCliAccount !== false) return 'import'
     return 'conflict'
   }
   if (existing.access === incoming.credential.access && existing.refresh === incoming.credential.refresh) return 'skip'
@@ -225,7 +235,10 @@ function shouldImportCredential(current: unknown, incoming: OAuthImport): 'impor
   return 'import'
 }
 
-async function syncPiCliOAuth(agentDir: string): Promise<PiOAuthSyncStatus> {
+async function syncPiCliOAuth(
+  agentDir: string,
+  options: PiUserConfigBootstrapOptions,
+): Promise<PiOAuthSyncStatus> {
   const sources: OAuthImport[] = []
   const codexPath = envPath('SUBAGENTS_CODEX_AUTH_PATH') || path.join(os.homedir(), '.codex', 'auth.json')
   if (existsSync(codexPath)) {
@@ -256,7 +269,7 @@ async function syncPiCliOAuth(agentDir: string): Promise<PiOAuthSyncStatus> {
   const next = { ...(existing || {}) }
   let changed = false
   for (const source of sources) {
-    const decision = shouldImportCredential(next[source.provider], source)
+    const decision = shouldImportCredential(next[source.provider], source, options)
     if (decision === 'conflict') {
       status.conflicts.push(source.provider)
       continue
@@ -278,19 +291,21 @@ async function syncPiCliOAuth(agentDir: string): Promise<PiOAuthSyncStatus> {
   if (!changed) return status
 
   await mkdir(agentDir, { recursive: true, mode: 0o700 })
-  const temporaryPath = `${authPath}.${process.pid}.tmp`
+  const temporaryPath = `${authPath}.${process.pid}.${randomUUID()}.tmp`
   await writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
   await rename(temporaryPath, authPath)
   return status
 }
 
-export async function bootstrapPiUserConfig(): Promise<PiUserConfigBootstrap> {
+export async function bootstrapPiUserConfig(
+  options: PiUserConfigBootstrapOptions = {},
+): Promise<PiUserConfigBootstrap> {
   const agentDir = resolvePiAgentDir()
   if (!agentDir) return { settings: {}, oauth: { sources: [], sourceKinds: [], importedProviders: [], skippedProviders: [], conflicts: [] } }
   const native = await readNativePiSettings(agentDir)
   let oauth: PiOAuthSyncStatus = { sources: [], sourceKinds: [], importedProviders: [], skippedProviders: [], conflicts: [] }
   try {
-    oauth = await syncPiCliOAuth(agentDir)
+    oauth = await syncPiCliOAuth(agentDir, options)
   } catch (error) {
     console.error('[pi-host] CLI OAuth sync skipped', error)
   }

@@ -33,7 +33,25 @@ npm install
 npm run dev
 ```
 
-This starts Vite + Electron. The UI also works in the browser at `http://localhost:5173` (archive falls back to memory without Electron IPC).
+This starts Vite + Electron. The browser URL at `http://localhost:5173` is a
+**plain-browser UI/degraded preview** only; it does not provide production Pi
+Core Host execution or its durable authority guarantees.
+
+## Readiness vocabulary
+
+- **compile success** — `npm run build`; compilation only, never a release claim.
+- **deterministic qualification** — `npm run qualify:deterministic`; blocking,
+  non-interactive repository guards without Electron App launch or signing.
+- **platform qualification** — explicit macOS/Windows runtime, installer,
+  signature/notarization, and clean-machine evidence jobs.
+- **release-ready** — the release workflow verifies one coherent immutable
+  candidate and its receipts; package success alone cannot reach this state.
+- **Paid Beta GO** — only the Paid Beta qualifier may declare it after every
+  required external and automated criterion passes. The retained local report
+  is currently **NO-GO (0/49)**.
+
+`npm run smoke` is the full repository qualification. `build` and `dist:*`
+remain compilation/packaging-only and never imply any later readiness state.
 
 ## Build installers
 

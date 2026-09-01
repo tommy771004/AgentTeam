@@ -1,6 +1,6 @@
 # Release Qualification 與 Repository Hardening
 
-Status: 可交給代理
+Status: resolved
 
 ## Problem Statement
 
@@ -14,7 +14,7 @@ Credential boundary 也尚未收口。Telegram、Webhook 與 custom-tool credent
 
 Repository qualification 同樣存在名實落差：純編譯 build 正確維持不執行 smoke／E2E／App launch，但 CI 與 release 沒有另行執行完整 deterministic architecture guards；complexity baseline 使用 `HEAD^` 而非 PR merge-base；只修改 packaged `vendor/pi` 的 PR 不會觸發 blocking CI；macOS 特有風險要等 release 才會被發現。Settings persistence 非原子操作、initial renderer bundle 過大、control-flow hotspots 與 source-text smoke 拓撲也持續增加維護風險。
 
-截至規格建立時，Paid Beta qualifier 仍是 **NO-GO（0/43）**。本 effort 不得把自動 smoke、CLI process success、unsigned local package 或模型文字解讀成 release readiness。
+截至本 effort 收口，Paid Beta qualifier 仍是 **NO-GO（0/49）**。本 effort 不得把自動 smoke、CLI process success、unsigned local package 或模型文字解讀成 release readiness。
 
 ## Solution
 

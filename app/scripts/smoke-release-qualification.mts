@@ -25,6 +25,7 @@ const incomplete: ReleaseQualificationInput = {
   entitlement: { freeCore: false, activePro: false, offlineGrace: false, expired: false, cancelled: false, packRollback: false },
   workflow: { spec: false, tickets: false, tdd: false, review: false, artifactIndex: false, handoff: false, userApprovalBeforeRelease: false },
   trust: { privacy: false, security: false, eula: false, terms: false, refund: false, support: false, releaseNotes: false, checksums: false, sbom: false, provenance: false },
+  hardening: { releasePromotion: false, credentialBoundary: false, settingsRecovery: false, deterministicGuards: false, mergeBaseComplexity: false, shippedRuntimeCiCoverage: false },
   warnings: [{ id: 'signed-artifacts', summary: '實機簽章證據尚未提供', owner: 'release-engineering', mitigation: '完成雙平台 clean-machine proof 後重跑 qualification' }],
 }
 
@@ -45,6 +46,7 @@ const complete: ReleaseQualificationInput = {
   entitlement: { freeCore: true, activePro: true, offlineGrace: true, expired: true, cancelled: true, packRollback: true },
   workflow: { spec: true, tickets: true, tdd: true, review: true, artifactIndex: true, handoff: true, userApprovalBeforeRelease: true },
   trust: { privacy: true, security: true, eula: true, terms: true, refund: true, support: true, releaseNotes: true, checksums: true, sbom: true, provenance: true },
+  hardening: { releasePromotion: true, credentialBoundary: true, settingsRecovery: true, deterministicGuards: true, mergeBaseComplexity: true, shippedRuntimeCiCoverage: true },
   warnings: [],
 }
 const go = buildReleaseQualification(complete, '2026-07-19T06:01:00.000Z')

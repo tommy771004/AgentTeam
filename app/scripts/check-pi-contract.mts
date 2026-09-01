@@ -242,6 +242,7 @@ const protocolDomains = [
   ['Session', 'electron/piHostSessionDomain.ts', 'handlePiHostSessionDomain', 'sessions/', undefined],
   ['Run', 'electron/piHostRunDomain.ts', 'handlePiHostRunDomain', 'runs/', 'handleRunRequest'],
   ['Tool', 'electron/piHostToolDomain.ts', 'handlePiHostToolDomain', 'tools/', undefined],
+  ['Turn', 'electron/piHostTurnDomain.ts', 'handlePiHostTurnDomain', 'turn/', undefined],
 ] as const
 for (const [label, file, owner, prefix, routerHelper] of protocolDomains) {
   assert.match(piHostProtocol, new RegExp(`from './${file.slice('electron/'.length, -3)}\\.ts'`), `${label} domain must be imported by the protocol router`)
@@ -252,7 +253,21 @@ for (const [label, file, owner, prefix, routerHelper] of protocolDomains) {
   assert.match(routeOwner, new RegExp(`\\b${owner}\\(`), `${label} domain must own its protocol route`)
   assert.match(read(file), new RegExp(prefix.replace('/', '\\/')), `${label} domain must name the capability it deletes`)
 }
-assert.doesNotMatch(requestDispatcher, /if \(input\.method === '(?:sessions|runs|tools|approvals)\//, 'session/run/tool method branches must not return to the main dispatcher')
+assert.doesNotMatch(requestDispatcher, /if \(input\.method === '(?:sessions|runs|tools|turn|approvals)\//, 'session/run/tool/turn method branches must not return to the main dispatcher')
+
+// ── Guard 7c: hardening prefactors have one real production owner ──
+// These are intentional deletion/ownership assertions. Their behavior belongs
+// to shipped-module smokes; this guard only proves the seam is actually used.
+const prefactorOwners = [
+  ['src/agent/taskRunAdmission.ts', 'src/agent/taskRunCoordinator.ts', 'decideInitialTaskRunAdmission'],
+  ['electron/piHostTurnDomain.ts', 'electron/piHostProtocol.ts', 'handlePiHostTurnDomain'],
+  ['electron/externalCliProviderParsers.ts', 'electron/localCliRunner.ts', 'parseProviderJsonEvent'],
+  ['src/agent/startupRecoveryPhases.ts', 'src/App.tsx', 'createStartupRecoveryPhaseTracker'],
+] as const
+for (const [module, owner, symbol] of prefactorOwners) {
+  assert.equal(existsSync(join(root, module)), true, `${module} is the declared hardening seam`)
+  assert.match(read(owner), new RegExp(`\\b${symbol}\\b`), `${owner} must remain the production owner of ${symbol}`)
+}
 
 
 // ── Guard 8: a test file must be reachable from a gate ──

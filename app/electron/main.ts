@@ -215,12 +215,7 @@ import type {
   SubDesignArtifactPatchOperation,
   SubDesignExportFormat,
 } from '../src/agent/subdesign/types'
-import {
-  formatExternalCliTerminal,
-  normalizeExternalCliRunPolicy,
-  classifyExternalCliDiagnostic,
-  type ExternalCliConnectorRequirement,
-} from '../src/agent/externalCliRunSession'
+import type { ExternalCliConnectorRequirement } from '../src/agent/externalCliRunSession'
 import {
   captureMigrationSnapshot,
   deferUpdate,
@@ -4190,7 +4185,7 @@ async function importSubDesignReference(input: { briefId?: string; kind?: 'scree
     const importedAt = new Date().toISOString()
     const sha256 = createHash('sha256').update(bytes).digest('hex')
     const reference = { id: refId, kind, source: storedSource, storedPath: path.relative(root, referenceFile).replaceAll(path.sep, '/'), title: title || undefined, importedAt, sha256 }
-    fs.writeFileSync(path.join(referenceDir, `${refId}.json`), JSON.stringify({ reference, analysis, createdAt: importedAt }, null, 2), 'utf8')
+    fs.writeFileSync(path.join(referenceDir, `${refId}.json`), JSON.stringify({ reference, analysis, visualNote, createdAt: importedAt }, null, 2), 'utf8')
     return { ok: true as const, reference }
   } catch (error) {
     return { ok: false as const, error: error instanceof Error ? error.message : String(error) }

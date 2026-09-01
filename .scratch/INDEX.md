@@ -8,7 +8,6 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 | Effort | Spec | Frontier | Notes |
 |--------|------|----------|-------|
-| **release-qualification-hardening** | [spec.md](release-qualification-hardening/spec.md) | [11 Shipped-runtime CI coverage](release-qualification-hardening/issues/11-shipped-runtime-ci-coverage.md) | 01–10 已 resolved：PR complexity 必須從 base SHA 計算 merge-base，缺值 fail closed；multi-commit fixture 鎖住舊 `HEAD^` 漏檢反例，local baseline 仍可明確覆寫。下一步補齊 vendored Pi／runtime-only path 的 blocking CI coverage；Paid Beta 仍維持 NO-GO（0/43）。 |
 | **codex-aligned-personalization-instructions** | [spec.md](codex-aligned-personalization-instructions/spec.md) | [11 External CLI native discovery](codex-aligned-personalization-instructions/issues/11-external-cli-instruction-delivery-modes.md) | 2026-08-31 fresh 真機重跑：Codex CLI 0.150.1 exit 0 且 checkpoint／record 通過，但 native marker 未出現；Claude Code 2.1.246 實際啟動後 auth unavailable。[qualification](codex-aligned-personalization-instructions/qualification.md) 維持 needs-info／unqualified。 |
 | **context-usage-panel** | [spec.md](context-usage-panel/spec.md) | [08 qualification](context-usage-panel/issues/08-qualification.md) | 實作已存在：`ContextUsagePanel`、`projectContextUsage` 與 context projection smoke 均在主鏈；2026-08-28 focused smoke 通過。票內 acceptance 尚未逐條對帳，手動 UI／舊記錄 replay 證據仍須補齊，故不宣稱 resolved。 |
 | **external-cli-durable-harness** | [spec.md](external-cli-durable-harness/spec.md) | [07 qualification](external-cli-durable-harness/issues/07-conversation-concurrency-release-qualification.md) | Durable harness 已落地；2026-08-31 [fresh real CLI report](external-cli-durable-harness/evidence/real-cli-qualification.md) 為 Codex `native_discovery_unproven`、Claude `auth_unavailable`。Grok／Gemini／Cursor 本輪未安裝或登入，故維持 open。 |
@@ -19,6 +18,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 | Effort | Status | 一 hop 證據 |
 |--------|--------|------------|
+| release-qualification-hardening | resolved（20/20 tickets done；[spec.md](release-qualification-hardening/spec.md)） | [qualification.md](release-qualification-hardening/qualification.md)：repository hardening owning gates、readiness vocabulary、build/dist-only topology、tracker links 與 full smoke；外部 signed-platform evidence 缺少，Paid Beta 誠實維持 NO-GO（0/49） |
 | harness-gap-closure | resolved（17/17 tickets done；[spec.md](harness-gap-closure/spec.md)） | #01 architecture narrative 已對齊 `runTask` + Pi Host 並由 legacy zero-reference guard 鎖定；#07／#10／#11／#15 以 shipped modules 與 focused smokes 對帳，#09 sandbox scope 已依 ADR-0047／0051 收口 |
 | host-owned-agent-collaboration | resolved（15/15 tickets done；[spec.md](host-owned-agent-collaboration/spec.md)） | [qualification.md](host-owned-agent-collaboration/qualification.md)：Host-owned agent tree/mailbox/follow-up/wait/conflict/worktree/adoption、Turn Record UI attribution、build/oxlint/full smoke/package-time smoke 全綠；x64/arm64 local unsigned DMG 已產生，signed/notarized publication 仍 fail closed 等待 Apple credentials |
 | usage-ledger | resolved（[spec.md](usage-ledger/spec.md)） | `smoke-usage-ledger.mts`：settlement single ingress、runId idempotent upsert、atomic publish、archive one-shot backfill 與純 projection；[desktop](usage-ledger/evidence/usage-desktop.png)／[narrow](usage-ledger/evidence/usage-narrow.png) rendered evidence |
@@ -35,7 +35,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 | tracker-truth-reconciliation | resolved（2026-08-26 本日收口；[spec.md](tracker-truth-reconciliation/spec.md)） | guard `smoke-tracker-index-links.mts` 掛主鏈並綠；七張對帳票 Comments 附證據；DEV_STATE 同日更新 |
 | pi-host-tool-and-skill-parity | resolved（19/19 驗收框全滿） | `smoke-pi-parity-qualification` 在主鏈；十個 extension pack 落地（ef781cf）、renderer 等價工具刪除＋單一 owner（a6d7754、b0f615a）；唯一 `[~]` 見 known residuals #18 |
 | turn-record-fidelity | resolved（12/12 tickets done） | `smoke-record-fidelity-qualification` 在主鏈；Host 端 seq/turn/step Turn Record，答案／模型歷史／UI Projection 三者皆由它推導（ADR-0039/0049/0050）；刻意 `[~]` 見 known residuals |
-| cli-subscription-pi-loop | resolved（6/6 tickets done） | [qualification.md](cli-subscription-pi-loop/qualification.md)：99 smoke 全綠＋真機 E2E（隔離 dir 匯入真 codex OAuth → gpt-5.4-mini 經 Pi loop 回答）；可重跑 `qualify-subscription-snapshot.mts` / `qualify-subscription-e2e.mts` |
+| cli-subscription-pi-loop | resolved（7/7 tickets done） | [qualification.md](cli-subscription-pi-loop/qualification.md)：原訂閱 E2E＋2026-09-01 OAuth rotation follow-up；隔離環境先重現 invalidated token，再由同一 Host 無重啟同步目前 CLI credential 並回答 |
 | tool-invocation-pipeline / review-cleanup | resolved | — |
 | hermes-aligned-runtime + registry-executor-cleanup | resolved | — |
 | outbound-data-gate（01–25 + evidence residual + PolicyAdmin extract） | resolved | — |
@@ -65,7 +65,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 1. **paid-beta #14 release qualification** — `blocked-pending-real-signed-platform-evidence`
    - 需 clean-machine 上 signed 安裝、CLI doctor、N-1→N、entitlement、workflow 實機證據。
-   - 2026-08-31 重跑 [`qualify-release.mts`](../app/scripts/qualify-release.mts) 為 **NO-GO（0/43）**；retained report 見 [`paid-beta-qualification.md`](../release-evidence/paid-beta-qualification.md)。
+   - 2026-09-01 重跑 [`qualify-release.mts`](../app/scripts/qualify-release.mts) 為 **NO-GO（0/49）**；retained report 見 [`paid-beta-qualification.md`](../app/release-evidence/paid-beta-qualification.md)。
    - 目錄已移除；歷史 No-Go 記錄可自 git 歷史（759d691 之前的 `.scratch/subagents-paid-beta/evidence/`）取回。
 2. **runtime-contract #14 Linux bwrap 真機 qualification** — 需 Linux CI 首綠（macOS seatbelt 已完成）；完成後補勾 #14 三框與 #22 的 2.1。
 3. **Optional polish（非 P0）**

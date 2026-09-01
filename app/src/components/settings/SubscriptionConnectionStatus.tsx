@@ -6,8 +6,8 @@ import { subscriptionCacheBadge, useSubscriptionCatalog } from '../../hooks/useS
  * Reads ONLY availability metadata from the Host snapshot config
  * (`config.subscriptionCatalog`) through the shared loader hook; raw tokens
  * never cross IPC and never reach this component. Rows relay the projection's
- * verdict verbatim — a conflict stays a conflict until the user resolves it in
- * the CLI.
+ * verdict verbatim. A conflict remains possible when automatic CLI-account
+ * following is disabled or when a credential came from another authority.
  */
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -53,7 +53,7 @@ export function SubscriptionConnectionStatus() {
               : entry.reason}
             {entry.availability === 'conflict' ? (
               <>
-                {' '}請在對應 CLI 登出其他帳號後，
+                {' '}請確認 CLI 登入，或啟用「跟隨 CLI 登入帳號」後，
                 <button type="button" onClick={refresh} className="ml-0.5 underline underline-offset-2 hover:text-ink">重新整理</button>
                 以確認。
               </>

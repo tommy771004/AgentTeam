@@ -6,7 +6,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { app } from 'electron'
 import { runBash } from './shellBridge'
 import { executableLookupCommand, firstExecutablePath } from './platformProcess'
 import { inspectCliProviderCapabilities } from './cliCapabilityRegistry.ts'

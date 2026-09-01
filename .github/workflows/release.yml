@@ -56,6 +56,9 @@ jobs:
       RELEASE_ARCH: ${{ matrix.arch }}
       UPDATE_BETA_BASE_URL: ${{ vars.UPDATE_BETA_BASE_URL }}
       UPDATE_STABLE_BASE_URL: ${{ vars.UPDATE_STABLE_BASE_URL }}
+      RELEASE_HARDENING_SIGNING_PRIVATE_KEY: ${{ secrets.RELEASE_HARDENING_SIGNING_PRIVATE_KEY }}
+      RELEASE_HARDENING_PUBLIC_KEY: ${{ vars.RELEASE_HARDENING_PUBLIC_KEY }}
+      RELEASE_HARDENING_KEY_ID: ${{ vars.RELEASE_HARDENING_KEY_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -94,6 +97,24 @@ jobs:
         run: |
           set -o pipefail
           npm run qualify:deterministic 2>&1 | tee release-evidence/deterministic-qualification.log
+
+      - name: Release promotion and credential owner contracts
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run smoke:release-hardening-owners 2>&1 | tee release-evidence/release-hardening-owners.log
+
+      - name: Write workflow-owned release hardening receipt
+        shell: bash
+        run: |
+          node --experimental-strip-types scripts/write-release-hardening-receipt.mts \
+            --output release-evidence/release-hardening-receipt.json \
+            --commit "${{ github.sha }}" \
+            --run-id "${{ github.run_id }}" \
+            --run-attempt "${{ github.run_attempt }}" \
+            --version "$RELEASE_VERSION" \
+            --platform "$RELEASE_PLATFORM" \
+            --arch "$RELEASE_ARCH"
 
       - name: Build
         shell: bash
@@ -354,7 +375,7 @@ jobs:
             echo "version=${RELEASE_VERSION}"
             echo "channel=${RELEASE_CHANNEL}"
             echo "status=${{ job.status }}"
-            echo "logs=npm-ci.log,lint.log,build.log,smoke.log,security-gates.log,npm-audit.json,cli-doctor.log,install-contract.log,install-lifecycle.log,install-launch-restart-uninstall.json,marketplace.log,smoke-built.log,icons.log,package.log,update-migration.log,update-migration-e2e.log,update-key-verification.log,update-manifest.log,update-channel/manifest.json,authenticode.log,windows-signature-verification.json,codesign.log,codesign-mounted.log,gatekeeper.log,gatekeeper-mounted.log,gatekeeper-dmg.log,notarization-dmg.log,dmg-mount.log,dmg-unmount.log,stapler-app.log,stapler-dmg.log,stapler-dmg-validate.log,evidence.log"
+            echo "logs=npm-ci.log,lint.log,build.log,smoke.log,security-gates.log,npm-audit.json,cli-doctor.log,install-contract.log,install-lifecycle.log,install-launch-restart-uninstall.json,marketplace.log,smoke-built.log,icons.log,package.log,deterministic-qualification.log,release-hardening-owners.log,release-hardening-receipt.json,update-migration.log,update-migration-e2e.log,update-key-verification.log,update-manifest.log,update-channel/manifest.json,authenticode.log,windows-signature-verification.json,codesign.log,codesign-mounted.log,gatekeeper.log,gatekeeper-mounted.log,gatekeeper-dmg.log,notarization-dmg.log,dmg-mount.log,dmg-unmount.log,stapler-app.log,stapler-dmg.log,stapler-dmg-validate.log,evidence.log"
           } > release-evidence/verification.log
 
       - name: Upload verification logs
@@ -394,6 +415,9 @@ jobs:
     if: needs.release-gate.result == 'success'
     needs: [package, release-gate]
     runs-on: ubuntu-latest
+    env:
+      RELEASE_HARDENING_PUBLIC_KEY: ${{ vars.RELEASE_HARDENING_PUBLIC_KEY }}
+      RELEASE_HARDENING_KEY_ID: ${{ vars.RELEASE_HARDENING_KEY_ID }}
     defaults:
       run:
         working-directory: app

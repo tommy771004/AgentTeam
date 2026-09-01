@@ -76,6 +76,7 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   bashRequireAsk: true,
   approvalMode: 'auto',
   unattended: false,
+  followCliOAuthAccount: true,
   /** Progressive disclosure of capability bundles (tools + runbooks) */
   capabilitiesEnabled: true,
   alwaysOnCapabilities: [],

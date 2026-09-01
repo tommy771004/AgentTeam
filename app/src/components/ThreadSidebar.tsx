@@ -5,7 +5,19 @@ import { getThinkingDepth } from '../agent/thinking'
 import { getPrimaryAgent } from '../agent/agentModes'
 import { useThreadStore } from '../store/threadStore'
 import { useProjectStore } from '../store/projectStore'
-import { projectThreadSidebar } from '../lib/threadProjectGroups'
+import {
+  buildProjectGroups,
+  mergeProjectOrder,
+  mergeThreadOrder,
+  moveProjectByOffset,
+  nextThreadAfterDelete,
+  parseProjectOrder,
+  projectThreadSidebar,
+  reconcileProjectOrder,
+  reorderProject,
+  THREAD_ORDER_STORAGE_KEY,
+  THREAD_PROJECT_ORDER_STORAGE_KEY,
+} from '../lib/threadProjectGroups'
 import { useSettingsStore } from '../store/settingsStore'
 import { useThreadConversationActions } from '../hooks/useThreadConversationActions'
 
@@ -25,21 +37,141 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
   const [expanded, setExpanded] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [projectOrder, setProjectOrder] = useState<string[]>(() => {
+    try {
+      return parseProjectOrder(window.localStorage.getItem(THREAD_PROJECT_ORDER_STORAGE_KEY))
+    } catch {
+      return []
+    }
+  })
+  const [threadOrder, setThreadOrder] = useState<string[]>(() => {
+    try {
+      return parseProjectOrder(window.localStorage.getItem(THREAD_ORDER_STORAGE_KEY))
+    } catch {
+      return []
+    }
+  })
+  const [undoProjectOrder, setUndoProjectOrder] = useState<string[] | null>(null)
+  const [reorderAnnouncement, setReorderAnnouncement] = useState('')
+  const [draggedProject, setDraggedProject] = useState<string | null>(null)
+  const [dragOverProject, setDragOverProject] = useState<{
+    key: string
+    position: 'before' | 'after'
+  } | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const { forkConversation, replayConversation } = useThreadConversationActions()
 
+  const liveProjectKeys = useMemo(
+    () => buildProjectGroups(threads, activeRoot, activeName).map((group) => group.key),
+    [threads, activeRoot, activeName],
+  )
+  const durableProjectOrder = useMemo(
+    () => mergeProjectOrder(projectOrder, liveProjectKeys),
+    [projectOrder, liveProjectKeys],
+  )
+  const stableProjectOrder = useMemo(
+    () => reconcileProjectOrder(durableProjectOrder, liveProjectKeys),
+    [durableProjectOrder, liveProjectKeys],
+  )
+  const liveThreadKeys = useMemo(
+    () => threads.filter((thread) => !thread.hidden).map((thread) => thread.id),
+    [threads],
+  )
+  const durableThreadOrder = useMemo(
+    () => mergeThreadOrder(threadOrder, liveThreadKeys),
+    [threadOrder, liveThreadKeys],
+  )
+  const stableThreadOrder = useMemo(
+    () => reconcileProjectOrder(durableThreadOrder, liveThreadKeys),
+    [durableThreadOrder, liveThreadKeys],
+  )
+
   const sidebar = useMemo(
-    () => projectThreadSidebar({ threads, activeRoot, activeName, query, expanded }),
-    [threads, activeRoot, activeName, query, expanded],
+    () => projectThreadSidebar({
+      threads,
+      activeRoot,
+      activeName,
+      query,
+      expanded,
+      projectOrder: stableProjectOrder,
+      threadOrder: stableThreadOrder,
+    }),
+    [
+      threads,
+      activeRoot,
+      activeName,
+      query,
+      expanded,
+      stableProjectOrder,
+      stableThreadOrder,
+    ],
+  )
+  const orderedVisibleThreadIds = useMemo(
+    () => buildProjectGroups(
+      threads,
+      activeRoot,
+      activeName,
+      stableProjectOrder,
+      stableThreadOrder,
+    ).flatMap((group) => group.threads.map((thread) => thread.id)),
+    [threads, activeRoot, activeName, stableProjectOrder, stableThreadOrder],
   )
 
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus()
   }, [searchOpen])
 
+  useEffect(() => {
+    if (
+      projectOrder.length !== durableProjectOrder.length
+      || projectOrder.some((key, index) => key !== durableProjectOrder[index])
+    ) {
+      setProjectOrder(durableProjectOrder)
+    }
+    try {
+      window.localStorage.setItem(
+        THREAD_PROJECT_ORDER_STORAGE_KEY,
+        JSON.stringify(durableProjectOrder),
+      )
+    } catch {
+      /* UI order persistence is best-effort; the live stable order still works. */
+    }
+  }, [projectOrder, durableProjectOrder])
+
+  useEffect(() => {
+    if (
+      threadOrder.length !== durableThreadOrder.length
+      || threadOrder.some((key, index) => key !== durableThreadOrder[index])
+    ) {
+      setThreadOrder(durableThreadOrder)
+    }
+    try {
+      window.localStorage.setItem(THREAD_ORDER_STORAGE_KEY, JSON.stringify(durableThreadOrder))
+    } catch {
+      /* UI order persistence is best-effort; the live stable order still works. */
+    }
+  }, [threadOrder, durableThreadOrder])
+
+  const applyVisibleProjectOrder = (nextVisible: string[], announcement: string) => {
+    if (
+      nextVisible.length === stableProjectOrder.length
+      && nextVisible.every((key, index) => key === stableProjectOrder[index])
+    ) return
+    setUndoProjectOrder(durableProjectOrder)
+    setProjectOrder([
+      ...nextVisible,
+      ...durableProjectOrder.filter((key) => !liveProjectKeys.includes(key)),
+    ])
+    setReorderAnnouncement(announcement)
+  }
+
   const selectConversation = (threadId: string) => {
     selectThread(threadId)
     onThreadSelected?.()
+  }
+
+  const deleteConversation = (threadId: string) => {
+    deleteThread(threadId, nextThreadAfterDelete(orderedVisibleThreadIds, threadId))
   }
 
   return (
@@ -129,16 +261,130 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-3">
-        <div className="px-3 pt-3 pb-1 text-[11px] tracking-wide text-ink-3">專案</div>
+        <div className="flex items-center gap-2 px-3 pt-3 pb-1 text-[11px] tracking-wide text-ink-3">
+          <span className="min-w-0 flex-1">專案</span>
+          {liveProjectKeys.length > 1 && (
+            <button
+              type="button"
+              onClick={() => applyVisibleProjectOrder(liveProjectKeys, '已重設專案順序')}
+              className="shrink-0 text-[11px] tracking-normal hover:text-ink-2"
+            >
+              重設排序
+            </button>
+          )}
+        </div>
+
+        {sidebar.searching && (
+          <div className="px-3 pb-1 text-[11px] text-ink-3">
+            清除搜尋後可調整專案順序
+          </div>
+        )}
+
+        {undoProjectOrder && !sidebar.searching && (
+          <div className="mx-2 mt-2 flex items-center gap-2 rounded-md bg-surface-2 px-2 py-1.5 text-[11px] text-ink-2">
+            <span className="min-w-0 flex-1 truncate">已調整專案順序</span>
+            <button
+              type="button"
+              onClick={() => {
+                setProjectOrder(undoProjectOrder)
+                setUndoProjectOrder(null)
+                setReorderAnnouncement('已復原專案順序')
+              }}
+              className="shrink-0 font-medium text-accent-ink"
+            >
+              復原
+            </button>
+          </div>
+        )}
+
+        <div className="sr-only" aria-live="polite">{reorderAnnouncement}</div>
 
         {sidebar.groups.map((group) => (
-            <div key={group.key} className="pt-2.5">
+            <div
+              key={group.key}
+              className="relative pt-2.5"
+              onDragOver={(event) => {
+                if (sidebar.searching || !draggedProject || draggedProject === group.key) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'move'
+                const header = event.currentTarget.querySelector('[data-project-header]')
+                const bounds = header?.getBoundingClientRect() || event.currentTarget.getBoundingClientRect()
+                setDragOverProject({
+                  key: group.key,
+                  position: event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after',
+                })
+              }}
+              onDragLeave={(event) => {
+                const nextTarget = event.relatedTarget
+                if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                  setDragOverProject(null)
+                }
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                if (draggedProject && draggedProject !== group.key) {
+                  const reorderedLive = reorderProject(
+                    stableProjectOrder,
+                    draggedProject,
+                    group.key,
+                    dragOverProject?.key === group.key ? dragOverProject.position : 'before',
+                  )
+                  const nextIndex = reorderedLive.indexOf(draggedProject) + 1
+                  const draggedLabel = sidebar.groups.find((item) => item.key === draggedProject)?.label
+                    || '專案'
+                  applyVisibleProjectOrder(
+                    reorderedLive,
+                    `${draggedLabel} 已移至第 ${nextIndex} 個位置`,
+                  )
+                }
+                setDraggedProject(null)
+                setDragOverProject(null)
+              }}
+            >
+              {dragOverProject?.key === group.key && dragOverProject.position === 'before' && (
+                <div className="absolute inset-x-2 top-1 h-0.5 rounded-full bg-accent" aria-hidden="true" />
+              )}
               <div
-                className="flex items-center gap-2 px-3 py-1 text-[13px] text-ink-2"
+                data-project-header
+                className={`flex items-center gap-2 px-3 py-1 text-[13px] text-ink-2 ${
+                  draggedProject === group.key ? 'opacity-60' : ''
+                }`}
                 title={group.root || '尚未綁定專案資料夾'}
               >
                 <Icon name="folder_open" size={16} className="shrink-0 text-ink-3" />
-                <span className="truncate">{group.label}</span>
+                <span className="min-w-0 flex-1 truncate">{group.label}</span>
+                <button
+                  type="button"
+                  draggable={!sidebar.searching}
+                  disabled={sidebar.searching}
+                  aria-label={`${group.label} 排序把手；拖曳或按 Alt 加方向鍵調整順序`}
+                  title={sidebar.searching ? '搜尋時無法調整順序' : '拖曳排序；Alt+↑/↓ 鍵盤移動'}
+                  onDragStart={(event) => {
+                    setDraggedProject(group.key)
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData('text/plain', group.label)
+                  }}
+                  onDragEnd={() => {
+                    setDraggedProject(null)
+                    setDragOverProject(null)
+                  }}
+                  onKeyDown={(event) => {
+                    if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
+                    event.preventDefault()
+                    const next = moveProjectByOffset(
+                      stableProjectOrder,
+                      group.key,
+                      event.key === 'ArrowUp' ? -1 : 1,
+                    )
+                    applyVisibleProjectOrder(
+                      next,
+                      `${group.label} 已移至第 ${next.indexOf(group.key) + 1} 個位置`,
+                    )
+                  }}
+                  className="sidebar-icon-button -mr-1 shrink-0 cursor-grab text-ink-3 active:cursor-grabbing disabled:cursor-default disabled:opacity-40"
+                >
+                  <Icon name="drag_indicator" size={17} />
+                </button>
               </div>
 
               {group.threads.length === 0 ? (
@@ -218,7 +464,7 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
                             </DropdownMenu.Item>
                             <DropdownMenu.Item
                               className="sidebar-menu-item text-error"
-                              onSelect={() => deleteThread(t.id)}
+                              onSelect={() => deleteConversation(t.id)}
                             >
                               <Icon name="delete" size={16} />
                               刪除對話
@@ -229,6 +475,9 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
                     </div>
                   )
                 })
+              )}
+              {dragOverProject?.key === group.key && dragOverProject.position === 'after' && (
+                <div className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-accent" aria-hidden="true" />
               )}
             </div>
           ))}

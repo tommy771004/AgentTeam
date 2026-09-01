@@ -82,10 +82,10 @@ try {
   send(4, 'turn/submit', { sessionId, runId: 'oauth-rotation-stale', prompt: 'Reply with exactly: pong' })
   const staleAttempt = await waitForId(4)
   const staleDetail = JSON.stringify(staleAttempt)
-  if (!staleDetail.includes('invalidated oauth token')) {
+  if (!/invalidated oauth token|authentication token has been invalidated/i.test(staleDetail)) {
     throw new Error(`stale token did not reproduce the reported failure: ${staleDetail.slice(0, 1000)}`)
   }
-  console.log('RED-CAPABLE: stale App credential reproduced "invalidated oauth token"')
+  console.log('RED-CAPABLE: stale App credential reproduced the invalidated OAuth failure')
 
   await writeFile(sourcePath, JSON.stringify(currentCli))
   send(5, 'turn/submit', { sessionId, runId: 'oauth-rotation-current', prompt: 'Reply with exactly: pong' })

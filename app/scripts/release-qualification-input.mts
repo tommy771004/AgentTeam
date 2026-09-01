@@ -6,6 +6,13 @@ import {
   type ReleasePlatformEvidence,
 } from '../src/agent/releaseQualification.ts'
 import { validatePackagedInstallEvidence } from './packaged-install-evidence.mjs'
+import {
+  RELEASE_HARDENING_CHECK_IDS,
+  validateReleaseHardeningReceipt,
+  type ReleaseHardeningCheckId,
+  type ReleaseHardeningIdentity,
+  type ReleaseHardeningTrust,
+} from './release-hardening-receipt.mts'
 
 type EvidenceBundle = {
   directory: string
@@ -30,6 +37,15 @@ async function fileExists(filePath: string) {
   try {
     await fs.access(filePath)
     return true
+  } catch {
+    return false
+  }
+}
+
+async function nonEmptyFile(filePath: string) {
+  try {
+    const stat = await fs.stat(filePath)
+    return stat.isFile() && stat.size > 0
   } catch {
     return false
   }
@@ -101,11 +117,13 @@ export async function buildQualificationInputFromEvidence({
   releaseVersion = '',
   owner = 'release-engineering',
   repoRoot = path.resolve(process.cwd(), '..'),
+  hardeningTrust,
 }: {
   evidenceRoot: string
   releaseVersion?: string
   owner?: string
   repoRoot?: string
+  hardeningTrust?: ReleaseHardeningTrust
 }): Promise<ReleaseQualificationInput> {
   const directories = await findManifestDirectories(path.resolve(evidenceRoot))
   const bundles = (await Promise.all(directories.map((directory) => loadBundle(directory, repoRoot)))).filter(Boolean) as EvidenceBundle[]
@@ -130,7 +148,8 @@ export async function buildQualificationInputFromEvidence({
 
   const smoke = bundles.map((bundle) => bundle.smoke).join('\n')
   const trustDocs = bundles.map((bundle) => bundle.trustDocs).find(Boolean) || ''
-  const allBundlesHave = (fileName: string) => bundles.length > 0 && bundles.every((bundle) => fileExists(path.join(bundle.directory, fileName)))
+  const allBundlesHave = async (fileName: string) => bundles.length > 0
+    && (await Promise.all(bundles.map((bundle) => fileExists(path.join(bundle.directory, fileName))))).every(Boolean)
   const piHostEvidence = await Promise.all(bundles.map((bundle) => readJson(path.join(bundle.directory, 'pi-host-qualification.json'))))
   const piHost = {
     protocol: piHostEvidence.length > 0 && piHostEvidence.every((evidence) => evidence?.protocol === true),
@@ -142,23 +161,52 @@ export async function buildQualificationInputFromEvidence({
   const entitlementEvidence = /Entitlement boundary smoke:|Subscription lifecycle smoke:|Feature pack smoke:/i.test(smoke)
   const releaseVersionFromManifest = String(releaseVersion || bundles[0]?.manifest.version || 'unknown')
   const trustDocsComplete = /privacy|security|EULA|terms|refund|support|release notes|checksum|SBOM|provenance/i.test(trustDocs)
+  const bundleEvidence = {
+    recovery: await allBundlesHave('recovery-e2e.log'),
+    updateRollback: await allBundlesHave('update-rollback-evidence.json'),
+    updateKey: await allBundlesHave('update-key-verification.log'),
+    security: await allBundlesHave('security-gates.log'),
+    releaseNotes: await allBundlesHave('release-notes.md'),
+    checksums: await allBundlesHave('checksums.txt'),
+    sbom: await allBundlesHave('sbom.cdx.json'),
+  }
+  const hardeningReceipts = await Promise.all(bundles.map(async (bundle) => {
+    const provenance = bundle.manifest.provenance || {}
+    const expected: ReleaseHardeningIdentity = {
+      commit: String(provenance.commit || ''),
+      runId: String(provenance.runId || ''),
+      runAttempt: String(provenance.runAttempt || ''),
+      version: String(bundle.manifest.version || releaseVersionFromManifest),
+      platform: bundle.manifest.platform === 'macos' ? 'macos' : 'windows',
+      arch: String(bundle.manifest.arch || 'unknown'),
+    }
+    const receipt = await readJson(path.join(bundle.directory, 'release-hardening-receipt.json'))
+    if (!validateReleaseHardeningReceipt(receipt, expected, hardeningTrust)) return null
+    const evidencePresent = await Promise.all(receipt.checks.map((check) => nonEmptyFile(path.join(bundle.directory, check.evidenceFile))))
+    return evidencePresent.every(Boolean) ? receipt : null
+  }))
+  const hardeningPassed = (id: ReleaseHardeningCheckId) => hardeningReceipts.length > 0
+    && hardeningReceipts.every((receipt) => receipt?.checks.some((check) => check.id === id && check.passed))
+  const hardening = Object.fromEntries(
+    RELEASE_HARDENING_CHECK_IDS.map((id) => [id, hardeningPassed(id)]),
+  ) as ReleaseQualificationInput['hardening']
 
   return {
     releaseVersion: releaseVersionFromManifest,
     owner,
     platforms,
     recovery: {
-      restart: allBundlesHave('recovery-e2e.log'),
-      crash: allBundlesHave('recovery-e2e.log'),
-      queueExactlyOnce: allBundlesHave('recovery-e2e.log'),
-      schedulerOnceJob: allBundlesHave('recovery-e2e.log'),
+      restart: bundleEvidence.recovery,
+      crash: bundleEvidence.recovery,
+      queueExactlyOnce: bundleEvidence.recovery,
+      schedulerOnceJob: bundleEvidence.recovery,
     },
     piHost,
     update: {
-      nMinusOneToN: allBundlesHave('update-rollback-evidence.json'),
-      signatureVerified: allBundlesHave('update-key-verification.log'),
-      failedRecovery: allBundlesHave('update-rollback-evidence.json'),
-      rollback: allBundlesHave('update-rollback-evidence.json'),
+      nMinusOneToN: bundleEvidence.updateRollback,
+      signatureVerified: bundleEvidence.updateKey,
+      failedRecovery: bundleEvidence.updateRollback,
+      rollback: bundleEvidence.updateRollback,
     },
     entitlement: {
       freeCore: entitlementEvidence,
@@ -179,16 +227,17 @@ export async function buildQualificationInputFromEvidence({
     },
     trust: {
       privacy: trustDocsComplete,
-      security: trustDocsComplete && allBundlesHave('security-gates.log'),
+      security: trustDocsComplete && bundleEvidence.security,
       eula: trustDocsComplete,
       terms: trustDocsComplete,
       refund: trustDocsComplete,
       support: trustDocsComplete,
-      releaseNotes: allBundlesHave('release-notes.md'),
-      checksums: allBundlesHave('checksums.txt'),
-      sbom: allBundlesHave('sbom.cdx.json'),
+      releaseNotes: bundleEvidence.releaseNotes,
+      checksums: bundleEvidence.checksums,
+      sbom: bundleEvidence.sbom,
       provenance: bundles.length > 0 && bundles.every((bundle) => Boolean(bundle.manifest.provenance)),
     },
+    hardening,
     warnings: warningInput(),
   }
 }
