@@ -39,7 +39,7 @@ export function ExecutionStepsProgress({
 
   return (
     <div
-      className="execution-steps-progress relative z-20 w-fit max-w-full shrink-0"
+      className="execution-steps-progress relative z-20 ml-auto w-fit max-w-full shrink-0"
       data-execution-steps-progress
       onMouseEnter={() => setHoverOpen(true)}
       onMouseLeave={() => setHoverOpen(false)}
@@ -50,7 +50,7 @@ export function ExecutionStepsProgress({
         type="button"
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="agent-process-row inline-flex max-w-full items-center gap-2 rounded-full border border-line-strong/70 bg-surface-container-low px-3.5 py-2 whitespace-nowrap text-left text-[12px] text-ink-2"
+        className="agent-process-row !ml-0 inline-flex max-w-full items-center gap-2 rounded-full border border-line-strong/70 bg-surface-container-low px-3.5 py-2 whitespace-nowrap text-left text-[12px] text-ink-2"
         onClick={togglePinned}
       >
         <Icon name="checklist" size={16} className="shrink-0 text-ink-3" />
@@ -58,9 +58,10 @@ export function ExecutionStepsProgress({
         {fileChanges.length > 0 ? (
           <>
             <span aria-hidden="true" className="text-ink-3">·</span>
-            <span>已變更 {fileChanges.length} 個檔案</span>
-            {additions > 0 ? <span className="text-green tabular-nums">+{additions}</span> : null}
-            {removals > 0 ? <span className="text-red tabular-nums">-{removals}</span> : null}
+            <span className="inline-flex items-center gap-1.5" aria-label={`本輪檔案差異：新增 ${additions} 行，刪除 ${removals} 行`}>
+              <span className="text-green tabular-nums">+{additions}</span>
+              <span className="text-red tabular-nums">-{removals}</span>
+            </span>
           </>
         ) : null}
         {failed > 0 ? <span className="text-red">{failed} 項失敗</span> : null}
@@ -68,7 +69,7 @@ export function ExecutionStepsProgress({
       </button>
 
       {open ? (
-        <div className="absolute left-0 top-full z-40 w-[min(32rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] pt-1">
+        <div className="absolute right-0 bottom-full z-40 w-[min(32rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] pb-1">
           <section
             role="dialog"
             aria-label="執行步驟"

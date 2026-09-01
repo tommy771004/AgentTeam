@@ -1,11 +1,10 @@
 /**
  * The current request must appear in the prompt exactly once.
  *
- * Every execution path (Pi Host, legacy builtin, external CLI) carries the
- * objective in its own "當前請求" / "Current request" slot, so the thread
- * bubble holding the same text must be cut from the replayed chat history.
- * One shared helper owns that cut; a source drift guard keeps a fourth path
- * from copy-pasting a fourth version of it.
+ * Stateless compatibility paths carry the objective in their own "當前請求"
+ * / "Current request" slot, so the thread bubble holding the same text must
+ * be cut from replayed chat history. Pi Host is stateful: it must consume its
+ * native session history instead of receiving a second renderer-built copy.
  *
  * Run: node --experimental-strip-types scripts/smoke-current-objective-dedupe.mts
  */
@@ -97,7 +96,7 @@ await test('history block built from the cut list mentions the objective zero ti
   assert.equal(block.split(OBJECTIVE).length - 1, 0)
 })
 
-await test('Pi turn context injects the current request exactly once', async () => {
+await test('Pi turn context leaves conversation history to the Host session', async () => {
   const { buildPiTurnContext, withPiTurnContext } = await import('../src/agent/piTurnContext.ts')
   const settings = {
     referenceChatHistory: true,
@@ -120,10 +119,10 @@ await test('Pi turn context injects the current request exactly once', async () 
     1,
     'the objective belongs to the 當前請求 slot alone',
   )
-  assert.match(prompt, /先看一下專案結構/, 'earlier turns still travel')
+  assert.doesNotMatch(prompt, /先看一下專案結構/, 'renderer bubbles must not duplicate Host history')
 })
 
-await test('two consecutive turns each inject only their own request', async () => {
+await test('a later Pi turn does not flatten an earlier turn into system context', async () => {
   const { buildPiTurnContext, withPiTurnContext } = await import('../src/agent/piTurnContext.ts')
   const settings = {
     referenceChatHistory: true,
@@ -143,11 +142,10 @@ await test('two consecutive turns each inject only their own request', async () 
   })
   const prompt = withPiTurnContext(second, ctx.assembled)
   assert.equal(prompt.split(second).length - 1, 1, 'turn 2 request appears once')
-  assert.ok(prompt.includes(OBJECTIVE), 'turn 1 request is history now and still travels once')
-  assert.equal(prompt.split(OBJECTIVE).length - 1, 1)
+  assert.equal(prompt.split(OBJECTIVE).length - 1, 0, 'turn 1 stays in native Host history')
 })
 
-await test('drift guard: all three execution paths call the shared helper', () => {
+await test('drift guard: only stateless execution paths replay renderer history', () => {
   const chatHistory = read('src/agent/chatHistory.ts')
   assert.match(
     chatHistory,
@@ -156,13 +154,10 @@ await test('drift guard: all three execution paths call the shared helper', () =
   )
 
   const piTurnContext = read('src/agent/piTurnContext.ts')
-  assert.match(piTurnContext, /dropCurrentObjectiveFromHistory/, 'Pi Host path must call the helper')
-
-  assert.match(
-    piTurnContext,
-    /buildChatHistoryContext\(dropCurrentObjectiveFromHistory\(/,
-    'the Pi packet must build its history from the cut list, not alongside it',
-  )
+  assert.doesNotMatch(piTurnContext, /buildChatHistoryContext|dropCurrentObjectiveFromHistory/,
+    'Pi Host must use its native structured history, not a renderer transcript')
+  assert.doesNotMatch(piTurnContext, /bubbles\?: ChatHistoryBubble\[\]/,
+    'the Pi context contract must not accept renderer-owned conversation history')
 
   const runDispatch = read('src/agent/runDispatch.ts')
   // Both runDispatch paths must feed the helper's OUTPUT into their history
@@ -184,10 +179,6 @@ await test('drift guard: all three execution paths call the shared helper', () =
   // Nobody may hand raw thread bubbles straight to the history builder again.
   assert.ok(
     !/buildChatHistoryContext\(\s*thread\.bubbles/.test(runDispatch),
-    'no path may replay the untrimmed transcript',
-  )
-  assert.ok(
-    !/buildChatHistoryContext\(input\.bubbles\)/.test(piTurnContext),
     'no path may replay the untrimmed transcript',
   )
 })

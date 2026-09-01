@@ -125,7 +125,7 @@ function AgentWorkActions({ row, parentAgentId, onStatus }: { row: AgentWorkRow;
       <label className="flex min-w-52 flex-1 items-center gap-2">
         <span className="sr-only">派送後續任務給 {row.title}</span>
         <input value={followUp} onChange={(event) => setFollowUp(event.target.value)} className="h-7 min-w-0 flex-1 border-b border-line bg-transparent px-1 text-[11px] text-ink outline-none focus:border-accent" placeholder="新增後續任務" />
-        <button type="button" disabled={!followUp.trim()} className="agent-process-link disabled:opacity-40" title={row.executionKind === 'external-cli-process' ? '外部 CLI 會建立新的 execution，不會復用 provider session' : '沿用此子智慧體 session'} onClick={() => void invoke(async () => {
+        <button type="button" disabled={!followUp.trim()} className="agent-process-link disabled:opacity-40" title={row.executionKind === 'external-cli-process' ? '外部 CLI 會建立新的 execution，不會復用 provider session' : '沿用此子代理 session'} onClick={() => void invoke(async () => {
           await api.followUp({ senderAgentId: parentAgentId, receiverAgentId: row.agentId, content: followUp.trim() })
           setFollowUp('')
         }, '後續任務已排入')}>派送</button>
@@ -144,7 +144,7 @@ function AgentWorkRowView({ row, parentAgentId }: { row: AgentWorkRow; parentAge
         <Icon name={lifecycleIcon[row.lifecycle]} size={15} className={`shrink-0 ${row.lifecycle === 'running' ? 'animate-spin text-accent-ink' : attention ? 'text-orange' : 'text-ink-3'}`} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[12px] font-medium text-ink">{row.title}</span>
-          <span className="block truncate text-[10.5px] text-ink-3">{row.executionKind === 'external-cli-process' ? '子程序' : '子智慧體'} · {row.role} · {lifecycleLabel[row.lifecycle]}</span>
+          <span className="block truncate text-[10.5px] text-ink-3">{row.executionKind === 'external-cli-process' ? '子程序' : '子代理'} · {row.role} · {lifecycleLabel[row.lifecycle]}</span>
         </span>
         <WorkspaceMode row={row} />
         {attention ? <span className="sr-only">需要注意</span> : null}
@@ -190,11 +190,11 @@ export function AgentWorkTree({ entries, originTurn, sessionId, live = false }: 
   if (!rows.length) return null
   const attention = rows.filter((row) => ['failed', 'blocked', 'waiting-approval'].includes(row.lifecycle)).length
   return (
-    <section className="agent-work-tree border-y border-line" aria-label="Agent Work Tree" data-origin-turn={originTurn}>
+    <section className="agent-work-tree border-y border-line" aria-label="子程序／子代理" data-origin-turn={originTurn}>
       <button type="button" aria-expanded={open} className="flex min-h-10 w-full items-center gap-2 py-2 text-left" onClick={() => setOpen((value) => !value)}>
         <Icon name="account_tree" size={16} className="shrink-0 text-ink-3" />
-        <span className="min-w-0 flex-1 text-[12px] font-semibold text-ink">Agent Work Tree</span>
-        <span className={`text-[10.5px] ${attention ? 'text-orange' : 'text-ink-3'}`}>{rows.length} 個 task{attention ? ` · ${attention} 需注意` : ''}</span>
+        <span className="min-w-0 flex-1 text-[12px] font-semibold text-ink">子程序／子代理</span>
+        <span className={`text-[10.5px] ${attention ? 'text-orange' : 'text-ink-3'}`}>{rows.length} 個執行{attention ? ` · ${attention} 需注意` : ''}</span>
         <Icon name={open ? 'expand_less' : 'expand_more'} size={15} className="shrink-0 text-ink-3" />
       </button>
       <Reveal open={open}><ul>{rows.map((row) => <AgentWorkRowView key={row.agentId} row={row} parentAgentId={sessionId} />)}</ul></Reveal>

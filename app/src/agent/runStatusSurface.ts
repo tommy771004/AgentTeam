@@ -1,22 +1,9 @@
-import type {
-  RunActivityEvent,
-  RunTaskItem,
-} from '../store/runActivityStore.ts'
+import type { RunActivityEvent } from '../store/runActivityStore.ts'
 import type { RunLifecyclePhase, RunLifecycleView } from './runLifecycle.ts'
 import type { RunnerCapabilities } from './runners/types.ts'
 import type { WorkingStateProjection } from './workingStateProjection.ts'
 
-export type RunStatusMilestone = {
-  id: string
-  description: string
-  status: RunTaskItem['status']
-  blocker?: string
-  meta?: string
-  details?: RunTaskItem['details']
-}
-
 export type RunSecondarySurface =
-  | { kind: 'progress'; title: '任務進度'; milestones: RunStatusMilestone[] }
   | { kind: 'activity'; title: '最近活動'; items: string[] }
   | { kind: 'attention'; title: '需要你處理'; action: string; attentionKind: 'approval' | 'authentication' | 'input' }
   | { kind: 'summary'; title: '執行摘要'; items: string[]; outcome: 'completed' | 'cancelled' | 'failed' }
@@ -40,7 +27,6 @@ export type RunStatusSurfaceInput = {
     updatedAt: number
     interaction: { kind: 'user' | 'approval' } | null
     authenticationRequired?: boolean
-    tasks?: readonly RunTaskItem[]
   }
   workingState?: WorkingStateProjection
   approvalPending?: boolean
@@ -150,31 +136,12 @@ function terminalSurface(input: RunStatusSurfaceInput): RunSecondarySurface | un
   return { kind: 'summary', title: '執行摘要', items, outcome }
 }
 
-function progressSurface(input: RunStatusSurfaceInput): RunSecondarySurface | undefined {
-  const tasks = input.activity.tasks || []
-  if (tasks.length === 0) return undefined
-  return {
-    kind: 'progress',
-    title: '任務進度',
-    milestones: tasks.map((task) => ({
-      id: task.id,
-      description: task.text,
-      status: task.status,
-      ...(task.status === 'failed' ? { blocker: 'Agent 標記此項失敗' } : {}),
-      ...(task.meta ? { meta: task.meta } : {}),
-      ...(task.details ? { details: task.details } : {}),
-    })),
-  }
-}
-
 export function projectRunStatusSurface(input: RunStatusSurfaceInput): RunStatusSurfaceProjection {
   const attention = attentionSurface(input)
   const terminal = terminalSurface(input)
-  const progress = progressSurface(input)
   const activity = recentActivity(input.activity.events)
   const secondary = attention
     || terminal
-    || progress
     || (activity.length > 0 ? { kind: 'activity' as const, title: '最近活動' as const, items: activity } : undefined)
   return {
     phase: input.lifecycle.phase,

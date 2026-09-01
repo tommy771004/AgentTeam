@@ -609,6 +609,10 @@ export function CommandComposer({
 }: CommandComposerProps) {
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  // React state cannot close the same-event-loop double-click/Enter window:
+  // both handlers can retain the same non-empty value before a re-render.
+  // This imperative lease spans the caller's whole admission promise.
+  const submitInFlightRef = useRef(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
   const [selectedSkill, setSelectedSkill] = useState<SlashCommand | null>(null)
@@ -828,41 +832,47 @@ export function CommandComposer({
     const line = value.trim()
     if (disabled || attaching) return
     if (!hasComposerSubmission(line, attachments.length, selectedSkill)) return
-    const submissionLine = effectiveSubmissionLine(selectedSkill, line)
-    if (submissionLine.startsWith('/')) {
-      if (attachments.length > 0) {
-        setAttachError('斜線指令不會使用附件；請先移除附件，或改用一般訊息送出。')
-        return
-      }
-      pushHistory(submissionLine)
-      setMentionOpen(false)
-      const parsed = parseSlashLine(submissionLine)
-      setSelectedSkill(null)
-      onChange('')
-      if (parsed) {
-        const cmd = resolveSlashCommand(parsed.cmd, [], skillCatalog)
-        if (cmd) {
-          setMenuOpen(false)
-          await onSlashCommand(cmd, parsed.args, parsed.raw)
+    if (submitInFlightRef.current) return
+    submitInFlightRef.current = true
+    try {
+      const submissionLine = effectiveSubmissionLine(selectedSkill, line)
+      if (submissionLine.startsWith('/')) {
+        if (attachments.length > 0) {
+          setAttachError('斜線指令不會使用附件；請先移除附件，或改用一般訊息送出。')
           return
         }
-        await onSlashCommand(
-          { name: parsed.cmd, description: '', category: 'session' },
-          parsed.args,
-          parsed.raw,
-        )
-        return
+        pushHistory(submissionLine)
+        setMentionOpen(false)
+        const parsed = parseSlashLine(submissionLine)
+        setSelectedSkill(null)
+        onChange('')
+        if (parsed) {
+          const cmd = resolveSlashCommand(parsed.cmd, [], skillCatalog)
+          if (cmd) {
+            setMenuOpen(false)
+            await onSlashCommand(cmd, parsed.args, parsed.raw)
+            return
+          }
+          await onSlashCommand(
+            { name: parsed.cmd, description: '', category: 'session' },
+            parsed.args,
+            parsed.raw,
+          )
+          return
+        }
       }
+      // 先清輸入再送出：送出管線再慢或拋錯，都不該把已送出的字留在框裡。
+      const toSend = attachments
+      setAttachments([])
+      setAttachError(null)
+      histIdx.current = -1
+      pushHistory(line || `（${attachments.length} 個附件）`)
+      setMenuOpen(false)
+      onChange('')
+      await onSubmitLine(line, toSend)
+    } finally {
+      submitInFlightRef.current = false
     }
-    // 先清輸入再送出：送出管線再慢或拋錯，都不該把已送出的字留在框裡。
-    const toSend = attachments
-    setAttachments([])
-    setAttachError(null)
-    histIdx.current = -1
-    pushHistory(line || `（${attachments.length} 個附件）`)
-    setMenuOpen(false)
-    onChange('')
-    await onSubmitLine(line, toSend)
   }, [
     value,
     disabled,

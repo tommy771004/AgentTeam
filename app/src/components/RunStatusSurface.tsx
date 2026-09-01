@@ -1,6 +1,5 @@
 import { ElapsedTime } from './primitives/ElapsedTime.tsx'
 import type { RunSecondarySurface, RunStatusSurfaceProjection } from '../agent/runStatusSurface.ts'
-import { RunTaskRow } from './RunTaskRow.tsx'
 
 function formatUpdateTime(value: number): string {
   return new Intl.DateTimeFormat('zh-TW', {
@@ -11,28 +10,7 @@ function formatUpdateTime(value: number): string {
   }).format(value)
 }
 
-function SecondarySurface({ surface, live }: { surface: RunSecondarySurface; live: boolean }) {
-  if (surface.kind === 'progress') {
-    return (
-      <section className="border-b border-line px-4 py-4" aria-labelledby="run-secondary-title">
-        <h3 id="run-secondary-title" className="text-[12px] font-semibold text-ink">{surface.title}</h3>
-        <ol className="mt-3 space-y-2" aria-label="任務里程碑">
-          {surface.milestones.map((milestone, index) => (
-            <RunTaskRow
-              key={milestone.id}
-              text={milestone.description}
-              status={milestone.status}
-              index={index}
-              live={live}
-              detail={milestone.blocker}
-              amount={milestone.meta}
-              details={milestone.details}
-            />
-          ))}
-        </ol>
-      </section>
-    )
-  }
+function SecondarySurface({ surface }: { surface: RunSecondarySurface }) {
   if (surface.kind === 'activity') {
     return (
       <section className="border-b border-line px-4 py-4" aria-labelledby="run-secondary-title">
@@ -74,7 +52,7 @@ export function RunStatusSurface({ projection, startedAt }: { projection: RunSta
           {projection.updatedAt ? <span className="font-[family-name:var(--font-mono)] tabular-nums">最後更新 {formatUpdateTime(projection.updatedAt)}</span> : null}
         </div>
       </section>
-      {projection.secondary ? <SecondarySurface surface={projection.secondary} live={projection.live} /> : null}
+      {projection.secondary ? <SecondarySurface surface={projection.secondary} /> : null}
     </>
   )
 }

@@ -766,15 +766,6 @@ html:not([data-sidebar-solid='true']) .sidebar-panel::before {
   }
 }
 
-@keyframes stream-in {
-  from {
-    filter: blur(4px);
-  }
-  to {
-    filter: blur(0);
-  }
-}
-
 /* Increasing background-position moves the highlight band left, so the sweep
    runs 150% → -50% to travel left-to-right and stay off-screen at both ends. */
 @keyframes shimmer-text {
@@ -1505,8 +1496,6 @@ html[data-theme='light'] .agent-process-chip,
 html[data-theme='light'] .agent-file-chip,
 html[data-theme='light'] .agent-summary-card,
 html[data-theme='light'] .agent-decision-panel { background: var(--color-surface-container-low); }
-
-.agent-streaming-body .markdown-body > :not(.agent-code-block) { animation: stream-in 420ms cubic-bezier(0.22, 0.61, 0.25, 1) both; }
 
 /* ── Calm workspace refinement ────────────────────────────
    The product is information-dense, so hierarchy comes from tone and spacing.

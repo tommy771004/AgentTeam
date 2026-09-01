@@ -204,6 +204,24 @@ await test('automation follow-ups keep queueing, untouched by the steer branch',
   assert.equal(listQueuedRuns()[0]?.sourceKind, 'webhook')
 })
 
+await test('an explicit run identity cannot dispatch again after settlement', async () => {
+  resetWorld('queue')
+  const runId = 'run_terminal_replay'
+  const first = await runTask({
+    runId,
+    sourceKind: 'composer',
+    objective: '只允許派送一次的 request',
+  })
+  assert.equal(first.status, 'failed', 'the plain-browser seam reaches and settles the real dispatch path')
+
+  const replay = await runTask({
+    runId,
+    sourceKind: 'composer',
+    objective: '只允許派送一次的 request',
+  })
+  assert.equal(replay.skipReason, 'duplicate', 'a transport replay after settlement is rejected before dispatch')
+})
+
 await test('drift guard: the takeover branch enqueues instead of falling through to busy', () => {
   const coordinator = read('src/agent/taskRunCoordinator.ts')
   const steer = coordinator.slice(

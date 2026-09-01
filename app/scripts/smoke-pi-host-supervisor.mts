@@ -286,7 +286,8 @@ assert.equal(journal.completeFinalization('run-1', 'renderer-b', takeover.claimE
 assert.equal(journal.completeFinalization('run-1', 'renderer-a', firstClaim.claimEpoch).completed, true, 'complete is idempotent after ownership changes')
 assert.equal(journal.acknowledge('run-1'), true)
 assert.equal(journal.acknowledge('run-1'), true)
-assert.equal(journal.get('run-1'), undefined)
+assert.equal(journal.get('run-1')?.acknowledged, true, 'ack keeps a bounded idempotency tombstone until TTL')
+assert.equal(journal.begin({ runId: 'run-1', sessionId: 'session-replay' }).sessionId, 'session-1', 'a late replay cannot resurrect an acknowledged run identity')
 const long = new PiHostAttachmentJournal({}, undefined, () => now)
 long.begin({ runId: 'long', sessionId: 'session-1' })
 long.append('long', Array.from({ length: 300 }, (_, index) => entry(index + 1)))
@@ -304,4 +305,8 @@ for (let index = 0; index < 260; index += 1) {
   journal.settle(runId, 'answered', `summary-${index}`, index + 1)
 }
 assert.equal(journal.pendingTerminal().length, 256)
+assert.equal(journal.get('run-1')?.acknowledged, true, 'pending recovery pressure cannot evict the acknowledged identity tombstone')
+now += 24 * 60 * 60 * 1000 + 1
+journal.active()
+assert.equal(journal.get('run-1'), undefined, 'the acknowledged identity tombstone expires after its bounded TTL')
 console.log('Pi Host Supervisor exposes cancellation to Electron callers')

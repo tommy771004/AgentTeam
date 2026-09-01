@@ -111,6 +111,28 @@ function seedFixture() {
     activity.setStatus('執行中', runId, 'executing')
     activity.push({ runId, kind: 'status', title: hostile, detail: hostile })
     activity.push({ runId, kind: 'tool', tool: 'workspace_grep', title: hostile, detail: hostile })
+  } else if (scenario === 'subagent') {
+    activity.appendRecordEntries([
+      { kind: 'turn-start', source: 'host', seq: 1, turn: 1, step: 1, at: 1 },
+      { kind: 'user-text', source: 'user', content: '請交給子代理檢查', seq: 2, turn: 1, step: 1, at: 2 },
+      {
+        kind: 'agent-collaboration', source: 'host', seq: 3, turn: 1, step: 1, at: 3,
+        event: {
+          type: 'spawned', agentId: 'fixture-child', runId: 'fixture-child-run',
+          admission: {
+            version: 1, spawnId: 'fixture-spawn', parentAgentId: 'fixture-root', rootAgentId: 'fixture-root',
+            originTurn: 1, originRunId: runId, objective: '檢查回覆呈現狀況', role: 'reviewer', depth: 1,
+            detached: false, executionKind: 'builtin-agent', policy: { capabilities: [], mcpServers: [] },
+            workspace: { mode: 'shared-readonly', scopes: [], revision: 1 }, createdAt: 3,
+          },
+        },
+      },
+      {
+        kind: 'agent-lifecycle', source: 'host', seq: 4, turn: 1, step: 1, at: 4,
+        event: { agentId: 'fixture-child', rootAgentId: 'fixture-root', parentAgentId: 'fixture-root', taskPath: '/root/reviewer', state: 'running', runId: 'fixture-child-run' },
+      },
+    ], runId)
+    activity.setStatus('執行中', runId, 'executing')
   } else if (scenario === 'external') {
     for (const tool of ['workspace_grep', 'workspace_read', 'bash', 'workspace_edit', 'check_build', 'git_status']) {
       activity.push({ runId, kind: 'tool', tool, title: hostile, detail: hostile })

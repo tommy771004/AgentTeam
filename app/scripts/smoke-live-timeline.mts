@@ -9,6 +9,7 @@ import {
   runTimelineRows,
 } from '../src/agent/liveTimeline.ts'
 import { projectTrajectory } from '../src/agent/trajectoryProjection.ts'
+import { projectRunFileChanges } from '../src/agent/runOperationsProjection.ts'
 import { appendTurnRecord, derivePiHistory, pageTurnRecord, type TurnRecordAppend } from '../src/agent/turnRecord.ts'
 import {
   mergeWorkingStateProjection,
@@ -117,6 +118,20 @@ assert.equal(mutatingRow?.kind === 'tool' ? mutatingRow.added : undefined, 1,
 assert.equal(mutatingRow?.kind === 'tool' ? mutatingRow.removed : undefined, 0,
   'a creation removes nothing')
 
+// The compact composer summary accumulates successful mutations across the
+// current run. Replayed frames and failed edits must not inflate its +/− count.
+const cumulativeMutations = appendTurnRecord(mutating, [
+  { kind: 'tool-call', source: 'model', tool: 'edit', callId: 'e1', args: { path: 'out/x.ts', oldText: 'export {}\n', newText: 'export const x = 1\nexport {}\n' }, turn: 1, step: 2, at: 5 },
+  { kind: 'tool-result', source: 'host', tool: 'edit', callId: 'e1', settlement: 'success', turn: 1, step: 2, at: 6 },
+  { kind: 'tool-call', source: 'model', tool: 'edit', callId: 'e2', args: { path: 'out/x.ts', oldText: 'export {}\n', newText: 'discarded\n' }, turn: 1, step: 3, at: 7 },
+  { kind: 'tool-result', source: 'host', tool: 'edit', callId: 'e2', settlement: 'failed', turn: 1, step: 3, at: 8 },
+])
+assert.deepEqual(
+  projectRunFileChanges(cumulativeMutations),
+  [{ path: 'out/x.ts', action: 'create', added: 2, removed: 0, seq: 3 }],
+  'one run totals successful declared diffs per file and ignores failed mutations',
+)
+
 // The text streaming in right now is the timeline's current assistant line.
 const streaming = runTimelineRows(running, '結論：Pi Core 擁')
 const last = streaming[streaming.length - 1]
@@ -188,6 +203,31 @@ assert.deepEqual(
   projectLiveTimeline(buffered?.recordEntries || [], buffered?.recordTotal),
   replayed,
   'what the store accumulated projects to the same rows as the finished record',
+)
+
+store.clear()
+store.begin('diff_run', 'timeline_thread')
+store.appendRecordEntries(cumulativeMutations.entries, 'diff_run')
+store.appendRecordEntries(cumulativeMutations.entries, 'diff_run')
+assert.deepEqual(
+  useRunActivityStore.getState().getPresentation('diff_run')?.fileChanges.map(({ path, action, added, removed }) => ({ path, action, added, removed })),
+  [{ path: 'out/x.ts', action: 'create', added: 2, removed: 0 }],
+  'Host record replay updates the live diff summary once',
+)
+store.appendRecordEntries([
+  { kind: 'tool-call', source: 'model', tool: 'edit', callId: 'e3', args: { path: 'out/x.ts', oldText: 'export {}\n', newText: 'export const y = 2\nexport {}\n' }, seq: 9, turn: 1, step: 4, at: 9 },
+  { kind: 'tool-result', source: 'host', tool: 'edit', callId: 'e3', settlement: 'success', seq: 10, turn: 1, step: 4, at: 10 },
+], 'diff_run')
+assert.equal(useRunActivityStore.getState().getPresentation('diff_run')?.fileChanges[0]?.added, 3,
+  'a later successful edit continues the same run total')
+
+store.clear()
+store.begin('diff_reattach', 'timeline_thread')
+store.reattachRecord({ entries: cumulativeMutations.entries, total: cumulativeMutations.entries.length, latestSeq: 8 }, 'diff_reattach')
+assert.deepEqual(
+  useRunActivityStore.getState().getPresentation('diff_reattach')?.fileChanges.map(({ path, action, added, removed }) => ({ path, action, added, removed })),
+  [{ path: 'out/x.ts', action: 'create', added: 2, removed: 0 }],
+  'reattaching a live run restores the diff total already recorded by the Host',
 )
 
 // Host snapshot replay is a count/high-watermark calibration, not another

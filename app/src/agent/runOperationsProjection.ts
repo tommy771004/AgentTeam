@@ -40,6 +40,34 @@ export type RunOperationRow = {
 }
 
 export type ProducedFile = { path: string; action: 'create' | 'edit'; seq: number }
+export type RunFileChange = {
+  path: string
+  action: 'create' | 'edit'
+  added: number
+  removed: number
+  /** Sequence of the first successful mutation of this file in the projection. */
+  seq: number
+}
+
+function includesResult(resultSeqs: ReadonlySet<number> | undefined, resultSeq: number | undefined): boolean {
+  return !resultSeqs || (resultSeq !== undefined && resultSeqs.has(resultSeq))
+}
+
+function accumulateFileChange(
+  changes: Map<string, RunFileChange>,
+  stat: { path: string; added: number; removed: number },
+  action: 'create' | 'edit',
+  seq: number,
+): void {
+  const current = changes.get(stat.path)
+  changes.set(stat.path, {
+    path: stat.path,
+    action: action === 'create' || current?.action === 'create' ? 'create' : 'edit',
+    added: (current?.added ?? 0) + stat.added,
+    removed: (current?.removed ?? 0) + stat.removed,
+    seq: current?.seq ?? seq,
+  })
+}
 
 const NON_OPERATION_ENTRY_KINDS = new Set<TurnRecordEntry['kind']>([
   'agent-lifecycle',
@@ -214,6 +242,40 @@ export function projectRunOperations(record: TurnRecord | undefined): RunOperati
   }
   for (const [callId] of open) flushToolRow(callId)
   return [...rows].sort((left, right) => left.seq - right.seq)
+}
+
+/**
+ * Cumulative per-file diff size for successful mutations in one Turn Record.
+ *
+ * The recorded tool arguments are the source of the diff, while the paired
+ * Host result decides whether it actually happened. This keeps failed calls
+ * out and makes replay idempotent: the same record always yields the same
+ * totals instead of counting transport arrivals.
+ */
+export function projectRunFileChanges(
+  record: TurnRecord | undefined,
+  resultSeqs?: ReadonlySet<number>,
+): RunFileChange[] {
+  const changes = new Map<string, RunFileChange>()
+  const resultSeqByCallId = new Map(
+    turnRecordEntries(record).flatMap((entry) => (
+      entry.kind === 'tool-result' && entry.settlement === 'success'
+        ? [[entry.callId, entry.seq] as const]
+        : []
+    )),
+  )
+  for (const row of projectRunOperations(record)) {
+    if (row.kind !== 'tool' || row.ok !== true || !row.card) continue
+    const resultSeq = row.callId ? resultSeqByCallId.get(row.callId) : undefined
+    if (!includesResult(resultSeqs, resultSeq)) continue
+    const stats = diffStats(row.card)
+    if (!stats) continue
+    const actions = new Map((diffPaths(row.card) ?? []).map((item) => [item.path, item.action]))
+    for (const stat of stats) {
+      accumulateFileChange(changes, stat, actions.get(stat.path) === 'create' ? 'create' : 'edit', row.seq)
+    }
+  }
+  return [...changes.values()].sort((left, right) => left.seq - right.seq)
 }
 
 function unpairedRecordTitle(_entry: TurnRecordEntry): string {

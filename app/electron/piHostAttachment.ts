@@ -119,6 +119,7 @@ export type PiHostAttachmentPage = {
 }
 
 export const PI_HOST_ATTACHMENT_TERMINAL_LIMIT = 256
+export const PI_HOST_ATTACHMENT_TOMBSTONE_LIMIT = 256
 export const PI_HOST_ATTACHMENT_MAX_SUMMARY_BYTES = 64 * 1024
 export const PI_HOST_ATTACHMENT_TTL_MS = 24 * 60 * 60 * 1000
 export const PI_HOST_ATTACHMENT_PAGE_LIMIT = 200
@@ -363,10 +364,22 @@ export class PiHostAttachmentJournal {
 
   private prune(now: number): void {
     const terminal = this.state.records.filter((record) => record.status === 'terminal')
-    const kept = terminal.filter((record) => !record.acknowledged && !(record.terminalAt && now - record.terminalAt >= PI_HOST_ATTACHMENT_TTL_MS))
-    const sorted = kept.sort((a, b) => (a.terminalAt || 0) - (b.terminalAt || 0)).slice(-PI_HOST_ATTACHMENT_TERMINAL_LIMIT)
+    const unexpired = terminal.filter((record) => !(record.terminalAt && now - record.terminalAt >= PI_HOST_ATTACHMENT_TTL_MS))
+    // Ack ends recovery/finalization delivery, not run identity. Keep the
+    // acknowledged record as a bounded tombstone so a delayed turn/submit
+    // cannot resurrect the same runId after renderer settlement. Recovery and
+    // tombstone retention have separate caps: a burst of pending finalization
+    // must not evict recently acknowledged submission identities.
+    const pending = unexpired
+      .filter((record) => !record.acknowledged)
+      .sort((a, b) => (a.terminalAt || 0) - (b.terminalAt || 0))
+      .slice(-PI_HOST_ATTACHMENT_TERMINAL_LIMIT)
+    const tombstones = unexpired
+      .filter((record) => record.acknowledged)
+      .sort((a, b) => (a.terminalAt || 0) - (b.terminalAt || 0))
+      .slice(-PI_HOST_ATTACHMENT_TOMBSTONE_LIMIT)
     const active = this.state.records.filter((record) => record.status === 'active')
-    this.state.records = [...active, ...sorted]
+    this.state.records = [...active, ...tombstones, ...pending]
   }
 
   begin(input: { runId: string; sessionId: string; threadId?: string; turn?: number; learning?: PiHostRunLearningCandidate }): PiHostAttachment {

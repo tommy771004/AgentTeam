@@ -2244,6 +2244,13 @@ await test('drift guard: the Pi path\'s live timeline is the record projection, 
     'the right-side panel delegates trusted progress/activity selection to the adaptive status owner')
   assert.match(panel, /projectRunStatusSurface\(\{/,
     'the panel supplies lifecycle, capabilities, activity, Working State and attention evidence to that owner')
+  assert.match(panel, /function InlineAgentWork[\s\S]*latestConversationTurn\(entries\)[\s\S]*<AgentWorkTree entries=\{entries\}/,
+    'the child-work leaf derives one conversation-turn scope from the Host record')
+  assert.match(panel, /<InlineAgentWork entries=\{activity\.recordEntries\} sessionId=\{agent\.hostSessionId\}/,
+    'the right-side summary shows Host-owned child execution only when that projection has rows')
+  const statusSurface = fs.readFileSync(path.join(appRoot, 'src/agent/runStatusSurface.ts'), 'utf8')
+  assert.doesNotMatch(statusSurface, /progressSurface|title: '任務進度'/,
+    'the execution summary no longer repeats the task plan as a secondary status surface')
   assert.doesNotMatch(panel, /\{agent\.progress\}%/,
     'a Pi Host run without a finite plan must not display a fake percentage')
   // The activity-event trace is the FALLBACK. It renders only where no record
@@ -2331,6 +2338,10 @@ await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and r
     'run-scoped live step progress stays horizontally beside the project picker above the conversation composer')
   assert.match(progress, /whitespace-nowrap/)
   assert.match(progress, /步驟 \{currentStep\} \/ \{tasks\.length\}/)
+  assert.match(progress, /right-0 bottom-full/,
+    'the floating step card opens above and stays aligned to the right edge')
+  assert.match(progress, /本輪檔案差異：新增 \$\{additions\} 行，刪除 \$\{removals\} 行/,
+    'the compact row exposes cumulative current-run diff totals accessibly')
   assert.match(progress, /onMouseEnter=\{\(\) => setHoverOpen\(true\)\}/)
   assert.match(progress, /aria-expanded=\{open\}/)
   assert.match(progress, /task\.status === 'done'[\s\S]*check_circle/,

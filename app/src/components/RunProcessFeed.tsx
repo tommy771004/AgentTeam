@@ -728,19 +728,15 @@ export function RunProcessFeed({
 
       {/* Streaming draft (markdown), fallback path only. On the record path the
           draft is the timeline's current assistant line — showing it here too
-          would be the same text in two places. The answer resolves out of blur
-          once when it first appears, and carries the docs/ui caret on its last
-          line so "still writing" is visible without a second status row. */}
+          would be the same text in two places. The docs/ui caret on its last
+          line shows "still writing" without obscuring live response text. */}
       {draftText && !hasRecordTimeline ? (
         <div className="agent-streaming-answer pt-2">
           <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
             <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
             assistant · 回覆中
           </div>
-          <div
-            className="agent-streaming-body"
-            style={{ animation: 'stream-in 420ms cubic-bezier(0.22,0.61,0.25,1) both' }}
-          >
+          <div className="agent-streaming-body">
             <MarkdownBody content={draftText} streaming />
           </div>
         </div>

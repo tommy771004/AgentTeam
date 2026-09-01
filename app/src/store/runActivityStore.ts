@@ -13,6 +13,8 @@ import type {
   ExternalCliTerminalClassification,
 } from '../agent/externalCliRunSession.ts'
 import type { TurnRecordEntry } from '../agent/turnRecord.ts'
+import { TURN_RECORD_FORMAT_VERSION } from '../agent/turnRecord.ts'
+import { projectRunFileChanges } from '../agent/runOperationsProjection.ts'
 
 export type RunActivityKind =
   | 'status'
@@ -740,6 +742,29 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         const added = entries.filter((entry) => !known.has(entry.seq))
         if (!added.length) return presentation
         const merged = [...presentation.recordEntries, ...added].sort((left, right) => left.seq - right.seq)
+        const addedResultSeqs = new Set(
+          added.filter((entry) => entry.kind === 'tool-result' && entry.settlement === 'success').map((entry) => entry.seq),
+        )
+        const newFileChanges = addedResultSeqs.size > 0
+          ? projectRunFileChanges(
+              { version: TURN_RECORD_FORMAT_VERSION, entries: merged },
+              addedResultSeqs,
+            )
+          : []
+        const fileChanges = [...presentation.fileChanges]
+        for (const change of newFileChanges) {
+          const existingIndex = fileChanges.findIndex((file) => file.path === change.path)
+          const current = existingIndex >= 0 ? fileChanges[existingIndex] : undefined
+          const next: FileChangeRecord = {
+            path: change.path,
+            action: current?.action === 'create' || change.action === 'create' ? 'create' : 'edit',
+            added: (current?.added ?? 0) + change.added,
+            removed: (current?.removed ?? 0) + change.removed,
+            at: Date.now(),
+          }
+          if (existingIndex >= 0) fileChanges[existingIndex] = next
+          else fileChanges.push(next)
+        }
         // The message the draft was accumulating is now ON the record, so the
         // draft has done its job. Keeping it would put the same sentence on the
         // timeline twice — once as the recorded assistant row and once as the
@@ -748,6 +773,7 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         return {
           ...presentation,
           recordEntries: merged.slice(-MAX_RECORD_ENTRIES),
+          fileChanges: fileChanges.slice(-MAX_FILES),
           // `recordTotal` is a Host high-watermark/count, not a count of this
           // renderer's arrivals. A replayed/backfilled page must not inflate it.
           recordTotal: Math.max(presentation.recordTotal, merged.length, merged.at(-1)?.seq || 0),
@@ -767,9 +793,24 @@ export const useRunActivityStore = create<RunActivityStore>((set, get) => ({
         for (const entry of presentation.recordEntries) bySeq.set(entry.seq, entry)
         for (const entry of input.entries) bySeq.set(entry.seq, entry)
         const recordEntries = [...bySeq.values()].sort((left, right) => left.seq - right.seq).slice(-MAX_RECORD_ENTRIES)
+        const fileChanges = [...presentation.fileChanges]
+        for (const change of projectRunFileChanges({ version: TURN_RECORD_FORMAT_VERSION, entries: recordEntries })) {
+          const existingIndex = fileChanges.findIndex((file) => file.path === change.path)
+          const current = existingIndex >= 0 ? fileChanges[existingIndex] : undefined
+          const next: FileChangeRecord = {
+            path: change.path,
+            action: current?.action === 'create' || change.action === 'create' ? 'create' : 'edit',
+            added: Math.max(current?.added ?? 0, change.added),
+            removed: Math.max(current?.removed ?? 0, change.removed),
+            at: Date.now(),
+          }
+          if (existingIndex >= 0) fileChanges[existingIndex] = next
+          else fileChanges.push(next)
+        }
         return {
           ...presentation,
           recordEntries,
+          fileChanges: fileChanges.slice(-MAX_FILES),
           // The Host's total/latestSeq are authoritative and monotonic; the
           // renderer never derives a larger count from replay arrivals.
           recordTotal: Math.max(presentation.recordTotal, input.total, input.latestSeq, recordEntries.length),

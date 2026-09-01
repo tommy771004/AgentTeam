@@ -182,5 +182,9 @@ try {
 const agentWorkTreeUi = await readFile(new URL('../src/components/AgentWorkTree.tsx', import.meta.url), 'utf8')
 assert.doesNotMatch(agentWorkTreeUi, /agent-review:|review\.admit|review\.finalize/, 'Agent Work Tree must not mint a second review lifecycle')
 assert.match(agentWorkTreeUi, /row\.reviewSnapshotRef\.snapshotId/, 'Agent Work Tree opens only the Host settlement snapshot')
+assert.deepEqual(projectAgentWorkTree([{
+  kind: 'agent-lifecycle', source: 'host', seq: 0, turn: 1, step: 0, at: 1,
+  event: { agentId: 'root-only', rootAgentId: 'root-only', taskPath: '/root', state: 'running', runId: 'root-run' },
+}], 1), [], 'a root session lifecycle alone never creates a child-work row')
 
 console.log('Host-owned agent collaboration lifecycle, conflict isolation, recovery, and turn attribution are qualified')

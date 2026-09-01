@@ -3033,6 +3033,21 @@ export async function runTask(input: TaskRunInput): Promise<TaskRunResult> {
   }
   const normalized = applyComposerApprovalHandoff(normalizeTaskRunInput(input))
   const runId = normalized.runId || `run_${uuid().slice(0, 12)}`
+  // An explicit runId is the caller's durable submission identity. Once its
+  // terminal journal fact exists, a delayed transport/UI replay must not pass
+  // admission again. Legitimate continuation creates a fresh runId and binds
+  // the prior identity through overrides.resumeFromRunId instead.
+  if (normalized.runId && hasJournalledEnding(runId)) {
+    return {
+      path: 'builtin',
+      status: 'skipped',
+      error: `runId ${runId} 已完成生命週期，略過重送。`,
+      threadId: normalized.reuseThreadId || null,
+      runId,
+      skipped: true,
+      skipReason: 'duplicate',
+    }
+  }
   if (coordinatingRunIds.has(runId)) {
     return {
       path: 'builtin',

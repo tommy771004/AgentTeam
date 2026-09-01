@@ -90,7 +90,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineItem, { kind: 'ass
       data-assistant-phase={row.phase || 'legacy'}
       data-timeline-row={row.draft ? 'assistant-draft' : 'assistant'}
     >
-      <div className={row.draft ? 'agent-streaming-body' : ''} style={row.draft ? { animation: 'stream-in 420ms cubic-bezier(0.22,0.61,0.25,1) both' } : undefined}>
+      <div className={row.draft ? 'agent-streaming-body' : ''}>
         <MarkdownBody content={row.content} streaming={row.draft} />
       </div>
     </div>

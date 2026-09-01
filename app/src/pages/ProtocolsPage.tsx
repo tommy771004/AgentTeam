@@ -79,10 +79,9 @@ function ComposerExecutionContext({
   fileChanges?: readonly Pick<FileChangeRecord, 'added' | 'removed'>[]
 }) {
   return (
-    <div className={live ? 'grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2' : 'flex min-w-0 items-center gap-2'}>
+    <div className="flex min-w-0 items-center gap-2">
       <ProjectContextBar />
       {live ? <ExecutionStepsProgress tasks={tasks} fileChanges={fileChanges} /> : null}
-      {live ? <span aria-hidden="true" /> : null}
     </div>
   )
 }

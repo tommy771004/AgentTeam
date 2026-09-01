@@ -16,6 +16,7 @@ import {
   agentLifecycleFromExecutionSettlement,
   agentLifecycleFromTurnSettlement,
 } from '../src/agent/agentLifecycle.ts'
+import { useAgentStore } from '../src/store/agentStore.ts'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -166,6 +167,48 @@ assert(
   'an agent snapshot must project the same exhausted wording',
 )
 assert(orchestrationFromAgent({ executionKind: 'loop' }) === undefined, 'an agent with no settlement evidence projects nothing')
+
+// A downstream app effect belongs to the post-state/finalization axis. Once
+// the Host has settled an answered, completed execution, a failed webhook must
+// remain visible without rewriting that immutable execution fact or hiding the
+// answer the user already received.
+const postStateRunId = 'lifecycle_post_state_failure'
+const agentStore = useAgentStore.getState()
+agentStore.reserveRun(postStateRunId, 'thread_post_state_failure')
+const initialPostStateRun = agentStore.getRunState(postStateRunId)
+assert(initialPostStateRun, 'post-state regression run should be reserved')
+agentStore.restoreRun({
+  runId: postStateRunId,
+  threadId: 'thread_post_state_failure',
+  state: {
+    ...initialPostStateRun,
+    status: 'success',
+    result: '完整 final 回覆',
+    turnSettlement: 'answered',
+    executionSettlement: 'completed',
+  },
+})
+useAgentStore.getState().applyPostState(postStateRunId, {
+  nextState: 'Dispatch Webhook',
+  status: 'failed',
+  attemptedAt: '2026-09-01T00:00:00.000Z',
+  error: 'upstream unavailable',
+})
+const postStateFailedRun = useAgentStore.getState().getRunState(postStateRunId)
+assert(postStateFailedRun?.result === '完整 final 回覆', 'post-state failure must preserve the final answer')
+assert(postStateFailedRun?.status === 'success', 'post-state failure must not rewrite completed execution status')
+assert(postStateFailedRun.executionSettlement === 'completed', 'post-state failure must preserve execution settlement')
+assert(postStateFailedRun.postState?.status === 'failed', 'post-state failure must remain independently inspectable')
+view = deriveRunLifecycle({
+  status: postStateFailedRun.status,
+  terminal: true,
+  outcome: {
+    turnSettlement: postStateFailedRun.turnSettlement,
+    executionSettlement: postStateFailedRun.executionSettlement,
+  },
+})
+assert(view.label !== '執行失敗' && view.tone !== 'danger', 'post-state failure must not project as execution failure')
+useAgentStore.getState().releaseRun(postStateRunId)
 
 const brief = {
   id: 'brief_exhausted',

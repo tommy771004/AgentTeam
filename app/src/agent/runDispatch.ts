@@ -165,14 +165,13 @@ export async function dispatchThreadTask(
       attachmentsPathAppendix(attachments),
     ].filter(Boolean).join('\n\n')
     const request = appendix ? `${raw}\n\n${appendix}` : raw
-    // Pi Host cannot read renderer-owned skills, project guidance or chat
-    // history, and has no tool to fetch them. They travel with the prompt or
-    // the turn simply never sees them.
+    // Pi Host owns its structured conversation history and resource loading.
+    // Only cross-session recall and browser-fallback guidance are assembled
+    // here; replaying renderer bubbles would duplicate the native transcript.
     const piContext = await buildPiTurnContext({
       objective: raw,
       settings,
       projectRoot: snapshot.overrides.projectRoot?.trim() || undefined,
-      bubbles: thread?.bubbles,
       temporary: snapshot.overrides.temporary === true,
       archive: useAgentStore.getState().archive,
     })

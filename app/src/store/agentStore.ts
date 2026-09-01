@@ -744,16 +744,18 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       const current = runAgentStates.get(runId)
       if (!current) return
       const next = { ...current, postState: outcome }
-      if (outcome.status === 'failed' && current.status === 'success') {
-        next.status = 'failed'
-        next.haltReason = outcome.error || 'Post-state dispatch failed'
+      if (outcome.status === 'failed') {
+        // Post-state delivery is a downstream app effect, not execution. Keep
+        // the failure inspectable without rewriting the Host-settled execution
+        // status, answer, Goal verdict, or stop reason. The coordinator also
+        // surfaces this outcome as its own system bubble during finalization.
         next.logs = [
           ...current.logs,
           {
             id: `post_state_${runId}`,
             timestamp: new Date().toISOString(),
             level: 'ERROR' as const,
-            message: next.haltReason,
+            message: outcome.error || 'Post-state dispatch failed',
           },
         ]
       }

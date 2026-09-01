@@ -3,10 +3,10 @@
  *
  * Electron production dispatches the builtin turn straight to Pi Host
  * (runDispatch.ts). Pi Host recalls its own memory and discovers skills
- * through Pi's resource loader (ADR-0034), so this module now carries ONLY
- * what is not production resource discovery: recent chat history and
- * cross-session recall. Project guidance remains only as a plain-browser
- * compatibility fallback; Electron production resolves it inside Pi Host.
+ * through Pi's resource loader (ADR-0034), while Pi's SessionManager owns the
+ * structured conversation history. This module carries only cross-session
+ * recall and the plain-browser project-guidance fallback; replaying renderer
+ * bubbles here would duplicate and flatten the Host transcript.
  *
  * The former skill-injection branch was the stopgap this effort scheduled
  * for removal (issue 18): it resolved renderer localStorage skills into
@@ -14,11 +14,6 @@
  * loader. Skills travel through the Host now — written to the Host-owned
  * directory, advertised by `<available_skills>`, expanded when pinned.
  */
-import {
-  buildChatHistoryContext,
-  dropCurrentObjectiveFromHistory,
-  type ChatHistoryBubble,
-} from './chatHistory.ts'
 import { buildContextPacket, formatSessionRecallBlock, type ContextPacket } from './hermes/contextPacket.ts'
 import { formatProjectGuidance, resolveProjectContext, summarizeProjectContext } from './projectContext.ts'
 import type { ArchiveRecord, LlmSettings } from './types.ts'
@@ -27,8 +22,6 @@ export type PiTurnContextInput = {
   objective: string
   settings: LlmSettings
   projectRoot?: string
-  /** Conversation so far, oldest first. The current objective may be the last entry. */
-  bubbles?: ChatHistoryBubble[]
   /** Temporary chats read no memory and recall no other session. */
   temporary?: boolean
   /** Archive to recall across sessions; omitted when recall is off. */
@@ -62,13 +55,6 @@ export async function buildPiTurnContext(input: PiTurnContextInput): Promise<PiT
     }
   }
 
-  // The objective travels in the 當前請求 slot below the packet; the bubble
-  // holding the same text must not be replayed as history on top of it.
-  const recentChat =
-    input.settings.referenceChatHistory !== false && input.bubbles?.length
-      ? buildChatHistoryContext(dropCurrentObjectiveFromHistory(input.bubbles, objective))
-      : ''
-
   let sessionRecall = ''
   const recallOn = input.settings.sessionRecallEnabled !== false && !temporary
   if (recallOn && input.archive?.length) {
@@ -82,7 +68,6 @@ export async function buildPiTurnContext(input: PiTurnContextInput): Promise<PiT
 
   const packet = buildContextPacket({
     projectGuidance,
-    recentChat,
     sessionRecall,
     // Skills are Pi resources now (ADR-0034): the loader advertises them in
     // the system prompt, so no text travels here — one discovery path only.

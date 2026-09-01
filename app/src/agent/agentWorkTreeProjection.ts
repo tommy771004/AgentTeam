@@ -97,6 +97,10 @@ export function projectAgentWorkTree(entries: readonly TurnRecordEntry[], origin
 function applyLifecycleEntry(rows: Map<string, AgentWorkRow>, entry: Extract<TurnRecordEntry, { kind: 'agent-lifecycle' }>, originTurn: number): void {
   if (entry.turn !== originTurn) return
   const current = rows.get(entry.event.agentId)
+  // A root session records its own lifecycle too. It is the owner of this
+  // panel, not delegated work, so it must not make the child-work disclosure
+  // appear unless a real child admission/lifecycle exists.
+  if (!entry.event.parentAgentId && !current) return
   rows.set(entry.event.agentId, {
     agentId: entry.event.agentId,
     ...(entry.event.parentAgentId ? { parentAgentId: entry.event.parentAgentId } : {}),

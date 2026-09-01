@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ContextUsageChip } from './ContextUsageChip'
 import { Icon } from './Icon'
 import { LogViewer } from './LogViewer'
@@ -11,7 +11,7 @@ import {
 import { recordRunnerDeclaration, TURN_RECORD_FORMAT_VERSION } from '../agent/turnRecord'
 import { useAgentStore } from '../store/agentStore'
 import { usePermissionAskStore } from '../store/permissionAskStore'
-import { useRunActivityStore, type RunPresentation } from '../store/runActivityStore'
+import { useRunActivityStore } from '../store/runActivityStore'
 import { ReasoningFocusPanel } from './ReasoningFocusPanel'
 import { ContextUsagePanel } from './ContextUsagePanel'
 import { TrajectoryPanel } from './TrajectoryPanel'
@@ -20,14 +20,16 @@ import { formatTokensCompact } from '../agent/contextUsageView'
 import { useRunContextUsage } from '../hooks/useRunContextUsage'
 import { useRunUsageRefresher } from '../hooks/useRunUsageRefresher'
 import type { TurnRecordEntry } from '../agent/turnRecord'
-import { useThreadStore, type ThreadPlanItem } from '../store/threadStore'
+import { useThreadStore } from '../store/threadStore'
 import { useWorkingStateProjectionStore } from '../store/workingStateProjectionStore'
 import type { AgentState } from '../agent/types'
 import type { ReviewTarget } from '../agent/reviewContract.ts'
 import { WorkingStateDiagnostics } from './WorkingStateView'
-import { projectRunStatusSurface, type RunStatusSurfaceInput } from '../agent/runStatusSurface.ts'
+import { projectRunStatusSurface } from '../agent/runStatusSurface.ts'
 import { RunStatusSurface } from './RunStatusSurface.tsx'
 import { RunWorktreeSummary } from './ProjectContextBar.tsx'
+import { AgentWorkTree } from './AgentWorkTree.tsx'
+import { latestConversationTurn } from '../agent/agentWorkTreeProjection.ts'
 
 /**
  * CloudCLI-style embedded run progress — no page navigation.
@@ -43,22 +45,10 @@ const EMPTY_AGENT = emptyAgentLike({ objective: '', status: 'idle', progress: 0 
 const EMPTY_RECORD_ENTRIES: TurnRecordEntry[] = []
 const EMPTY_ACTIVITY = { active: false, tasks: [], events: [], fileChanges: [], statusLine: '', thought: '', startedAt: 0, updatedAt: 0, phase: 'starting' as const, terminal: null, interaction: null, authenticationRequired: false, stopping: false, recordEntries: EMPTY_RECORD_ENTRIES, recordTotal: 0 } as const
 
-function activityWithPersistedPlan(
-  activity: RunPresentation | typeof EMPTY_ACTIVITY,
-  persistedRunPlan?: ThreadPlanItem[],
-): RunStatusSurfaceInput['activity'] {
-  if (activity.tasks.length > 0 || !persistedRunPlan?.length) return activity
-  return {
-    ...activity,
-    tasks: persistedRunPlan.map((task) => ({
-      id: task.id,
-      text: task.text,
-      status: task.status,
-      at: Date.parse(task.at) || activity.updatedAt,
-      ...(task.meta ? { meta: task.meta } : {}),
-      ...(task.details ? { details: task.details } : {}),
-    })),
-  }
+function InlineAgentWork({ entries, sessionId }: { entries: readonly TurnRecordEntry[]; sessionId?: string }) {
+  const originTurn = useMemo(() => latestConversationTurn(entries), [entries])
+  if (originTurn <= 0) return null
+  return <AgentWorkTree entries={entries} originTurn={originTurn} sessionId={sessionId} />
 }
 
 // The trajectory section remembers being opened across remounts — repeated
@@ -286,7 +276,6 @@ export function InlineRunPanel({
   const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
   const activity = useRunActivityStore((s) => s.presentations[runId]) || EMPTY_ACTIVITY
-  const persistedRunPlan = useThreadStore((state) => state.threads.find((thread) => thread.id === threadId)?.runPlan)
   const projectRoot = useThreadStore((state) => state.threads.find((thread) => thread.id === threadId)?.projectRoot)
   const workingStateProjection = useWorkingStateProjectionStore((state) => state.byRunId[runId])
   const approvalPending = usePermissionAskStore((s) =>
@@ -339,7 +328,7 @@ export function InlineRunPanel({
     lifecycle,
     capabilities: runnerCaps,
     isExternal,
-    activity: activityWithPersistedPlan(activity, persistedRunPlan),
+    activity,
     workingState: workingStateProjection,
     approvalPending,
   })
@@ -391,6 +380,7 @@ export function InlineRunPanel({
       <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
         <RunWorktreeSummary projectRoot={projectRoot} />
         <RunStatusSurface projection={statusSurface} startedAt={activity.startedAt} />
+        <InlineAgentWork entries={activity.recordEntries} sessionId={agent.hostSessionId} />
 
         <PanelSection
           id="run-context"
