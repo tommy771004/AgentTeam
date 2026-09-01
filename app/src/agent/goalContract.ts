@@ -16,6 +16,12 @@ export type GoalCriterion =
       verifiedRevision: string
       verification: 'build' | 'smoke' | 'test'
     }>
+  | Readonly<{
+      id: string
+      kind: 'semantic-rubric'
+      rubricId: string
+      verifierPolicy: 'all' | 'majority' | 'mandatory'
+    }>
 
 export type GoalContractSnapshot = Readonly<{
   schemaVersion: 1
@@ -94,6 +100,9 @@ const validReviewCriterion = (criterion: Record<string, unknown>): boolean => ha
   && boundedString(criterion.snapshotId, 512) && boundedString(criterion.verifiedRevision, 512)
   && ['build', 'smoke', 'test'].includes(String(criterion.verification))
 
+const validSemanticCriterion = (criterion: Record<string, unknown>): boolean => hasOnlyKeys(criterion, ['id', 'kind', 'rubricId', 'verifierPolicy'])
+  && boundedString(criterion.rubricId, 1_024) && ['all', 'majority', 'mandatory'].includes(String(criterion.verifierPolicy))
+
 export function isGoalCriterion(value: unknown): value is GoalCriterion {
   if (!value || typeof value !== 'object') return false
   const criterion = value as Record<string, unknown>
@@ -105,7 +114,8 @@ export function isGoalCriterion(value: unknown): value is GoalCriterion {
     && ['build', 'lint', 'smoke', 'test'].includes(String(criterion.suite))
   if (criterion.kind === 'artifact-exists') return validArtifactCriterion(criterion)
   if (criterion.kind === 'json-schema') return validJsonSchemaCriterion(criterion)
-  return criterion.kind === 'review-verification' && validReviewCriterion(criterion)
+  if (criterion.kind === 'review-verification') return validReviewCriterion(criterion)
+  return criterion.kind === 'semantic-rubric' && validSemanticCriterion(criterion)
 }
 
 function isGoalOutputs(value: unknown): boolean {

@@ -7,6 +7,7 @@ import { GOAL_CONTRACT_CAPABILITY, goalContractFromWorkingState, hasExecutableGo
 import { WORKFLOW_GRAPH_CAPABILITY } from '../src/agent/workflowGraph.ts'
 import { WORKFLOW_RECORD_CAPABILITY } from '../src/agent/workflowRecord.ts'
 import { WORKFLOW_SCHEDULER_CAPABILITY } from './workflowScheduler.ts'
+import { FRESH_SEMANTIC_VERIFIER_CAPABILITY } from './criterionCheckers/semanticVerifier.ts'
 import type { AcceptanceSnapshot } from '../src/agent/acceptanceContract.ts'
 import { evaluateAcceptanceGate, goalVerdictFromAcceptance } from './acceptanceGate.ts'
 import type { GoalVerdict } from '../src/agent/goalOutcome.ts'
@@ -60,7 +61,7 @@ import type { ReviewDeliveryApproval, ReviewDeliveryIntent, ReviewDeliveryPrevie
  * field. Durable memory is available only through negotiated memory-store-v1.
  */
 export const PI_HOST_PROTOCOL_VERSION = 5 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'packages', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', GOAL_CONTRACT_CAPABILITY, WORKFLOW_GRAPH_CAPABILITY, WORKFLOW_RECORD_CAPABILITY, WORKFLOW_SCHEDULER_CAPABILITY, 'capabilities'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'packages', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', GOAL_CONTRACT_CAPABILITY, WORKFLOW_GRAPH_CAPABILITY, WORKFLOW_RECORD_CAPABILITY, WORKFLOW_SCHEDULER_CAPABILITY, FRESH_SEMANTIC_VERIFIER_CAPABILITY, 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
@@ -524,6 +525,7 @@ type HostState = {
   workflowGraphNegotiated: boolean
   workflowRecordNegotiated: boolean
   workflowSchedulerNegotiated: boolean
+  freshSemanticVerifierNegotiated: boolean
   agentCommunication: PiAgentCommunicationDomain
   reviewArtifactStore: ReviewArtifactStore
   reviewWorkspaces: Map<string, ReviewWorkspaceBinding>
@@ -3102,6 +3104,7 @@ function handleInitialization(
   state.workflowGraphNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, WORKFLOW_GRAPH_CAPABILITY)
   state.workflowRecordNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, WORKFLOW_RECORD_CAPABILITY)
   state.workflowSchedulerNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, WORKFLOW_SCHEDULER_CAPABILITY)
+  state.freshSemanticVerifierNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, FRESH_SEMANTIC_VERIFIER_CAPABILITY)
   const result = readyResult(state.negotiatedProtocolVersion)
   return [
     { event: 'host/ready', payload: {
@@ -6889,6 +6892,7 @@ export function createPiHostServer(
     workflowGraphNegotiated: false,
     workflowRecordNegotiated: false,
     workflowSchedulerNegotiated: false,
+    freshSemanticVerifierNegotiated: false,
     agentCommunication: new PiAgentCommunicationDomain(),
     reviewArtifactStore,
     reviewWorkspaces,

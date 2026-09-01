@@ -67,6 +67,24 @@ export type AcceptanceEvidence =
       verifiedRevision?: string
       exitCode?: number
     }>)
+  | (AcceptanceEvidenceBase & Readonly<{
+      kind: 'semantic-verifier'
+      state: 'matched' | 'mismatched' | 'blocked' | 'budget-exceeded' | 'unavailable'
+      rubricId: string
+      rubricDigest: string
+      artifactDigests: readonly string[]
+      checks: readonly Readonly<{
+        kind: 'correctness' | 'freshness' | 'source-validity'
+        verifierId: string
+        verdict: 'passed' | 'failed' | 'blocked'
+        reasonDigest: string
+        freshContextProof: string
+        tokens: number
+        costUsd: number
+      }>[]
+      totalTokens: number
+      totalCostUsd: number
+    }>)
 
 export type AcceptanceSnapshot = Readonly<{
   schemaVersion: 1
@@ -168,6 +186,21 @@ const validReviewEvidence = (evidence: Record<string, unknown>): boolean => ['ma
   && (evidence.verifiedRevision === undefined || typeof evidence.verifiedRevision === 'string')
   && (evidence.exitCode === undefined || Number.isInteger(evidence.exitCode))
 
+const validSemanticEvidence = (evidence: Record<string, unknown>): boolean => ['matched', 'mismatched', 'blocked', 'budget-exceeded', 'unavailable'].includes(String(evidence.state))
+  && typeof evidence.rubricId === 'string' && SHA256.test(String(evidence.rubricDigest))
+  && Array.isArray(evidence.artifactDigests) && evidence.artifactDigests.every((digest) => SHA256.test(String(digest)))
+  && Array.isArray(evidence.checks) && evidence.checks.every((value) => {
+    if (!value || typeof value !== 'object') return false
+    const check = value as Record<string, unknown>
+    return ['correctness', 'freshness', 'source-validity'].includes(String(check.kind))
+      && typeof check.verifierId === 'string' && ['passed', 'failed', 'blocked'].includes(String(check.verdict))
+      && SHA256.test(String(check.reasonDigest)) && typeof check.freshContextProof === 'string'
+      && Number.isSafeInteger(check.tokens) && Number(check.tokens) >= 0
+      && typeof check.costUsd === 'number' && Number.isFinite(check.costUsd) && Number(check.costUsd) >= 0
+  })
+  && Number.isSafeInteger(evidence.totalTokens) && Number(evidence.totalTokens) >= 0
+  && typeof evidence.totalCostUsd === 'number' && Number.isFinite(evidence.totalCostUsd) && Number(evidence.totalCostUsd) >= 0
+
 export function isAcceptanceEvidence(value: unknown): value is AcceptanceEvidence {
   if (!value || typeof value !== 'object') return false
   const evidence = value as Record<string, unknown>
@@ -176,7 +209,8 @@ export function isAcceptanceEvidence(value: unknown): value is AcceptanceEvidenc
   if (evidence.kind === 'file-content') return validFileEvidence(evidence)
   if (evidence.kind === 'registered-command' || evidence.kind === 'test-suite') return validCommandEvidence(evidence)
   if (evidence.kind === 'artifact-exists' || evidence.kind === 'json-schema') return validArtifactEvidence(evidence)
-  return evidence.kind === 'review-verification' && validReviewEvidence(evidence)
+  if (evidence.kind === 'review-verification') return validReviewEvidence(evidence)
+  return evidence.kind === 'semantic-verifier' && validSemanticEvidence(evidence)
 }
 
 export function isAcceptanceSnapshot(value: unknown): value is AcceptanceSnapshot {

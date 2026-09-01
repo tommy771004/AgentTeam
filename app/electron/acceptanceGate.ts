@@ -21,6 +21,46 @@ import {
   checkRevisionBoundReviewVerification,
   type ReviewVerificationBinding,
 } from './criterionCheckers/reviewVerification.ts'
+import {
+  checkFreshSemanticCriterion,
+  unavailableFreshSemanticCriterion,
+  type FreshSemanticVerifierRunner,
+  type SanitizedVerifierArtifact,
+  type SemanticRubric,
+  type SemanticVerifierBudget,
+  type SemanticVerifierGate,
+} from './criterionCheckers/semanticVerifier.ts'
+import type { BuildFlavor, OutboundGuardMode } from '../src/agent/outbound/outboundGate.ts'
+
+export type SemanticAcceptanceRuntime = Readonly<{
+  artifacts: readonly SanitizedVerifierArtifact[]
+  rubrics: Readonly<Record<string, SemanticRubric>>
+  evidenceRefs: readonly string[]
+  budget: SemanticVerifierBudget
+  effectiveMode: OutboundGuardMode
+  buildFlavor: BuildFlavor
+  providerConnectionId?: string
+  runner: FreshSemanticVerifierRunner
+  gate?: SemanticVerifierGate
+}>
+
+const minimumDefined = (left: number | undefined, right: number | undefined): number | undefined => {
+  if (left === undefined) return right
+  if (right === undefined) return left
+  return Math.min(left, right)
+}
+
+function effectiveSemanticBudget(runtime: SemanticAcceptanceRuntime, contract: GoalContractSnapshot): SemanticVerifierBudget {
+  return {
+    remainingTokens: minimumDefined(runtime.budget.remainingTokens, contract.budgets.maxTokens),
+    remainingCostUsd: minimumDefined(runtime.budget.remainingCostUsd, contract.budgets.maxCostUsd),
+  }
+}
+
+function semanticBudgetExceeded(usage: { tokens: number; costUsd: number }, budget: SemanticVerifierBudget): boolean {
+  return budget.remainingTokens !== undefined && usage.tokens > budget.remainingTokens
+    || budget.remainingCostUsd !== undefined && usage.costUsd > budget.remainingCostUsd
+}
 
 type RegisteredCommandState = 'matched' | 'exit-code-mismatch' | 'unknown-command' | 'unavailable' | 'revision-drift'
 
@@ -257,6 +297,7 @@ async function checkReviewVerification(input: {
 type AcceptanceCheck = { evidence: AcceptanceEvidence; verdict: CriterionVerdict }
 
 async function checkCriterion(input: {
+  runId: string
   criterion: GoalCriterion
   goalContract: GoalContractSnapshot
   workspaceRoot: string
@@ -266,6 +307,7 @@ async function checkCriterion(input: {
   previousEvidence?: AcceptanceEvidence
   runRegisteredCommand?: (input: { registryId: string; workspaceRoot: string }) => Promise<RegisteredCommandExecution>
   reviewBindings?: Readonly<Record<string, ReviewVerificationBinding>>
+  semanticVerifier?: SemanticAcceptanceRuntime
 }): Promise<AcceptanceCheck> {
   if (input.criterion.kind === 'assistant-answer-present') return checkAssistantAnswer({
     criterion: input.criterion, contract: input.goalContract, settlement: input.settlement,
@@ -282,10 +324,30 @@ async function checkCriterion(input: {
   if (input.criterion.kind === 'artifact-exists' || input.criterion.kind === 'json-schema') return checkArtifact({
     criterion: input.criterion, workspaceRoot: input.workspaceRoot, observedAt: input.observedAt,
   })
-  return checkReviewVerification({
-    criterion: input.criterion,
-    observedAt: input.observedAt,
+  if (input.criterion.kind === 'review-verification') return checkReviewVerification({
+    criterion: input.criterion, observedAt: input.observedAt,
     binding: input.reviewBindings?.[input.criterion.snapshotId],
+  })
+  const runtime = input.semanticVerifier
+  const rubric = runtime?.rubrics[input.criterion.rubricId]
+  if (!runtime || !rubric) return unavailableFreshSemanticCriterion({
+    criterion: input.criterion,
+    reason: 'Fresh semantic verifier runtime or rubric is unavailable',
+    observedAt: input.observedAt,
+  })
+  return checkFreshSemanticCriterion({
+    runId: input.runId,
+    criterion: input.criterion,
+    rubric,
+    artifacts: runtime.artifacts,
+    evidenceRefs: runtime.evidenceRefs,
+    budget: effectiveSemanticBudget(runtime, input.goalContract),
+    effectiveMode: runtime.effectiveMode,
+    buildFlavor: runtime.buildFlavor,
+    providerConnectionId: runtime.providerConnectionId,
+    runner: runtime.runner,
+    gate: runtime.gate,
+    observedAt: input.observedAt,
   })
 }
 
@@ -299,9 +361,15 @@ export async function evaluateAcceptanceGate(input: {
   previousEvidence?: readonly AcceptanceEvidence[]
   runRegisteredCommand?: (input: { registryId: string; workspaceRoot: string }) => Promise<RegisteredCommandExecution>
   reviewBindings?: Readonly<Record<string, ReviewVerificationBinding>>
-}): Promise<{ snapshot: AcceptanceSnapshot; evidence: readonly AcceptanceEvidence[] }> {
+  semanticVerifier?: SemanticAcceptanceRuntime
+}): Promise<{
+  snapshot: AcceptanceSnapshot
+  evidence: readonly AcceptanceEvidence[]
+  verifierUsage: Readonly<{ tokens: number; costUsd: number }>
+}> {
   const observedAt = Date.now()
   const checks = await Promise.all(input.goalContract.criteria.map((criterion) => checkCriterion({
+    runId: input.runId,
     criterion,
     goalContract: input.goalContract,
     workspaceRoot: input.workspaceRoot,
@@ -311,15 +379,36 @@ export async function evaluateAcceptanceGate(input: {
     previousEvidence: input.previousEvidence?.find((evidence) => evidence.criterionId === criterion.id),
     runRegisteredCommand: input.runRegisteredCommand,
     reviewBindings: input.reviewBindings,
+    semanticVerifier: input.semanticVerifier,
   })))
   const evidence = checks.map((check) => check.evidence)
+  const semanticEvidence = evidence.filter((item): item is Extract<AcceptanceEvidence, { kind: 'semantic-verifier' }> => item.kind === 'semantic-verifier')
+  const verifierUsage = {
+    tokens: semanticEvidence.reduce((total, item) => total + item.totalTokens, 0),
+    costUsd: semanticEvidence.reduce((total, item) => total + item.totalCostUsd, 0),
+  }
+  const aggregateBudgetExceeded = Boolean(input.semanticVerifier)
+    && semanticBudgetExceeded(verifierUsage, effectiveSemanticBudget(input.semanticVerifier!, input.goalContract))
+  const verdicts = checks.map(({ verdict, evidence: item }) => aggregateBudgetExceeded && item.kind === 'semantic-verifier'
+    ? {
+        ...verdict,
+        status: 'failed' as const,
+        reason: 'Aggregate fresh verifier usage exceeded the remaining Goal budget',
+        repairHint: undefined,
+        retryable: false,
+      }
+    : verdict)
   const snapshot = await createAcceptanceSnapshot({
     runId: input.runId,
     iteration: input.iteration,
     goalContract: input.goalContract,
-    verdicts: checks.map(({ verdict }) => verdict),
+    verdicts,
   })
-  return { snapshot, evidence }
+  return {
+    snapshot,
+    evidence,
+    verifierUsage,
+  }
 }
 
 export function goalVerdictFromAcceptance(input: {
