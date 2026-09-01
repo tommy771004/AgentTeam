@@ -72,7 +72,7 @@ export class PiHostSupervisor {
     this.turnIdleTimeoutMs = options.turnIdleTimeoutMs ?? 5 * 60_000
     this.requestedCapabilities = options.requestedCapabilities
       ? [...options.requestedCapabilities]
-      : ['attachments-v1', 'tool-contract-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', 'goal-contract-v1', 'workflow-graph-v1', 'workflow-record-v1']
+      : ['attachments-v1', 'tool-contract-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', 'goal-contract-v1', 'workflow-graph-v1', 'workflow-record-v1', 'workflow-scheduler-v1']
     this.serviceHandler = options.serviceHandler
   }
 

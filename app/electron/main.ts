@@ -326,7 +326,7 @@ const piHostSupervisor = new PiHostSupervisor(async () => {
   })
 },
   {
-    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', 'goal-contract-v1', 'workflow-graph-v1', 'workflow-record-v1'],
+    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', 'goal-contract-v1', 'workflow-graph-v1', 'workflow-record-v1', 'workflow-scheduler-v1'],
     serviceHandler: runPiHostMainService,
   },
 )

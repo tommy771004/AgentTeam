@@ -27,6 +27,7 @@ export type WorkflowRecordEvent =
   | Readonly<{ kind: 'artifact-published'; nodeRunId: string; attemptId: string; artifactId: string; digest: string }>
   | Readonly<{ kind: 'criterion-evaluated'; nodeRunId: string; attemptId: string; acceptanceDigest: string; criterionId: string; passed: boolean }>
   | Readonly<{ kind: 'node-verified'; nodeRunId: string; attemptId: string; passed: boolean; acceptanceDigest: string }>
+  | Readonly<{ kind: 'barrier-opened'; nodeRunId: string; upstreamArtifactIds: readonly string[] }>
   | Readonly<{ kind: 'goal-verdict'; verdict: GoalVerdict; acceptanceDigest: string }>
   | Readonly<{ kind: 'budget-updated'; remaining: Readonly<{ attempts: number; concurrentNodes: number; wallClockMs: number }> }>
   | Readonly<{ kind: 'workflow-terminal'; verdict: GoalVerdict; acceptanceDigest: string }>
@@ -50,6 +51,30 @@ export function isTurnRecordRangeRef(value: unknown): value is TurnRecordRangeRe
     && Number(ref.fromSeq) <= Number(ref.toSeq)
 }
 
+type EntryValidator = (entry: Record<string, unknown>) => boolean
+const EVENT_VALIDATORS: Readonly<Record<string, EntryValidator>> = {
+  'workflow-admitted': (entry) => validDigest(entry.definitionDigest),
+  'node-ready': (entry) => validId(entry.nodeRunId),
+  'node-dispatched': (entry) => validId(entry.nodeRunId) && validId(entry.attemptId),
+  'node-observed': (entry) => validId(entry.nodeRunId) && validId(entry.attemptId)
+    && ['completed', 'failed', 'cancelled', 'interrupted'].includes(String(entry.settlement)) && validId(entry.resultRef),
+  'artifact-published': (entry) => validId(entry.nodeRunId) && validId(entry.attemptId)
+    && validId(entry.artifactId) && validDigest(entry.digest),
+  'criterion-evaluated': (entry) => validId(entry.nodeRunId) && validId(entry.attemptId)
+    && validDigest(entry.acceptanceDigest) && validId(entry.criterionId) && typeof entry.passed === 'boolean',
+  'node-verified': (entry) => validId(entry.nodeRunId) && validId(entry.attemptId)
+    && validDigest(entry.acceptanceDigest) && typeof entry.passed === 'boolean',
+  'barrier-opened': (entry) => validId(entry.nodeRunId) && Array.isArray(entry.upstreamArtifactIds)
+    && entry.upstreamArtifactIds.every(validId),
+  'goal-verdict': (entry) => isGoalVerdict(entry.verdict) && validDigest(entry.acceptanceDigest),
+  'workflow-terminal': (entry) => isGoalVerdict(entry.verdict) && validDigest(entry.acceptanceDigest),
+  'budget-updated': (entry) => Boolean(entry.remaining) && typeof entry.remaining === 'object'
+    && ['attempts', 'concurrentNodes', 'wallClockMs'].every((key) => {
+      const value = (entry.remaining as Record<string, unknown>)[key]
+      return Number.isSafeInteger(value) && Number(value) >= 0
+    }),
+}
+
 export function isWorkflowRecordEntry(value: unknown): value is WorkflowRecordEntry {
   if (!value || typeof value !== 'object') return false
   if (workflowRecordContainsTranscript(value)) return false
@@ -57,20 +82,7 @@ export function isWorkflowRecordEntry(value: unknown): value is WorkflowRecordEn
   if (!positiveSeq(entry.workflowSeq) || typeof entry.at !== 'number' || !Number.isFinite(entry.at)) return false
   if (!validId(entry.taskRunId) || !validId(entry.workflowRunId) || typeof entry.kind !== 'string') return false
   if (entry.turnRecordRef !== undefined && !isTurnRecordRangeRef(entry.turnRecordRef)) return false
-  if (entry.kind === 'workflow-admitted') return validDigest(entry.definitionDigest)
-  if (entry.kind === 'node-ready') return validId(entry.nodeRunId)
-  if (entry.kind === 'node-dispatched') return validId(entry.nodeRunId) && validId(entry.attemptId)
-  if (entry.kind === 'node-observed') return validId(entry.nodeRunId) && validId(entry.attemptId)
-    && ['completed', 'failed', 'cancelled', 'interrupted'].includes(String(entry.settlement)) && validId(entry.resultRef)
-  if (entry.kind === 'artifact-published') return validId(entry.nodeRunId) && validId(entry.attemptId) && validId(entry.artifactId) && validDigest(entry.digest)
-  if (entry.kind === 'criterion-evaluated') return validId(entry.nodeRunId) && validId(entry.attemptId)
-    && validDigest(entry.acceptanceDigest) && validId(entry.criterionId) && typeof entry.passed === 'boolean'
-  if (entry.kind === 'node-verified') return validId(entry.nodeRunId) && validId(entry.attemptId)
-    && validDigest(entry.acceptanceDigest) && typeof entry.passed === 'boolean'
-  if (entry.kind === 'goal-verdict' || entry.kind === 'workflow-terminal') return isGoalVerdict(entry.verdict) && validDigest(entry.acceptanceDigest)
-  if (entry.kind !== 'budget-updated' || !entry.remaining || typeof entry.remaining !== 'object') return false
-  const remaining = entry.remaining as Record<string, unknown>
-  return ['attempts', 'concurrentNodes', 'wallClockMs'].every((key) => Number.isSafeInteger(remaining[key]) && Number(remaining[key]) >= 0)
+  return EVENT_VALIDATORS[entry.kind]?.(entry) === true
 }
 
 export function workflowRecordContainsTranscript(value: unknown): boolean {

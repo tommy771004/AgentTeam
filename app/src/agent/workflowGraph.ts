@@ -17,6 +17,8 @@ export type WorkflowNode = Readonly<{
     preferred?: string
     requiredCapabilities: readonly string[]
     workspaceMode: WorkflowWorkspaceMode
+    /** Required bounded project-relative scopes for shared writers. */
+    workspaceScopes?: readonly string[]
   }>
   verifier?: Readonly<{
     freshContext: boolean
@@ -106,12 +108,20 @@ function validOutput(value: unknown): boolean {
 }
 
 function validRunner(value: unknown): boolean {
-  if (!record(value) || !exactKeys(value, ['preferred', 'requiredCapabilities', 'workspaceMode'])) return false
+  if (!record(value) || !exactKeys(value, ['preferred', 'requiredCapabilities', 'workspaceMode', 'workspaceScopes'])) return false
   if (value.preferred !== undefined && !validId(value.preferred)) return false
   if (!Array.isArray(value.requiredCapabilities) || value.requiredCapabilities.length > 64) return false
   if (!value.requiredCapabilities.every(validId)) return false
   if (new Set(value.requiredCapabilities).size !== value.requiredCapabilities.length) return false
-  return WORKSPACE_MODES.has(value.workspaceMode as WorkflowWorkspaceMode)
+  if (!WORKSPACE_MODES.has(value.workspaceMode as WorkflowWorkspaceMode)) return false
+  if (value.workspaceScopes !== undefined && (!Array.isArray(value.workspaceScopes)
+    || value.workspaceScopes.length > 100
+    || !value.workspaceScopes.every((scope) => typeof scope === 'string'
+      && scope.length > 0 && scope.length <= 2_048 && !/^[/\\]|^[A-Za-z]:[/\\]/.test(scope)
+      && !scope.split(/[\\/]/).includes('..'))
+    || new Set(value.workspaceScopes).size !== value.workspaceScopes.length)) return false
+  if (value.workspaceMode === 'shared-leased-write' && (!Array.isArray(value.workspaceScopes) || value.workspaceScopes.length === 0)) return false
+  return true
 }
 
 function validVerifier(value: unknown): boolean {

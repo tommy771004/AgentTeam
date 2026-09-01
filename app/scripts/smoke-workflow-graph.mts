@@ -75,7 +75,14 @@ await expects('duplicate-output', (workflow) => { workflow.nodes[2].outputs = [{
 await expects('unreachable-terminal', (workflow) => {
   workflow.nodes.push(node({ id: 'orphan', kind: 'agent', task: 'Orphan branch' }))
 })
-await expects('invalid-workspace-policy', (workflow) => { workflow.nodes[1].runner.workspaceMode = 'shared-leased-write' })
+await expects('invalid-workspace-policy', (workflow) => {
+  workflow.nodes[1].runner.workspaceMode = 'shared-leased-write'
+  workflow.nodes[1].runner.workspaceScopes = ['src/generated']
+})
+await expects('invalid-runner', (workflow) => {
+  workflow.nodes[0].runner.workspaceMode = 'shared-leased-write'
+  workflow.nodes[0].runner.workspaceScopes = []
+})
 await expects('invalid-concurrency-budget', (workflow) => { workflow.budgets.maxConcurrentNodes = 9 })
 await expects('invalid-attempt-budget', (workflow) => { workflow.budgets.maxTotalAttempts = 1 })
 await expects('invalid-wall-clock-budget', (workflow) => { workflow.budgets.maxWallClockMs = 0 })
