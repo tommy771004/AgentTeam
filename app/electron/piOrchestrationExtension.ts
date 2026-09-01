@@ -1,4 +1,5 @@
 import { isCompletedModelCall, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
+import { clampPiIterations } from '../src/agent/loopBounds.ts'
 
 export type PiLoopPattern = 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'
 
@@ -46,7 +47,7 @@ function patternSettlesAfterOneTurn(pattern: PiLoopPattern): boolean {
  * agent engine. The default cap keeps unattended automation bounded.
  */
 export async function runPiOrchestration(input: PiOrchestrationInput): Promise<PiOrchestrationTurn & { iterations: number; pattern: PiLoopPattern; dodMet?: boolean }> {
-  const limit = Math.max(1, Math.min(8, Math.floor(input.maxIterations || 1)))
+  const limit = clampPiIterations(input.maxIterations ?? 1)
   let last: PiOrchestrationTurn = { result: '', settlement: 'failed' }
   let iterationPrompt = input.prompt
   for (let iteration = 1; iteration <= limit; iteration += 1) {

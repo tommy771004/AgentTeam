@@ -53,10 +53,13 @@ assert.equal(clampPiIterations(undefined), 1)
 // Drift guards: both clamp sites must use the shared module, not private literals.
 const piHostRun = await readFile(resolve(import.meta.dirname, '../src/agent/piHostRun.ts'), 'utf8')
 const hostProtocol = await readFile(resolve(import.meta.dirname, '../electron/piHostProtocol.ts'), 'utf8')
+const orchestration = await readFile(resolve(import.meta.dirname, '../electron/piOrchestrationExtension.ts'), 'utf8')
 assert.match(piHostRun, /clampPiIterations\(/, 'renderer run config must use the shared clamp')
 assert.doesNotMatch(piHostRun, /Math\.min\(8/, 'the old 8-round ceiling must not come back renderer-side')
 assert.match(hostProtocol, /clampPiIterations\(/, 'Host turn admission must use the shared clamp')
 assert.doesNotMatch(hostProtocol, /Math\.min\(8/, 'the old 8-round ceiling must not come back host-side')
+assert.match(orchestration, /clampPiIterations\(input\.maxIterations/, 'builtin orchestration must use the shared clamp')
+assert.doesNotMatch(orchestration, /Math\.min\(8/, 'builtin orchestration must not define a private 8-round ceiling')
 
 // Drift guard: continueGoal admission must consult the freshness window.
 const coordinator = await readFile(resolve(import.meta.dirname, '../src/agent/taskRunCoordinator.ts'), 'utf8')

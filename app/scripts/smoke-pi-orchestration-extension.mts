@@ -20,6 +20,22 @@ for (const pattern of ['Turn-based', 'Goal-based', 'Time-based', 'Proactive'] as
 
 console.log('one Pi Orchestration Extension owns all four loop patterns')
 
+for (const requested of [1, 8, 16, 32]) {
+  const calls: number[] = []
+  const bounded = await runPiOrchestration({
+    pattern: 'Goal-based',
+    prompt: `run ${requested} iterations`,
+    maxIterations: requested,
+    turn: async (_prompt, iteration) => {
+      calls.push(iteration)
+      return { settlement: 'answered', result: `iteration-${iteration}`, done: false }
+    },
+  })
+  assert.equal(bounded.iterations, requested)
+  assert.deepEqual(calls, Array.from({ length: requested }, (_, index) => index + 1))
+}
+console.log('Goal-based orchestration honors shared 1/8/16/32 iteration bounds')
+
 const unmet = await runPiOrchestration({
   pattern: 'Goal-based',
   prompt: 'unmet',
