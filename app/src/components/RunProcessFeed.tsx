@@ -99,6 +99,11 @@ function SubDesignThinkingSteps({ tasks }: { tasks: readonly RunTaskItem[] }) {
   )
 }
 
+function ContextThinkingSteps({ context, tasks }: { context?: 'default' | 'subdesign'; tasks: readonly RunTaskItem[] }) {
+  if (context !== 'subdesign') return null
+  return <SubDesignThinkingSteps tasks={tasks} />
+}
+
 function kindIcon(kind: string): string {
   switch (kind) {
     case 'tool':
@@ -165,7 +170,7 @@ export function RunProcessFeed({
   runId,
   depthLabel,
   onOpenPanel,
-  context = 'default',
+  context,
 }: {
   runId: string
   depthLabel: string
@@ -565,7 +570,7 @@ export function RunProcessFeed({
 
       <Reveal open={processOpen}>
         <div className="space-y-3">
-          {context === 'subdesign' ? <SubDesignThinkingSteps tasks={tasks} /> : null}
+          <ContextThinkingSteps context={context} tasks={tasks} />
           {recovery ? (
             <div className="agent-process-recovery space-y-2 text-[12px] text-ink-2" role="status">
               <div>

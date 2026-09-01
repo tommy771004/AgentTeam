@@ -18,7 +18,7 @@ const [protocolSource, mainSource, preloadSource, storeSource] = await Promise.a
 assert.match(protocolSource, /'workflow\/run'.*'workflow\/repair'.*'workflow\/status'.*'workflow\/record'.*'workflow\/checkpoint'/s)
 assert.match(mainSource, /pi-host:workflow:run/)
 assert.match(preloadSource, /workflow:\s*\{[\s\S]*run:/)
-assert.match(storeSource, /overrides\.workflowDefinition[\s\S]*piHost\.workflow\.run/)
+assert.match(storeSource, /executePiHostWorkflow[\s\S]*overrides\.workflowDefinition[\s\S]*piHost\?\.workflow\?\.run/)
 
 const agentDir = await mkdtemp(join(tmpdir(), 'workflow-prod-agent-'))
 const stateDir = await mkdtemp(join(tmpdir(), 'workflow-prod-state-'))
@@ -146,4 +146,3 @@ try {
     rm(workspace, { recursive: true, force: true }),
   ])
 }
-

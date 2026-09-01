@@ -40,6 +40,8 @@ const STATUS_LABEL: Record<ReviewFileManifestEntry['status'], string> = {
   added: 'A', modified: 'M', deleted: 'D', renamed: 'R', copied: 'C', 'type-changed': 'T', untracked: 'U',
 }
 
+const REVIEW_ICON_BUTTON = 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-ink-3 outline-none hover:bg-hover-2 hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-35'
+
 function targetIdentity(target: ReviewTarget): string {
   if (target.kind === 'run-snapshot') return target.snapshotId
   if (target.kind === 'snapshot-range') return `${target.beforeSnapshotId.slice(0, 8)} → ${target.afterSnapshotId.slice(0, 8)}`
@@ -281,7 +283,7 @@ function ReviewExplorerHeader({ target, state, onOpenTarget }: { target: ReviewT
       <span className="text-[12px] font-semibold">{SOURCE_LABEL[target.kind]}</span>
       <span className="truncate font-[family-name:var(--font-mono)] text-[10px] text-ink-3">{targetIdentity(target)}</span>
       <span className={`ml-auto shrink-0 text-[10px] ${mutable ? 'text-orange' : 'text-green'}`}>{mutable ? '可變 · 需刷新' : '固定來源'}</span>
-      {mutable ? <button type="button" disabled={refreshing} onClick={() => void refresh()} className="shrink-0 p-1 text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent" aria-label="刷新可變審查來源"><Icon name="refresh" size={14} /></button> : null}
+      {mutable ? <button type="button" disabled={refreshing} onClick={() => void refresh()} className={REVIEW_ICON_BUTTON} aria-label="刷新可變審查來源" title="刷新可變審查來源"><Icon name="refresh" size={14} className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined} /></button> : null}
     </div>
     {refreshError ? <div role="alert" className="mt-1 text-[10px] text-red">刷新失敗：{refreshError}</div> : null}
     {state.kind === 'ready' ? <div className="mt-1 flex items-center gap-2 text-[10px] text-ink-3">
@@ -289,6 +291,46 @@ function ReviewExplorerHeader({ target, state, onOpenTarget }: { target: ReviewT
       {state.artifact.manifestHash ? <span className="truncate font-[family-name:var(--font-mono)]">· {state.artifact.manifestHash.slice(0, 10)}</span> : null}
     </div> : null}
   </header>
+}
+
+function ReviewMutableControls({ target, activeFile, mutationOperation, mutationHunk, mutationBusy, onMutationOperation, onMutationHunk, onPreviewMutation }: {
+  target: ReviewTarget
+  activeFile?: ReviewFileManifestEntry
+  mutationOperation: ReviewMutationOperation
+  mutationHunk: number
+  mutationBusy: boolean
+  onMutationOperation: (value: 'stage' | 'revert') => void
+  onMutationHunk: (value: number) => void
+  onPreviewMutation: () => Promise<void>
+}) {
+  const mutable = target.kind === 'live-working-tree' || target.kind === 'staged'
+  if (!mutable || !activeFile) return null
+  return <>
+    {target.kind === 'live-working-tree' ? <select value={mutationOperation} onChange={(event) => onMutationOperation(event.target.value as 'stage' | 'revert')} aria-label="Git 操作" className="h-7 border border-line bg-surface px-1 text-[10px]"><option value="stage">Stage</option><option value="revert">Revert</option></select> : <span className="text-[10px] text-ink-3">Unstage</span>}
+    <select value={mutationHunk} onChange={(event) => onMutationHunk(Number(event.target.value))} disabled={activeFile.binary} aria-label="Mutation 範圍" className="h-7 max-w-24 border border-line bg-surface px-1 text-[10px] disabled:opacity-50"><option value={-1}>整個檔案</option>{Array.from({ length: activeFile.hunkCount || 0 }, (_, index) => <option key={index} value={index}>Hunk {index + 1}</option>)}</select>
+    <button type="button" disabled={mutationBusy} onClick={() => void onPreviewMutation()} className={`${REVIEW_ICON_BUTTON} border border-line-strong text-ink-2`} aria-label={mutationBusy ? '正在準備操作預覽' : '預覽操作'} title={mutationBusy ? '正在準備操作預覽' : '預覽操作'}><Icon name={mutationBusy ? 'progress_activity' : 'preview'} size={15} className={mutationBusy ? 'animate-spin motion-reduce:animate-none' : undefined} /></button>
+  </>
+}
+
+function ReviewSnapshotActions({ target, activeFile, activeReviewState, onMarkReviewed, onCommentError }: {
+  target: ReviewTarget
+  activeFile?: ReviewFileManifestEntry
+  activeReviewState: ReturnType<typeof fileReviewState>
+  onMarkReviewed: () => Promise<void>
+  onCommentError: (value: string) => void
+}) {
+  if (target.kind !== 'run-snapshot' || !activeFile) return null
+  const markReviewed = () => {
+    if (!activeFile.contentHash) return
+    void window.subagents?.piHost?.review?.markReviewed({ snapshotId: target.snapshotId, path: activeFile.path, contentHash: activeFile.contentHash }).then(onMarkReviewed).catch((error) => onCommentError(error instanceof Error ? error.message : String(error)))
+  }
+  const openFile = () => {
+    void window.subagents?.piHost?.review?.openFile({ snapshotId: target.snapshotId, path: activeFile.path }).then((result) => { if (!result.ok) onCommentError(result.error || '無法開啟檔案') }).catch((error) => onCommentError(error instanceof Error ? error.message : String(error)))
+  }
+  return <>
+    <button type="button" onClick={openFile} className={REVIEW_ICON_BUTTON} aria-label="在系統編輯器開啟檔案" title="在系統編輯器開啟檔案"><Icon name="open_in_new" size={15} /></button>
+    {activeFile.contentHash ? <button type="button" onClick={markReviewed} className={`${REVIEW_ICON_BUTTON} ${activeReviewState === 'reviewed' ? 'text-green' : ''}`} aria-label="標記檔案為已審查" title="標記檔案為已審查"><Icon name={activeReviewState === 'reviewed' ? 'check_circle' : 'task_alt'} size={15} /></button> : null}
+  </>
 }
 
 function ReviewDiffToolbar({ target, files, activeFile, activeReviewState, mutationOperation, mutationHunk, mutationBusy, foldContext, view, onMoveSelection, onMutationOperation, onMutationHunk, onPreviewMutation, onMarkReviewed, onCommentError, onFoldContext, onView }: {
@@ -310,32 +352,22 @@ function ReviewDiffToolbar({ target, files, activeFile, activeReviewState, mutat
   onFoldContext: (value: boolean | ((current: boolean) => boolean)) => void
   onView: (value: 'unified' | 'split') => void
 }) {
-  const mutable = target.kind === 'live-working-tree' || target.kind === 'staged'
-  const markReviewed = () => {
-    if (target.kind !== 'run-snapshot' || !activeFile?.contentHash) return
-    void window.subagents?.piHost?.review?.markReviewed({ snapshotId: target.snapshotId, path: activeFile.path, contentHash: activeFile.contentHash }).then(onMarkReviewed).catch((error) => onCommentError(error instanceof Error ? error.message : String(error)))
-  }
-  return <div className="flex min-h-10 max-w-full shrink-0 flex-wrap items-center gap-1 border-b border-line px-2 py-1 md:h-10 md:flex-nowrap md:overflow-x-auto md:py-0 custom-scrollbar">
-    <button type="button" onClick={() => onMoveSelection(-1)} disabled={!files.length} className="p-1.5 text-ink-3 hover:text-ink disabled:opacity-35" aria-label="上一個變更（⌥↑）"><Icon name="keyboard_arrow_up" size={17} /></button>
-    <button type="button" onClick={() => onMoveSelection(1)} disabled={!files.length} className="p-1.5 text-ink-3 hover:text-ink disabled:opacity-35" aria-label="下一個變更（⌥↓）"><Icon name="keyboard_arrow_down" size={17} /></button>
+  return <div className="flex min-h-10 max-w-full shrink-0 flex-wrap items-center gap-0 border-b border-line px-2 py-1 md:h-10 md:flex-nowrap md:overflow-x-auto md:py-0 custom-scrollbar">
+    <button type="button" onClick={() => onMoveSelection(-1)} disabled={!files.length} className={REVIEW_ICON_BUTTON} aria-label="上一個變更（⌥↑）" title="上一個變更（⌥↑）"><Icon name="keyboard_arrow_up" size={17} /></button>
+    <button type="button" onClick={() => onMoveSelection(1)} disabled={!files.length} className={REVIEW_ICON_BUTTON} aria-label="下一個變更（⌥↓）" title="下一個變更（⌥↓）"><Icon name="keyboard_arrow_down" size={17} /></button>
     <span className="order-first w-full min-w-0 truncate border-b border-line/60 px-1 pb-1 font-[family-name:var(--font-mono)] text-[10px] text-ink-2 md:order-none md:w-auto md:flex-1 md:border-0 md:pb-0">{activeFile?.path || '選擇檔案'}</span>
-    {activeFile ? <button type="button" onClick={() => void navigator.clipboard.writeText(activeFile.path)} className="p-1.5 text-ink-3 hover:text-ink" aria-label="複製檔案路徑"><Icon name="content_copy" size={15} /></button> : null}
-    {activeFile && target.kind === 'run-snapshot' ? <button type="button" onClick={() => void window.subagents?.piHost?.review?.openFile({ snapshotId: target.snapshotId, path: activeFile.path }).then((result) => { if (!result.ok) onCommentError(result.error || '無法開啟檔案') }).catch((error) => onCommentError(error instanceof Error ? error.message : String(error)))} className="p-1.5 text-ink-3 hover:text-ink" aria-label="在系統編輯器開啟檔案"><Icon name="open_in_new" size={15} /></button> : null}
-    {mutable && activeFile ? <>
-      {target.kind === 'live-working-tree' ? <select value={mutationOperation} onChange={(event) => onMutationOperation(event.target.value as 'stage' | 'revert')} aria-label="Git 操作" className="h-7 border border-line bg-surface px-1 text-[10px]"><option value="stage">Stage</option><option value="revert">Revert</option></select> : <span className="text-[10px] text-ink-3">Unstage</span>}
-      <select value={mutationHunk} onChange={(event) => onMutationHunk(Number(event.target.value))} disabled={activeFile.binary} aria-label="Mutation 範圍" className="h-7 max-w-24 border border-line bg-surface px-1 text-[10px] disabled:opacity-50"><option value={-1}>整個檔案</option>{Array.from({ length: activeFile.hunkCount || 0 }, (_, index) => <option key={index} value={index}>Hunk {index + 1}</option>)}</select>
-      <button type="button" disabled={mutationBusy} onClick={() => void onPreviewMutation()} className="border border-line-strong px-2 py-1 text-[10px] text-ink-2 hover:bg-hover-2 disabled:opacity-40">{mutationBusy ? '處理中…' : '預覽'}</button>
-    </> : null}
-    {target.kind === 'run-snapshot' && activeFile?.contentHash ? <button type="button" onClick={markReviewed} className={`px-2 py-1 text-[10px] ${activeReviewState === 'reviewed' ? 'text-green' : 'text-ink-3 hover:text-ink'}`} aria-label="標記檔案為已審查"><Icon name={activeReviewState === 'reviewed' ? 'check_circle' : 'task_alt'} size={15} /></button> : null}
-    <button type="button" aria-pressed={foldContext} onClick={() => onFoldContext((value) => !value)} className={`shrink-0 whitespace-nowrap px-2 py-1 text-[10px] ${foldContext ? 'bg-selected text-ink' : 'text-ink-3 hover:text-ink'}`}>折疊 context</button>
-    <div className="flex shrink-0 border border-line" aria-label="Diff 顯示方式"><button type="button" aria-pressed={view === 'unified'} onClick={() => onView('unified')} className={`px-2 py-1 text-[10px] ${view === 'unified' ? 'bg-selected text-ink' : 'text-ink-3'}`}>Unified</button><button type="button" aria-pressed={view === 'split'} onClick={() => onView('split')} className={`px-2 py-1 text-[10px] ${view === 'split' ? 'bg-selected text-ink' : 'text-ink-3'}`}>Split</button></div>
+    {activeFile ? <button type="button" onClick={() => void navigator.clipboard.writeText(activeFile.path)} className={REVIEW_ICON_BUTTON} aria-label="複製檔案路徑" title="複製檔案路徑"><Icon name="content_copy" size={15} /></button> : null}
+    <ReviewMutableControls target={target} activeFile={activeFile} mutationOperation={mutationOperation} mutationHunk={mutationHunk} mutationBusy={mutationBusy} onMutationOperation={onMutationOperation} onMutationHunk={onMutationHunk} onPreviewMutation={onPreviewMutation} />
+    <ReviewSnapshotActions target={target} activeFile={activeFile} activeReviewState={activeReviewState} onMarkReviewed={onMarkReviewed} onCommentError={onCommentError} />
+    <button type="button" aria-pressed={foldContext} onClick={() => onFoldContext((value) => !value)} className={`${REVIEW_ICON_BUTTON} ${foldContext ? 'bg-selected text-ink' : ''}`} aria-label={foldContext ? '展開 context' : '折疊 context'} title={foldContext ? '展開 context' : '折疊 context'}><Icon name={foldContext ? 'unfold_more' : 'unfold_less'} size={16} /></button>
+    <div className="flex shrink-0 gap-0" aria-label="Diff 顯示方式"><button type="button" aria-pressed={view === 'unified'} onClick={() => onView('unified')} className={`${REVIEW_ICON_BUTTON} ${view === 'unified' ? 'bg-selected text-ink' : ''}`} aria-label="Unified diff" title="Unified diff"><Icon name="view_stream" size={15} /></button><button type="button" aria-pressed={view === 'split'} onClick={() => onView('split')} className={`${REVIEW_ICON_BUTTON} ${view === 'split' ? 'bg-selected text-ink' : ''}`} aria-label="Split diff" title="Split diff"><Icon name="vertical_split" size={15} /></button></div>
   </div>
 }
 
 function MutationPreview({ preview, busy, onCancel, onApply }: { preview: ReviewMutationPreview; busy: boolean; onCancel: () => void; onApply: () => Promise<void> }) {
   const selection = preview.selection.kind === 'file' ? '整個檔案' : `Hunk ${preview.selection.hunkIndex + 1}`
   return <section className="shrink-0 border-b border-orange/40 bg-surface-container-low p-3" aria-label="Git mutation 精確預覽">
-    <div className="flex items-start justify-between gap-3"><div><p className="text-[11px] font-semibold text-ink">確認 {preview.operation} · {selection}</p><p className="mt-1 font-[family-name:var(--font-mono)] text-[9px] text-ink-3">{preview.patchHash.slice(0, 16)} · {preview.patchBytes} bytes · +{preview.additions} −{preview.removals}</p></div><div className="flex gap-2"><button type="button" onClick={onCancel} className="px-2 py-1 text-[10px] text-ink-3 hover:text-ink">取消</button><button type="button" disabled={busy} onClick={() => void onApply()} className="border border-orange px-3 py-1 text-[10px] font-medium text-orange hover:bg-orange/10 disabled:opacity-40">送交核准</button></div></div>
+    <div className="flex items-start justify-between gap-3"><div><p className="text-[11px] font-semibold text-ink">確認 {preview.operation} · {selection}</p><p className="mt-1 font-[family-name:var(--font-mono)] text-[9px] text-ink-3">{preview.patchHash.slice(0, 16)} · {preview.patchBytes} bytes · +{preview.additions} −{preview.removals}</p></div><div className="flex gap-0"><button type="button" onClick={onCancel} className={REVIEW_ICON_BUTTON} aria-label="取消操作" title="取消操作"><Icon name="close" size={16} /></button><button type="button" disabled={busy} onClick={() => void onApply()} className={`${REVIEW_ICON_BUTTON} border border-orange text-orange hover:bg-orange/10`} aria-label={busy ? '正在送交核准' : '送交核准'} title={busy ? '正在送交核准' : '送交核准'}><Icon name={busy ? 'progress_activity' : 'approval'} size={16} className={busy ? 'animate-spin motion-reduce:animate-none' : undefined} /></button></div></div>
     <pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap border border-line bg-inset p-2 font-[family-name:var(--font-mono)] text-[9px] leading-relaxed text-ink-2">{preview.patch}</pre>
     {preview.operation === 'revert' ? <p className="mt-2 text-[9px] text-orange">Revert 套用前會保存 recoverable patch；核准拒絕、取消或 CAS stale 都不產生 side effect。</p> : null}
   </section>
@@ -390,15 +422,15 @@ function PinnedCommentsPanel(props: {
     <div className="flex flex-col gap-2 sm:flex-row">
       <select value={props.anchorId} onChange={(event) => props.onAnchorId(event.target.value)} disabled={Boolean(props.editingId) || !props.anchors.length} aria-label="Review comment hunk" className="w-full border border-line bg-surface px-2 py-1.5 text-[10px] text-ink disabled:opacity-50 sm:max-w-44">{props.anchors.map((anchor, index) => <option key={anchor.hunkId} value={anchor.hunkId}>Hunk {index + 1} · {anchor.side}:{anchor.line}</option>)}</select>
       <textarea value={props.body} onChange={(event) => props.onBody(event.target.value)} rows={2} placeholder="在選取 hunk 建立 durable draft…" aria-label="Review draft 內容" className="min-w-0 flex-1 resize-none border border-line bg-surface px-2 py-1.5 text-[11px] outline-none focus-visible:border-accent" />
-      <button type="button" disabled={!props.body.trim() || (!props.editingId && !props.selectedAnchor)} onClick={save} className="self-stretch border border-line-strong px-3 text-[10px] text-ink-2 hover:bg-hover-2 disabled:opacity-35">{props.editingId ? '更新 draft' : '儲存 draft'}</button>
+      <button type="button" disabled={!props.body.trim() || (!props.editingId && !props.selectedAnchor)} onClick={save} className={`${REVIEW_ICON_BUTTON} self-stretch border border-line-strong text-ink-2`} aria-label={props.editingId ? '更新 draft' : '儲存 draft'} title={props.editingId ? '更新 draft' : '儲存 draft'}><Icon name={props.editingId ? 'edit_note' : 'save'} size={16} /></button>
     </div>
     {props.error ? <p className="mt-1 text-[10px] text-red" role="alert">{props.error}</p> : null}
     {fileComments.length ? <div className="mt-2 max-h-28 space-y-1 overflow-y-auto custom-scrollbar">{fileComments.map((comment) => <div key={comment.id} className="flex items-start gap-2 border-t border-line pt-1.5 text-[10px]">
       <span className={`shrink-0 font-medium ${comment.status === 'outdated' ? 'text-orange' : 'text-accent-ink'}`}>{comment.status}</span><span className="min-w-0 flex-1 text-ink-2">{comment.body}{comment.status === 'outdated' ? <span className="mt-1 block font-[family-name:var(--font-mono)] text-ink-3">原始：{comment.anchor.originalContext}</span> : null}</span>
-      {comment.status === 'draft' ? <><button type="button" onClick={() => { props.onBody(comment.body); props.onEditingId(comment.id) }} className="text-ink-3 hover:text-ink">編輯</button><button type="button" onClick={() => void window.subagents?.piHost?.review?.transitionComment(comment.id, 'submitted').then(props.onReload)} className="text-accent-ink">送出</button><button type="button" onClick={() => void window.subagents?.piHost?.review?.deleteDraft(comment.id).then(props.onReload)} className="text-red">刪除</button></> : null}
+      {comment.status === 'draft' ? <div className="flex shrink-0 gap-0"><button type="button" onClick={() => { props.onBody(comment.body); props.onEditingId(comment.id) }} className={REVIEW_ICON_BUTTON} aria-label="編輯 draft" title="編輯 draft"><Icon name="edit" size={15} /></button><button type="button" onClick={() => void window.subagents?.piHost?.review?.transitionComment(comment.id, 'submitted').then(props.onReload)} className={`${REVIEW_ICON_BUTTON} text-accent-ink`} aria-label="送出 comment" title="送出 comment"><Icon name="send" size={15} /></button><button type="button" onClick={() => void window.subagents?.piHost?.review?.deleteDraft(comment.id).then(props.onReload)} className={`${REVIEW_ICON_BUTTON} text-red`} aria-label="刪除 draft" title="刪除 draft"><Icon name="delete" size={15} /></button></div> : null}
     </div>)}</div> : null}
     {feedbackPreview ? <FeedbackBundlePreview bundle={feedbackPreview} sending={props.sending} onCancel={() => setFeedbackPreview(undefined)} onConfirm={submitFeedback} /> : null}
-    {!feedbackPreview && props.comments.some((comment) => comment.status === 'submitted' || comment.status === 'acknowledged') ? <div className="mt-2 flex items-center justify-between gap-3 border-t border-line pt-2"><p className="text-[9px] leading-relaxed text-ink-3">先由 Host 凍結 snapshot、workspace 與 anchors，確認預覽後才建立下一個 run。</p><button type="button" disabled={props.sending} onClick={previewFeedback} className="shrink-0 border border-accent px-3 py-1.5 text-[10px] font-medium text-accent-ink hover:bg-selected disabled:opacity-50">{props.sending ? '準備中…' : '預覽送交內容'}</button></div> : null}
+    {!feedbackPreview && props.comments.some((comment) => comment.status === 'submitted' || comment.status === 'acknowledged') ? <div className="mt-2 flex items-center justify-between gap-3 border-t border-line pt-2"><p className="text-[9px] leading-relaxed text-ink-3">先由 Host 凍結 snapshot、workspace 與 anchors，確認預覽後才建立下一個 run。</p><button type="button" disabled={props.sending} onClick={previewFeedback} className={`${REVIEW_ICON_BUTTON} border border-accent text-accent-ink`} aria-label={props.sending ? '正在準備送交內容' : '預覽送交內容'} title={props.sending ? '正在準備送交內容' : '預覽送交內容'}><Icon name={props.sending ? 'progress_activity' : 'preview'} size={16} className={props.sending ? 'animate-spin motion-reduce:animate-none' : undefined} /></button></div> : null}
   </section>
 }
 
@@ -412,9 +444,9 @@ function FeedbackBundlePreview({ bundle, sending, onCancel, onConfirm }: { bundl
         <p className="truncate">Workspace {bundle.workspace.projectRoot}</p>
         <p className="truncate">{paths.join(' · ')}</p>
       </div>
-      <div className="flex shrink-0 gap-2">
-        <button type="button" disabled={sending} onClick={onCancel} className="px-2 py-1 text-[10px] text-ink-3 hover:text-ink disabled:opacity-40">取消</button>
-        <button type="button" disabled={sending} onClick={onConfirm} className="border border-accent px-3 py-1 text-[10px] font-medium text-accent-ink hover:bg-selected disabled:opacity-40">{sending ? '送出中…' : '確認並建立 Run'}</button>
+      <div className="flex shrink-0 gap-0">
+        <button type="button" disabled={sending} onClick={onCancel} className={REVIEW_ICON_BUTTON} aria-label="取消送交" title="取消送交"><Icon name="close" size={16} /></button>
+        <button type="button" disabled={sending} onClick={onConfirm} className={`${REVIEW_ICON_BUTTON} border border-accent text-accent-ink`} aria-label={sending ? '正在送出 feedback' : '確認並建立 Run'} title={sending ? '正在送出 feedback' : '確認並建立 Run'}><Icon name={sending ? 'progress_activity' : 'send'} size={16} className={sending ? 'animate-spin motion-reduce:animate-none' : undefined} /></button>
       </div>
     </div>
   </section>
@@ -485,7 +517,7 @@ function ReviewFileList({ state, files, selectedPath, comments, fileStates, onSe
         <span className="shrink-0 font-[family-name:var(--font-mono)] text-[9px] text-ink-3">{file.additions ?? 0}+ {file.removals ?? 0}−</span>
       </button>
     })}
-    {state.artifact.nextCursor ? <button type="button" onClick={onLoadMore} className="w-full border-b border-line px-3 py-2 text-[10px] text-accent-ink hover:bg-hover-2 focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-accent">載入更多（{state.artifact.manifest.length}/{state.artifact.total}）</button> : null}
+    {state.artifact.nextCursor ? <button type="button" onClick={onLoadMore} className={`${REVIEW_ICON_BUTTON} mx-auto my-2 text-accent-ink`} aria-label={`載入更多變更（${state.artifact.manifest.length}/${state.artifact.total}）`} title={`載入更多變更（${state.artifact.manifest.length}/${state.artifact.total}）`}><Icon name="expand_more" size={17} /></button> : null}
   </div>
 }
 
@@ -543,9 +575,9 @@ function SnapshotDiff({ target, file, view, foldContext, onCommentAnchors }: { t
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface-container-lowest">
-      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-line bg-surface-container-low px-2 text-[9px] text-ink-3">
-        <button type="button" disabled={!reviewHunks.length} onClick={() => moveHunk(-1)} className="px-2 py-1 hover:text-ink disabled:opacity-40">上一 hunk</button><button type="button" disabled={!reviewHunks.length} onClick={() => moveHunk(1)} className="px-2 py-1 hover:text-ink disabled:opacity-40">下一 hunk</button><span>{reviewHunks.length ? `${activeHunkIndex + 1}/${reviewHunks.length}` : '0 hunks'}</span>
-        <button type="button" disabled={!activeHunk} onClick={() => activeHunk && void navigator.clipboard.writeText(activeHunk.content)} className="ml-auto px-2 py-1 hover:text-ink disabled:opacity-40">複製 hunk</button><button type="button" onClick={() => void navigator.clipboard.writeText(state.hunks.map((hunk) => hunk.content).join(''))} className="px-2 py-1 hover:text-ink">複製 patch</button>
+      <div className="flex h-8 shrink-0 items-center gap-0 border-b border-line bg-surface-container-low px-2 text-[9px] text-ink-3">
+        <button type="button" disabled={!reviewHunks.length} onClick={() => moveHunk(-1)} className={REVIEW_ICON_BUTTON} aria-label="上一個 hunk" title="上一個 hunk"><Icon name="keyboard_arrow_up" size={16} /></button><button type="button" disabled={!reviewHunks.length} onClick={() => moveHunk(1)} className={REVIEW_ICON_BUTTON} aria-label="下一個 hunk" title="下一個 hunk"><Icon name="keyboard_arrow_down" size={16} /></button><span>{reviewHunks.length ? `${activeHunkIndex + 1}/${reviewHunks.length}` : '0 hunks'}</span>
+        <button type="button" disabled={!activeHunk} onClick={() => activeHunk && void navigator.clipboard.writeText(activeHunk.content)} className={`${REVIEW_ICON_BUTTON} ml-auto`} aria-label="複製目前 hunk" title="複製目前 hunk"><Icon name="content_copy" size={15} /></button><button type="button" onClick={() => void navigator.clipboard.writeText(state.hunks.map((hunk) => hunk.content).join(''))} className={REVIEW_ICON_BUTTON} aria-label="複製完整 patch" title="複製完整 patch"><Icon name="file_copy" size={15} /></button>
       </div>
       <div ref={containerRef} className="min-h-0 flex-1 overflow-auto custom-scrollbar" tabIndex={0} aria-label={`${file.path} diff`}>
         <div className={view === 'split' ? 'min-w-[760px]' : 'min-w-max'}>
@@ -556,7 +588,7 @@ function SnapshotDiff({ target, file, view, foldContext, onCommentAnchors }: { t
               {view === 'unified' ? lines.map((line, index) => <DiffLine key={index} line={line} />) : <div className="grid grid-cols-2"><SplitLines lines={lines} /></div>}
             </section>
           })}
-          {state.nextCursor ? <button type="button" onClick={loadMore} className="col-span-2 m-3 border border-line px-3 py-2 text-[10px] text-accent-ink hover:bg-hover-2">載入更多 hunks</button> : null}
+          {state.nextCursor ? <button type="button" onClick={loadMore} className={`${REVIEW_ICON_BUTTON} col-span-2 m-3 border border-line text-accent-ink`} aria-label="載入更多 hunks" title="載入更多 hunks"><Icon name="expand_more" size={17} /></button> : null}
         </div>
       </div>
     </div>
@@ -604,6 +636,6 @@ function ReviewState({ icon, title, detail, action, onAction, spinning = false }
   return <div className="flex min-h-32 flex-1 flex-col items-center justify-center gap-2 p-5 text-center" role="status">
     <Icon name={icon} size={22} className={`${spinning ? 'animate-spin motion-reduce:animate-none' : ''} text-ink-3`} />
     <p className="text-[12px] font-medium text-ink-2">{title}</p><p className="max-w-sm text-[10px] leading-relaxed text-ink-3">{detail}</p>
-    {action && onAction ? <button type="button" onClick={onAction} className="mt-1 border border-line-strong px-2.5 py-1.5 text-[10px] text-ink-2 hover:bg-hover-2 focus-visible:outline-2 focus-visible:outline-accent">{action}</button> : null}
+    {action && onAction ? <button type="button" onClick={onAction} className={`${REVIEW_ICON_BUTTON} mt-1 border border-line-strong text-ink-2`} aria-label={action} title={action}><Icon name={action === '複製路徑' ? 'content_copy' : action === '清除篩選' ? 'filter_alt_off' : 'refresh'} size={16} /></button> : null}
   </div>
 }

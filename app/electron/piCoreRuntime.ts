@@ -400,6 +400,29 @@ function restorePiSessionHistory(
   }
 }
 
+function standardRuntimeValue<T>(settings: PiRuntimeSettings, value: T, isolatedValue: T): T {
+  return settings.verifierIsolation ? isolatedValue : value
+}
+
+function standardRuntimeAction(settings: PiRuntimeSettings, action: () => void): void {
+  if (!settings.verifierIsolation) action()
+}
+
+async function runtimeSkillSnapshot(
+  settings: PiRuntimeSettings,
+  agentDir: string | undefined,
+  sessionId: string,
+  cwd: string,
+) {
+  if (settings.verifierIsolation) return undefined
+  return snapshotPiSkillResources(agentDir, sessionId, cwd)
+}
+
+function runtimeSkillPaths(settings: PiRuntimeSettings, piSkillsDir: string | undefined): string[] | undefined {
+  if (settings.verifierIsolation || !piSkillsDir) return undefined
+  return [piSkillsDir]
+}
+
 async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: PiHostHistoryMessage[], sessionFile?: string, settings: PiRuntimeSettings = {}) {
   const existing = sessionRuntimes.get(sessionId)
   const agentDir = resolvePiAgentDir()
@@ -410,7 +433,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   // selected provider/model. Hash locally; no credential material leaves the
   // utility process or reaches logs/IPC.
   const { authPath, revision: authRevision } = await piAuthRevision(agentDir)
-  const skillSnapshot = settings.verifierIsolation ? undefined : await snapshotPiSkillResources(agentDir, sessionId, cwd)
+  const skillSnapshot = await runtimeSkillSnapshot(settings, agentDir, sessionId, cwd)
   const packageExtensions = await resolvePiPackageExtensionResources(agentDir)
   const activeToolsKey = JSON.stringify({ settings, cwd, skillSnapshotDigest: skillSnapshot?.digest, packageExtensionDigest: packageExtensions.digest, authRevision })
   if (skillSnapshot) bindPiSessionSkillResourceView(sessionId, skillSnapshot)
@@ -459,8 +482,8 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
       // never auto-load an untrusted extension behind this boundary.
       noExtensions: true,
       noContextFiles: true,
-      additionalExtensionPaths: settings.verifierIsolation ? [] : packageExtensions.resources.map((resource) => resource.path),
-      additionalSkillPaths: !settings.verifierIsolation && piSkillsDir ? [piSkillsDir] : undefined,
+      additionalExtensionPaths: standardRuntimeValue(settings, packageExtensions.resources.map((resource) => resource.path), []),
+      additionalSkillPaths: runtimeSkillPaths(settings, piSkillsDir),
       extensionsOverride: (base: { extensions: Array<{ path: string; tools: Map<string, unknown> }>; errors: unknown[]; runtime: unknown }) => {
         const reserved = new Set([...Object.keys(TOOL_FACTORIES), ...piAllPackToolNames(), ...mcpDynamic.tools.map((tool) => tool.modelName)])
         const discoveries = new Map<string, { names: string[]; collisions: string[] }>()
@@ -483,7 +506,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
         for (const [source, discovery] of discoveries) recordPiPackageToolDiscovery(source, discovery.names, discovery.collisions)
         return base
       },
-      extensionFactories: settings.verifierIsolation ? [] : [
+      extensionFactories: standardRuntimeValue(settings, [
         ...packBundle.factories,
         piSkillPreflightExtensionFactory({ sessionId }),
         // ADR-0047: builtin shell stays outside the external-CLI sandbox and
@@ -533,7 +556,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
             })
           },
         },
-      ],
+      ], []),
     })
     await resourceLoader.reload()
     options.resourceLoader = resourceLoader
@@ -543,11 +566,11 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   }
   const restrictedTools = configurePiToolOptions(options, settings, mcpDynamic, packageToolNames)
   if (settings.thinkingLevel) options.thinkingLevel = settings.thinkingLevel
-  options.customTools = settings.verifierIsolation ? [] : [piWorkingStateWriteToolDefinition({
+  options.customTools = standardRuntimeValue(settings, [piWorkingStateWriteToolDefinition({
     sessionId,
     cwd,
     factory: piCodingAgent.createWriteToolDefinition,
-  })]
+  })], [])
   if (agentDir) options.agentDir = agentDir
   if (settings.provider && settings.model && typeof piCodingAgent.ModelRuntime?.create === 'function') {
     const modelRuntime = await piCodingAgent.ModelRuntime.create({
@@ -566,13 +589,13 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     contextWindowTokens = model.contextWindow
   }
   const created = await piCodingAgent.createAgentSession(options)
-  if (!settings.verifierIsolation) installPiSkillPreflightBatchBarrier(sessionId, created.session.agent)
+  standardRuntimeAction(settings, () => installPiSkillPreflightBatchBarrier(sessionId, created.session.agent))
   // The active set is stated explicitly so the model sees exactly what the
   // catalog projection claims: restricted allowlists union their unlocked
   // capability tools; an unrestricted run gets the Pi defaults plus every
   // always-on pack tool. Without this, Pi would auto-activate every
   // registered extension tool and the catalog would understate reality.
-  const desiredActive = settings.verifierIsolation ? [] : desiredPiTools(restrictedTools, settings, mcpDynamic, packageToolNames)
+  const desiredActive = standardRuntimeValue(settings, desiredPiTools(restrictedTools, settings, mcpDynamic, packageToolNames), [])
   try {
     created.session.setActiveToolsByName?.([...new Set(desiredActive)])
   } catch {
@@ -580,7 +603,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   }
   // The session handle is the ONLY thing packs may touch mid-run: activating
   // registered tools. load_capability drives it; nothing else is exposed.
-  if (!settings.verifierIsolation) registerPiPackSession(sessionId, {
+  standardRuntimeAction(settings, () => registerPiPackSession(sessionId, {
     setActiveTools: (names) => {
       try {
         created.session.setActiveToolsByName?.(names)
@@ -596,7 +619,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
         return []
       }
     },
-  })
+  }))
   const runtime = {
     activeToolsKey,
     ...(skillSnapshot ? { skillSnapshotRoot: skillSnapshot.root } : {}),
@@ -613,7 +636,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   if (existing?.skillSnapshotRoot && existing.skillSnapshotRoot !== skillSnapshot?.root) {
     await rm(existing.skillSnapshotRoot, { recursive: true, force: true })
   }
-  if (!settings.verifierIsolation) commitPiPackExtensionBundle(sessionId, packBundle)
+  standardRuntimeAction(settings, () => commitPiPackExtensionBundle(sessionId, packBundle))
   sessionRuntimes.set(sessionId, runtime)
   return runtime
   } catch (error) {

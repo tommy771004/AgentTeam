@@ -5323,6 +5323,47 @@ type HostSemanticVerifierContext = Readonly<{
   consume: (usage: HostAcceptanceResult['verifierUsage']) => void
 }>
 
+async function runHostSemanticVerifierTurn(input: {
+  workspaceRoot: string
+  settings: PiSettings
+  verifierSessionId: string
+  verifierRunId: string
+  instruction: string
+}) {
+  try {
+    const turn = await runPiTurn(
+      input.verifierSessionId,
+      input.workspaceRoot,
+      input.instruction,
+      [],
+      undefined,
+      input.verifierRunId,
+      undefined,
+      {
+        provider: input.settings.provider,
+        model: input.settings.model,
+        thinkingLevel: input.settings.thinkingLevel,
+        activeTools: [],
+        activeToolsRestricted: true,
+        unlockedTools: [],
+        temporaryChat: true,
+        verifierIsolation: true,
+      },
+      '',
+      false,
+    )
+    const usage = 'timing' in turn ? turn.timing?.usage : undefined
+    const tokens = usage?.total ?? (usage?.input || 0) + (usage?.output || 0)
+    return {
+      settlement: turn.settlement,
+      text: piTurnFinalAnswer(turn.items),
+      usage: { tokens, ...(usage?.costUsd === undefined ? {} : { costUsd: usage.costUsd }) },
+    }
+  } finally {
+    await disposePiSession(input.verifierSessionId)
+  }
+}
+
 function createHostSemanticVerifierContext(input: {
   runId: string
   workspaceRoot: string
@@ -5335,40 +5376,11 @@ function createHostSemanticVerifierContext(input: {
 }): HostSemanticVerifierContext {
   let consumedTokens = 0
   let consumedCostUsd = 0
-  const runner = createFreshSemanticVerifierRunner(async ({ verifierSessionId, verifierRunId, instruction }) => {
-    try {
-      const turn = await runPiTurn(
-        verifierSessionId,
-        input.workspaceRoot,
-        instruction,
-        [],
-        undefined,
-        verifierRunId,
-        undefined,
-        {
-          provider: input.settings.provider,
-          model: input.settings.model,
-          thinkingLevel: input.settings.thinkingLevel,
-          activeTools: [],
-          activeToolsRestricted: true,
-          unlockedTools: [],
-          temporaryChat: true,
-          verifierIsolation: true,
-        },
-        '',
-        false,
-      )
-      const usage = 'timing' in turn ? turn.timing?.usage : undefined
-      const tokens = usage?.total ?? (usage?.input || 0) + (usage?.output || 0)
-      return {
-        settlement: turn.settlement,
-        text: piTurnFinalAnswer(turn.items),
-        usage: { tokens, ...(usage?.costUsd === undefined ? {} : { costUsd: usage.costUsd }) },
-      }
-    } finally {
-      await disposePiSession(verifierSessionId)
-    }
-  })
+  const runner = createFreshSemanticVerifierRunner((request) => runHostSemanticVerifierTurn({
+    ...request,
+    workspaceRoot: input.workspaceRoot,
+    settings: input.settings,
+  }))
   return {
     rubric: input.rubric,
     runtime: (answer, evidenceRefs) => semanticAcceptanceRuntimeForAnswer({
@@ -5392,6 +5404,41 @@ function createHostSemanticVerifierContext(input: {
     },
   }
 }
+
+function semanticRubricForTurn(input: {
+  negotiated: boolean
+  goalContractV1: boolean
+  pattern: string
+  definitionOfDone?: string
+}): SemanticRubric | undefined {
+  if (!input.negotiated || !input.goalContractV1 || input.pattern !== 'Goal-based' || !input.definitionOfDone) return undefined
+  return semanticRubricFromDefinitionOfDone(input.definitionOfDone)
+}
+
+function semanticVerifierForGoal(input: {
+  rubric?: SemanticRubric
+  goalContract?: GoalContractSnapshot
+  runId: string
+  workspaceRoot: string
+  settings: PiSettings
+  effectiveMode?: 'required' | 'optional' | 'demo' | 'off'
+  providerConnectionId?: string
+}): HostSemanticVerifierContext | undefined {
+  if (!input.rubric || !input.goalContract) return undefined
+  return createHostSemanticVerifierContext({
+    runId: input.runId,
+    workspaceRoot: input.workspaceRoot,
+    rubric: input.rubric,
+    settings: input.settings,
+    effectiveMode: input.effectiveMode,
+    providerConnectionId: input.providerConnectionId,
+    maxTokens: input.goalContract.budgets.maxTokens,
+    maxCostUsd: input.goalContract.budgets.maxCostUsd,
+  })
+}
+
+const semanticRubricAdmission = (rubric?: SemanticRubric): { semanticRubricId?: string } =>
+  rubric ? { semanticRubricId: rubric.id } : {}
 
 async function reviewBindingsForGoalContract(state: HostState, contract: GoalContractSnapshot) {
   const snapshotIds = [...new Set(contract.criteria.flatMap((criterion) =>
@@ -5594,12 +5641,12 @@ async function submitPiHostTurn(
   const working = prepareTurnWorkingState(state, input, id, session, runId, prompt, checkpointWriter)
   if (working.response) return working.response
   const { resumed, initialWorkingState, governingPackage, memoryControl } = working.value!
-  const semanticRubric = state.freshSemanticVerifierNegotiated
-    && input.params?.goalContractV1 === true
-    && pattern === 'Goal-based'
-    && definitionOfDone
-    ? semanticRubricFromDefinitionOfDone(definitionOfDone)
-    : undefined
+  const semanticRubric = semanticRubricForTurn({
+    negotiated: state.freshSemanticVerifierNegotiated,
+    goalContractV1: input.params?.goalContractV1 === true,
+    pattern,
+    definitionOfDone,
+  })
   const goalContract = await admitGoalContractForTurn({
     negotiated: state.goalContractNegotiated,
     enabled: input.params?.goalContractV1 === true,
@@ -5608,20 +5655,17 @@ async function submitPiHostTurn(
     maxIterations: iterationLimit,
     maxWallClockMs: goalContractMaxWallClock(input.params?.timeoutMs),
     unattended: turnSettings.unattended,
-    ...(semanticRubric ? { semanticRubricId: semanticRubric.id } : {}),
+    ...semanticRubricAdmission(semanticRubric),
   })
-  const semanticVerifier = semanticRubric && goalContract
-    ? createHostSemanticVerifierContext({
-        runId,
-        workspaceRoot: cwd,
-        rubric: semanticRubric,
-        settings: turnSettings,
-        effectiveMode: contextPolicy.outboundShellMode,
-        providerConnectionId: contextPolicy.outboundConnectionId,
-        maxTokens: goalContract.budgets.maxTokens,
-        maxCostUsd: goalContract.budgets.maxCostUsd,
-      })
-    : undefined
+  const semanticVerifier = semanticVerifierForGoal({
+    rubric: semanticRubric,
+    goalContract,
+    runId,
+    workspaceRoot: cwd,
+    settings: turnSettings,
+    effectiveMode: contextPolicy.outboundShellMode,
+    providerConnectionId: contextPolicy.outboundConnectionId,
+  })
   const recorder: ActiveTurnRecorder = {
     cwd,
     turn: nextTurnNumber(session.record),
@@ -6443,86 +6487,99 @@ function workflowNodePrompt(request: WorkflowNodeExecutionRequest): string {
   ].join('\n')
 }
 
-function createWorkflowNodeExecutor(input: {
+type WorkflowNodeExecutorContext = {
   state: HostState
   cwd: string
   profile?: Record<string, unknown>
   threadId?: string
   emit?: (message: PiHostMessage) => void
   checkpointWriter?: CompactionCheckpointWriter
-}): PiWorkflowNodeExecutor {
-  return async (request) => {
-    if (request.node.kind === 'human-gate') {
-      return { settlement: 'failed', resultRef: `${request.attemptId}:human-gate-unavailable`, outputs: [] }
-    }
-    const sessionId = `pi-workflow-${createHash('sha256').update(request.attemptId).digest('hex').slice(0, 24)}`
-    if (input.state.snapshot.sessions.some((session) => session.id === sessionId)) {
-      throw new Error('Workflow node session identity already exists')
-    }
-    const session: SessionRecord = {
-      id: sessionId,
-      title: `Workflow · ${request.node.id}`,
-      ...(input.threadId ? { threadId: input.threadId } : {}),
-      ...(input.profile ? { profile: { ...input.profile } } : {}),
-      messages: [],
-    }
-    input.state.snapshot.sessions = [...input.state.snapshot.sessions, session]
-    input.state.snapshot.cursor += 1
-    recordAgentLifecycle(input.state.snapshot.sessions, sessionId, 'admitted', undefined, undefined, (entry) => {
-      publishAgentLifecycleEntry(input.emit, sessionId, entry)
-    })
-    const runId = `${request.attemptId}:run`
-    const messages = await submitPiHostTurn(input.state, {
-      id: request.attemptId,
-      method: 'turn/submit',
-      params: {
-        sessionId,
-        runId,
-        cwd: input.cwd,
-        profile: input.profile || {},
-        prompt: workflowNodePrompt(request),
-        pattern: 'Turn-based',
-        maxIterations: 1,
-        goalContractV1: true,
-      },
-    }, request.attemptId, input.emit, input.checkpointWriter)
-    const response = messages.find((message) => 'id' in message && message.id === request.attemptId)
-    if (!response || !('result' in response) || !response.result) {
-      const message = response && 'error' in response && response.error
-        ? response.error.message
-        : 'Workflow node turn returned no result'
-      throw new Error(message)
-    }
-    const settlement = response.result.settlement
-    const executionSettlement = settlement === 'answered' || settlement === 'empty'
-      ? 'completed' as const
-      : settlement === 'cancelled' || settlement === 'interrupted' ? settlement : 'failed' as const
-    const answer = piTurnFinalAnswer(response.result.items || [])
-    const entries = response.result.record?.entries || []
-    return {
-      settlement: executionSettlement,
-      resultRef: `${request.attemptId}:turn`,
-      agentSessionId: sessionId,
-      runId,
-      ...(entries.length ? { turnRecordRef: { sessionId, fromSeq: entries[0].seq, toSeq: entries.at(-1)!.seq } } : {}),
-      outputs: executionSettlement === 'completed' ? workflowEnvelope(answer) : [],
-    }
+}
+
+function workflowNodeExecutionResult(
+  messages: PiHostMessage[],
+  request: WorkflowNodeExecutionRequest,
+  sessionId: string,
+  runId: string,
+) {
+  const response = messages.find((message) => 'id' in message && message.id === request.attemptId)
+  if (!response || !('result' in response) || !response.result) {
+    const message = response && 'error' in response && response.error
+      ? response.error.message
+      : 'Workflow node turn returned no result'
+    throw new Error(message)
+  }
+  const settlement = response.result.settlement
+  const executionSettlement = settlement === 'answered' || settlement === 'empty'
+    ? 'completed' as const
+    : settlement === 'cancelled' || settlement === 'interrupted' ? settlement : 'failed' as const
+  const answer = piTurnFinalAnswer(response.result.items || [])
+  const entries = response.result.record?.entries || []
+  return {
+    settlement: executionSettlement,
+    resultRef: `${request.attemptId}:turn`,
+    agentSessionId: sessionId,
+    runId,
+    ...(entries.length ? { turnRecordRef: { sessionId, fromSeq: entries[0].seq, toSeq: entries.at(-1)!.seq } } : {}),
+    outputs: executionSettlement === 'completed' ? workflowEnvelope(answer) : [],
   }
 }
 
-function handleWorkflowRequest(
+async function executeWorkflowNode(
+  input: WorkflowNodeExecutorContext,
+  request: WorkflowNodeExecutionRequest,
+) {
+  if (request.node.kind === 'human-gate') {
+    return { settlement: 'failed' as const, resultRef: `${request.attemptId}:human-gate-unavailable`, outputs: [] }
+  }
+  const sessionId = `pi-workflow-${createHash('sha256').update(request.attemptId).digest('hex').slice(0, 24)}`
+  if (input.state.snapshot.sessions.some((session) => session.id === sessionId)) {
+    throw new Error('Workflow node session identity already exists')
+  }
+  const session: SessionRecord = {
+    id: sessionId,
+    title: `Workflow · ${request.node.id}`,
+    ...(input.threadId ? { threadId: input.threadId } : {}),
+    ...(input.profile ? { profile: { ...input.profile } } : {}),
+    messages: [],
+  }
+  input.state.snapshot.sessions = [...input.state.snapshot.sessions, session]
+  input.state.snapshot.cursor += 1
+  recordAgentLifecycle(input.state.snapshot.sessions, sessionId, 'admitted', undefined, undefined, (entry) => {
+    publishAgentLifecycleEntry(input.emit, sessionId, entry)
+  })
+  const runId = `${request.attemptId}:run`
+  const messages = await submitPiHostTurn(input.state, {
+    id: request.attemptId,
+    method: 'turn/submit',
+    params: {
+      sessionId,
+      runId,
+      cwd: input.cwd,
+      profile: input.profile || {},
+      prompt: workflowNodePrompt(request),
+      pattern: 'Turn-based',
+      maxIterations: 1,
+      goalContractV1: true,
+    },
+  }, request.attemptId, input.emit, input.checkpointWriter)
+  return workflowNodeExecutionResult(messages, request, sessionId, runId)
+}
+
+function createWorkflowNodeExecutor(input: WorkflowNodeExecutorContext): PiWorkflowNodeExecutor {
+  return (request) => executeWorkflowNode(input, request)
+}
+
+const workflowFailure = (id: string | number) => (error: unknown): PiHostMessage[] => [
+  errorResponse(id, 'runtime_error', error instanceof Error ? error.message : 'Workflow request failed'),
+]
+
+function workflowReadResponse(
   state: HostState,
   input: Partial<InternalPiHostRequest>,
   id: string | number,
-  emit?: (message: PiHostMessage) => void,
-  checkpointWriter?: CompactionCheckpointWriter,
-): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
-  if (!input.method?.startsWith('workflow/')) return undefined
-  if (!state.workflowGraphNegotiated || !state.workflowRecordNegotiated || !state.workflowSchedulerNegotiated) {
-    return [errorResponse(id, 'forbidden', 'Workflow Graph, Record, and Scheduler capabilities must all be negotiated')]
-  }
+): PiHostMessage[] | undefined {
   const workflowRunId = typeof input.params?.workflowRunId === 'string' ? input.params.workflowRunId : ''
-  const fail = (error: unknown) => [errorResponse(id, 'runtime_error', error instanceof Error ? error.message : 'Workflow request failed')]
   if (input.method === 'workflow/record') {
     if (!workflowRunId) return [errorResponse(id, 'invalid_request', 'workflowRunId is required')]
     return [{ id, result: { workflowRecord: state.workflowRuntime.record(workflowRunId) } }]
@@ -6532,6 +6589,16 @@ function handleWorkflowRequest(
     const workflow = state.workflowRuntime.status(workflowRunId)
     return workflow ? [{ id, result: { workflow } }] : [errorResponse(id, 'not_found', 'Workflow run is unknown or not terminal')]
   }
+  return undefined
+}
+
+function workflowMaintenanceResponse(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
+  const workflowRunId = typeof input.params?.workflowRunId === 'string' ? input.params.workflowRunId : ''
+  const fail = workflowFailure(id)
   if (input.method === 'workflow/checkpoint') {
     if (!workflowRunId) return [errorResponse(id, 'invalid_request', 'workflowRunId is required')]
     return state.workflowRuntime.checkpoint(workflowRunId)
@@ -6544,6 +6611,17 @@ function handleWorkflowRequest(
       .then((workflow) => [{ id, result: { workflow } }])
       .catch(fail)
   }
+  return undefined
+}
+
+function workflowRunResponse(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+  checkpointWriter?: CompactionCheckpointWriter,
+): PiHostMessage[] | Promise<PiHostMessage[]> {
+  const workflowRunId = typeof input.params?.workflowRunId === 'string' ? input.params.workflowRunId : ''
   const taskRunId = typeof input.params?.taskRunId === 'string' ? input.params.taskRunId : ''
   const cwd = typeof input.params?.cwd === 'string' ? input.params.cwd : ''
   if (!taskRunId || !workflowRunId || !cwd || input.params?.definition === undefined) {
@@ -6558,7 +6636,34 @@ function handleWorkflowRequest(
     taskRunId,
     workflowRunId,
     executeNode: createWorkflowNodeExecutor({ state, cwd, profile, threadId, emit, checkpointWriter }),
-  }).then((workflow) => [{ id, result: { workflow } }]).catch(fail)
+  }).then((workflow) => [{ id, result: { workflow } }]).catch(workflowFailure(id))
+}
+
+function handleWorkflowRequest(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+  checkpointWriter?: CompactionCheckpointWriter,
+): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
+  if (!input.method?.startsWith('workflow/')) return undefined
+  if (!state.workflowGraphNegotiated || !state.workflowRecordNegotiated || !state.workflowSchedulerNegotiated) {
+    return [errorResponse(id, 'forbidden', 'Workflow Graph, Record, and Scheduler capabilities must all be negotiated')]
+  }
+  return workflowReadResponse(state, input, id)
+    ?? workflowMaintenanceResponse(state, input, id)
+    ?? workflowRunResponse(state, input, id, emit, checkpointWriter)
+}
+
+function handleCoreProjectionRequest(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+  checkpointWriter?: CompactionCheckpointWriter,
+): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
+  if (input.method === 'state/snapshot') return projectPiHostStateSnapshot(state, id)
+  return handleWorkflowRequest(state, input, id, emit, checkpointWriter)
 }
 
 export function handlePiHostRequest(
@@ -6593,11 +6698,8 @@ export function handlePiHostRequest(
     execute: () => executePiHostToolRequest(state, input, id, invocationOrigin, emit),
   })
   if (toolDomainResponse) return toolDomainResponse
-  if (input.method === 'state/snapshot') {
-    return projectPiHostStateSnapshot(state, id)
-  }
-  const workflowResponse = handleWorkflowRequest(state, input, id, emit, checkpointWriter)
-  if (workflowResponse) return workflowResponse
+  const projectionResponse = handleCoreProjectionRequest(state, input, id, emit, checkpointWriter)
+  if (projectionResponse) return projectionResponse
   const runResponse = handleRunRequest(state, input, id, emit)
   if (runResponse) return runResponse
   const agentResponse = handleAgentRequest(state, input, id, emit)

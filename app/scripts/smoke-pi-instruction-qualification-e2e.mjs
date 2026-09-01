@@ -56,6 +56,8 @@ const modelServer = createServer(async (request, response) => {
   try { parsed = JSON.parse(raw) } catch {}
   requests.push(parsed)
   const messages = Array.isArray(parsed.messages) ? parsed.messages : []
+  const serializedMessages = JSON.stringify(messages)
+  const isFreshVerifier = serializedMessages.includes('You are a fresh acceptance verifier.')
   const hasToolResult = messages.some((message) => message?.role === 'tool' || message?.tool_call_id)
   const id = `instruction-qualification-${requests.length}`
   const sse = (payload) => `data: ${JSON.stringify(payload)}\n\n`
@@ -66,7 +68,17 @@ const modelServer = createServer(async (request, response) => {
     choices: [{ index: 0, delta, finish_reason: finish }],
   })
   response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive', 'cache-control': 'no-cache' })
-  if (!hasToolResult) {
+  if (isFreshVerifier) {
+    response.write(chunk({ role: 'assistant', content: JSON.stringify({ verdict: 'passed', reason: 'Loopback verifier confirmed the admitted answer.' }) }))
+    response.write(chunk({}, 'stop'))
+    response.write(sse({
+      id,
+      object: 'chat.completion.chunk',
+      model: 'instruction-qualification-model',
+      choices: [],
+      usage: { prompt_tokens: 32, completion_tokens: 8, total_tokens: 40 },
+    }))
+  } else if (!hasToolResult) {
     response.write(chunk({ role: 'assistant', content: 'QUALIFIED_FIRST_ITERATION' }))
     response.write(chunk({ tool_calls: [{
       index: 0,
@@ -208,8 +220,22 @@ try {
   const sessionId = attachment.sessionId
   step('Task run admitted')
   const recordResult = await waitForTurnRecord(page, sessionId)
-  assert.equal(requests.length, 2, `provider must receive exactly two loop iterations (got ${requests.length})`)
-  const requestMessages = requests.map((request) => Array.isArray(request.messages) ? request.messages : [])
+  const mainRequests = requests.filter((request) => {
+    const serialized = JSON.stringify(request.messages || [])
+    return serialized.includes('QUALIFIED_GLOBAL_INSTRUCTION')
+      && serialized.includes('QUALIFIED_PROJECT_SOURCE')
+      && serialized.includes('QUALIFIED_CURRENT_REQUEST')
+  })
+  const verifierRequests = requests.filter((request) => !mainRequests.includes(request))
+  assert.equal(mainRequests.length, 2, `provider must receive exactly two admitted loop iterations (got ${mainRequests.length})`)
+  assert.equal(verifierRequests.length, 3, `fresh semantic acceptance must run exactly three isolated checks (got ${verifierRequests.length})`)
+  assert.ok(verifierRequests.every((request) => {
+    const serialized = JSON.stringify(request.messages || [])
+    return serialized.includes('You are a fresh acceptance verifier.')
+      && !serialized.includes('QUALIFIED_GLOBAL_INSTRUCTION')
+      && !serialized.includes('QUALIFIED_PROJECT_SOURCE')
+  }), 'fresh verifier calls must exclude worker instructions and use the verifier-only prompt')
+  const requestMessages = mainRequests.map((request) => Array.isArray(request.messages) ? request.messages : [])
   const request1Text = JSON.stringify(requestMessages[0])
   const request2Text = JSON.stringify(requestMessages[1])
   assert.equal(request1Text.includes('QUALIFIED_GLOBAL_INSTRUCTION'), true, 'request 1 must include the admitted global instruction')

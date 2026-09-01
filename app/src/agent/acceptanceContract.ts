@@ -11,6 +11,17 @@ export type CriterionVerdict = Readonly<{
   retryable: boolean
 }>
 
+function serializableCriterionVerdict(verdict: CriterionVerdict): CriterionVerdict {
+  return {
+    criterionId: verdict.criterionId,
+    status: verdict.status,
+    evidenceRefs: [...verdict.evidenceRefs],
+    reason: verdict.reason,
+    ...(verdict.repairHint === undefined ? {} : { repairHint: verdict.repairHint }),
+    retryable: verdict.retryable,
+  }
+}
+
 type AcceptanceEvidenceBase = Readonly<{
   schemaVersion: 1
   id: string
@@ -257,7 +268,7 @@ export async function createAcceptanceSnapshot(input: {
     iteration: input.iteration,
     goalContractDigest: input.goalContract.digest,
     ...(input.workflowRevision === undefined ? {} : { workflowRevision: input.workflowRevision }),
-    verdicts: [...input.verdicts],
+    verdicts: input.verdicts.map(serializableCriterionVerdict),
     overall,
     ...((failed || blocked) ? { weakestCriterionId: (failed || blocked)?.criterionId } : {}),
     impactedNodeIds: (failed || blocked)

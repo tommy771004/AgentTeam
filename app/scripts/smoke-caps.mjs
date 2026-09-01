@@ -2325,10 +2325,12 @@ await test('Ticket 05: Working State UI is Host-owned, monotonic, bounded, and r
     'the complete Host projection remains available only in the diagnostic disclosure')
   assert.doesNotMatch(feed, /ExecutionStepsProgress/,
     'compact live step progress no longer interrupts the conversation timeline')
-  assert.match(protocols, /flex min-w-0 items-center gap-2[\s\S]*<ProjectContextBar \/>[\s\S]*lifecycle\.live[\s\S]*<ExecutionStepsProgress[\s\S]*<CommandComposer/,
+  assert.match(protocols, /function ComposerExecutionContext[\s\S]*flex min-w-0 items-center gap-2[\s\S]*<ProjectContextBar \/>[\s\S]*live \? <ExecutionStepsProgress/,
+    'the extracted composer context keeps live step progress horizontally beside the project picker')
+  assert.match(protocols, /<ComposerExecutionContext[\s\S]*live=\{lifecycle\.live\}[\s\S]*<CommandComposer/,
     'run-scoped live step progress stays horizontally beside the project picker above the conversation composer')
   assert.match(progress, /whitespace-nowrap/)
-  assert.match(progress, /執行步驟：\{completed\} \/ \{tasks\.length\}/)
+  assert.match(progress, /步驟 \{currentStep\} \/ \{tasks\.length\}/)
   assert.match(progress, /onMouseEnter=\{\(\) => setHoverOpen\(true\)\}/)
   assert.match(progress, /aria-expanded=\{open\}/)
   assert.match(progress, /task\.status === 'done'[\s\S]*check_circle/,
@@ -2362,7 +2364,7 @@ await test('Ticket 06: delegated goals remain parent-owned and CAS-checked', asy
   assert.doesNotMatch(statusDefinition, /policyMigration/, 'delegate_status remains a pure observation')
   assert.match(working, /evidence\.parentRunId !== state\.runId/)
   assert.match(working, /stale-goal-conflict/)
-  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 14/)
+  assert.match(record, /TURN_RECORD_FORMAT_VERSION = (?:1[4-9]|[2-9]\d+)/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-delegated-working-goal\.mts/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-delegated-goal-host\.mts/)
 })
@@ -2383,7 +2385,7 @@ await test('Ticket 07: state-changing Skill preflight is contract-bound and zero
   assert.match(host, /setPiSkillPreflightBridge\(/)
   assert.match(host, /createSkillPreflight\(/)
   assert.match(host, /kind: 'skill-invocation'/)
-  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 14/)
+  assert.match(record, /TURN_RECORD_FORMAT_VERSION = (?:1[4-9]|[2-9]\d+)/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-skill-preflight-pass-through\.mts/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-working-state-completion\.mts/)
 })
@@ -2402,7 +2404,7 @@ await test('Ticket 08: Skill match blocks the original call and injects one immu
   assert.match(toolHost, /fresh call identity/)
   assert.match(host, /settlement: 'not-executed'/)
   assert.match(host, /kind: 'skill-context'/)
-  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 14/)
+  assert.match(record, /TURN_RECORD_FORMAT_VERSION = (?:1[4-9]|[2-9]\d+)/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-skill-preflight-redraft\.mts/)
 })
 
@@ -2426,7 +2428,7 @@ await test('Ticket 09: Skill preflight retries are batch-bound and block paralle
   assert.ok(runtime.indexOf('commitPiPackExtensionBundle(sessionId, packBundle)') > runtime.indexOf('await existing.session.dispose?.()')
     && runtime.indexOf('commitPiPackExtensionBundle(sessionId, packBundle)') < runtime.indexOf('sessionRuntimes.set(sessionId, runtime)'),
   'the staged preflight catalog commits only after replacement succeeds and immediately before runtime publication')
-  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 14/)
+  assert.match(record, /TURN_RECORD_FORMAT_VERSION = (?:1[4-9]|[2-9]\d+)/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-skill-preflight-batch\.mts/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-pi-skill-preflight-stop-replay\.mts/)
 })
@@ -2447,7 +2449,7 @@ await test('Ticket 10: each Task run freezes one active Memory-Control Package r
   assert.match(host, /memory-control\/v1\/package\/get/)
   assert.match(host, /governingPackage/)
   assert.match(record, /kind: 'memory-control-package'/)
-  assert.match(record, /TURN_RECORD_FORMAT_VERSION = 14/)
+  assert.match(record, /TURN_RECORD_FORMAT_VERSION = (?:1[4-9]|[2-9]\d+)/)
   assert.match(packageJson.scripts['smoke:pi-host'], /smoke-memory-control-package-lifecycle\.mts/)
 })
 

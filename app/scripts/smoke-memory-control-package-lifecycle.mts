@@ -18,22 +18,41 @@ const packagePath = join(stateDir, 'memory-control-packages.json')
 const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex')
 
 let completion = 0
+let verifierCompletion = 0
 let releaseFirstResponse: (() => void) | undefined
 const firstResponseGate = new Promise<void>((resolveGate) => { releaseFirstResponse = resolveGate })
 const sse = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`
 const modelServer = createServer(async (request, response) => {
-  request.resume()
-  await once(request, 'end')
-  completion += 1
-  if (completion === 1) await firstResponseGate
+  const raw = await new Promise<string>((resolveBody) => {
+    let body = ''
+    request.on('data', (part) => { body += String(part) })
+    request.on('end', () => resolveBody(body))
+  })
+  let parsed: { messages?: unknown[] } = {}
+  try { parsed = JSON.parse(raw) as { messages?: unknown[] } } catch {}
+  const isFreshVerifier = JSON.stringify(parsed.messages || []).includes('You are a fresh acceptance verifier.')
+  if (isFreshVerifier) verifierCompletion += 1
+  else completion += 1
+  const responseId = isFreshVerifier ? `memory-control-verifier-${verifierCompletion}` : `memory-control-${completion}`
+  if (!isFreshVerifier && completion === 1) await firstResponseGate
   const chunk = (delta: unknown, finish: string | null) => sse({
-    id: `memory-control-${completion}`,
+    id: responseId,
     object: 'chat.completion.chunk',
     model: 'smoke-model',
     choices: [{ index: 0, delta, finish_reason: finish }],
   })
   response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive', 'cache-control': 'no-cache' })
-  if (completion === 1 || completion === 3) {
+  if (isFreshVerifier) {
+    response.write(chunk({ role: 'assistant', content: JSON.stringify({ verdict: 'passed', reason: 'Loopback verifier confirmed the admitted file evidence.' }) }, null))
+    response.write(chunk({}, 'stop'))
+    response.write(sse({
+      id: responseId,
+      object: 'chat.completion.chunk',
+      model: 'smoke-model',
+      choices: [],
+      usage: { prompt_tokens: 32, completion_tokens: 8, total_tokens: 40 },
+    }))
+  } else if (completion === 1 || completion === 3) {
     const second = completion === 3
     response.write(chunk({ role: 'assistant', tool_calls: [{
       index: 0,
@@ -68,6 +87,7 @@ type Harness = {
   messages: Array<Record<string, any>>
   send(id: number, method: string, params?: Record<string, unknown>): void
   waitFor(id: number): Promise<Record<string, any>>
+  waitForApprovalOrResponse(runId: string, responseId: number): Promise<Record<string, any>>
   waitForPackageRevision(revision: number): Promise<void>
 }
 
@@ -97,7 +117,7 @@ const startHost = (): Harness => {
   const waitUntil = async (predicate: () => boolean, label: string) => {
     const timeoutAt = Date.now() + 25_000
     while (!predicate()) {
-      if (Date.now() > timeoutAt) throw new Error(`timed out waiting for ${label}`)
+      if (Date.now() > timeoutAt) throw new Error(`timed out waiting for ${label}; last messages=${JSON.stringify(messages.slice(-5))}`)
       await new Promise((done) => setTimeout(done, 10))
     }
   }
@@ -108,6 +128,12 @@ const startHost = (): Harness => {
     waitFor: async (id) => {
       await waitUntil(() => messages.some((message) => message.id === id), `response ${id}`)
       return messages.find((message) => message.id === id)!
+    },
+    waitForApprovalOrResponse: async (runId, responseId) => {
+      await waitUntil(() => messages.some((message) => message.id === responseId
+        || (message.event === 'host/approval-requested' && message.payload?.runId === runId)), `approval or response for ${runId}`)
+      return messages.find((message) => message.event === 'host/approval-requested' && message.payload?.runId === runId)
+        || messages.find((message) => message.id === responseId)!
     },
     waitForPackageRevision: async (revision) => waitUntil(() => messages.some((message) =>
       message.event === 'host/record-append'
@@ -185,14 +211,18 @@ try {
   })
   assert.match(activation.error?.message || '', /operation is invalid/i)
   releaseFirstResponse?.()
-  while (completion < 2) await new Promise((resolve) => setTimeout(resolve, 5))
+  const firstOutcome = await firstHost.waitForApprovalOrResponse('package-run-one', 6)
+  if (firstOutcome.event === 'host/approval-requested') {
+    firstHost.send(17, 'approvals/resolve', { runId: 'package-run-one', callId: firstOutcome.payload?.callId, decision: 'allow' })
+    assert.equal((await firstHost.waitFor(17)).error, undefined)
+  }
+  const firstTurn = await firstHost.waitFor(6)
   firstHost.send(16, 'memory-control/v1/maintain', {
     maintenanceToken: 'ticket-11-maintainer-secret', sessionId, operation: 'create-candidate',
     expectedActiveRevision: 1, diagnosisComponent: 'workingMemorySpec',
     patch: [{ op: 'add', path: '/tooLate', value: true }], reason: 'must not enter after settlement closes audit admission',
   })
   assert.match((await firstHost.waitFor(16)).error?.message || '', /settling.*closed|active audit Task run/i)
-  const firstTurn = await firstHost.waitFor(6)
   assert.equal(firstTurn.error, undefined, JSON.stringify(firstTurn))
   assertPackageLinks(firstTurn.result?.record?.entries || [], 1)
   const firstLifecycle = firstTurn.result?.record?.entries
@@ -216,6 +246,11 @@ try {
     pattern: 'Goal-based', maxIterations: 1,
     workingGoal: { kind: 'file-content', path: 'second.txt', sha256: sha256('second\n') },
   })
+  const secondOutcome = await firstHost.waitForApprovalOrResponse('package-run-two', 15)
+  if (secondOutcome.event === 'host/approval-requested') {
+    firstHost.send(18, 'approvals/resolve', { runId: 'package-run-two', callId: secondOutcome.payload?.callId, decision: 'allow' })
+    assert.equal((await firstHost.waitFor(18)).error, undefined)
+  }
   const secondTurn = await firstHost.waitFor(15)
   assert.equal(secondTurn.error, undefined, JSON.stringify(secondTurn))
   assertPackageLinks(secondTurn.result?.record?.entries || [], 1)

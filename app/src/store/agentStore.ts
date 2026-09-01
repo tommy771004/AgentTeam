@@ -379,6 +379,89 @@ function hostGoalOutcomeFacts(result: {
   }
 }
 
+function requirePiHostBridge(overrides: RuntimeOverrides) {
+  const piHost = window.subagents?.piHost
+  if (!piHost?.sessions?.list || !piHost.sessions.create || !piHost.turn?.submit || !overrides.threadId) {
+    throw new Error('Pi Core Host bridge is unavailable for an Electron run')
+  }
+  return piHost
+}
+
+async function executePiHostWorkflow(input: {
+  set: (partial: Partial<AgentStore>) => void
+  get: () => AgentStore
+  text: string
+  runId: string
+  overrides: RuntimeOverrides
+  profile: Record<string, unknown>
+  loopConfig: AgentState['loopConfig']
+  loopType: LoopType
+  startedAt: string
+  startedMs: number
+}): Promise<boolean> {
+  if (!input.overrides.workflowDefinition) return false
+  const runWorkflow = window.subagents?.piHost?.workflow?.run
+  if (!runWorkflow) throw new Error('Pi Host Workflow bridge is unavailable')
+  const workflowRunId = `workflow:${input.runId}`
+  const projection = await runWorkflow({
+    definition: input.overrides.workflowDefinition,
+    taskRunId: input.runId,
+    workflowRunId,
+    cwd: input.overrides.projectRoot || '.',
+    profile: input.profile,
+    threadId: input.overrides.threadId,
+  })
+  const workflow = projection.workflow.result
+  const passed = workflow.verdict === 'passed'
+  const status: AgentState['status'] = passed ? 'success' : workflow.verdict === 'blocked' ? 'halted' : 'failed'
+  const goalVerdict: AgentState['goalVerdict'] = passed ? 'passed' : workflow.verdict
+  const summary = passed
+    ? `Workflow ${workflow.workflowRunId} passed ${Object.keys(workflow.nodeStatuses).length} nodes`
+    : `Workflow ${workflow.workflowRunId} ${workflow.verdict}: ${workflow.errors.join('；') || 'node contract was not satisfied'}`
+  const final = emptyAgentLike({
+    id: input.runId,
+    objective: input.text,
+    status,
+    progress: 100,
+    result: summary,
+    ...(passed ? {} : { haltReason: summary }),
+    confidence: passed ? 1 : 0,
+    loopConfig: input.loopConfig,
+    executionKind: 'loop',
+    executionSettlement: 'completed',
+    goalVerdict,
+    acceptanceDigest: workflow.acceptanceDigest,
+    workflowRunId: workflow.workflowRunId,
+    workflowVerdict: workflow.verdict,
+    workflowAcceptanceDigest: workflow.acceptanceDigest,
+    runnerCapabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
+    startedAt: input.startedAt,
+    finishedAt: new Date().toISOString(),
+    logs: [{ id: 'pi-workflow-end', timestamp: new Date().toISOString(), level: passed ? 'SUCCESS' : 'ERROR', message: summary }],
+    steps: Object.entries(workflow.nodeStatuses).map(([nodeId, nodeStatus], index) => ({
+      step: index + 1,
+      action: `workflow:${nodeId}`,
+      description: nodeId,
+      status: nodeStatus === 'passed' ? 'COMPLETED' as const : 'FAILED' as const,
+      result: nodeStatus,
+      durationMs: Date.now() - input.startedMs,
+      modelSource: 'primary' as const,
+    })),
+  })
+  publishRun(input.set, input.get, input.runId, final)
+  const postState = await consumeNextState(input.loopConfig.nextState, {
+    runId: input.runId,
+    objective: input.text,
+    status: final.status,
+    loopType: input.loopType,
+    result: final.result,
+    finishedAt: final.finishedAt,
+    webhookTarget: input.overrides.webhookTarget,
+  })
+  input.get().applyPostState(input.runId, postState)
+  return true
+}
+
 async function executePiHostTurn(
   set: (partial: Partial<AgentStore>) => void,
   get: () => AgentStore,
@@ -398,10 +481,7 @@ async function executePiHostTurn(
     nextState: overrides.nextState || 'Halt',
   }
   const t0 = Date.now()
-  const piHost = window.subagents?.piHost
-  if (!piHost?.sessions?.list || !piHost.sessions.create || !piHost.turn?.submit || !overrides.threadId) {
-    throw new Error('Pi Core Host bridge is unavailable for an Electron run')
-  }
+  const piHost = requirePiHostBridge(overrides)
   publishRun(set, get, runId, emptyAgentLike({
     id: runId,
     objective: text,
@@ -446,67 +526,9 @@ async function executePiHostTurn(
       }
     : undefined
   try {
-    if (overrides.workflowDefinition) {
-      if (!piHost.workflow?.run) throw new Error('Pi Host Workflow bridge is unavailable')
-      const workflowRunId = `workflow:${runId}`
-      const projection = await piHost.workflow.run({
-        definition: overrides.workflowDefinition,
-        taskRunId: runId,
-        workflowRunId,
-        cwd: overrides.projectRoot || '.',
-        profile,
-        threadId: overrides.threadId,
-      })
-      const workflow = projection.workflow.result
-      const passed = workflow.verdict === 'passed'
-      const status: AgentState['status'] = passed ? 'success' : workflow.verdict === 'blocked' ? 'halted' : 'failed'
-      const goalVerdict: AgentState['goalVerdict'] = passed ? 'passed' : workflow.verdict
-      const summary = passed
-        ? `Workflow ${workflow.workflowRunId} passed ${Object.keys(workflow.nodeStatuses).length} nodes`
-        : `Workflow ${workflow.workflowRunId} ${workflow.verdict}: ${workflow.errors.join('；') || 'node contract was not satisfied'}`
-      const final = emptyAgentLike({
-        id: runId,
-        objective: text,
-        status,
-        progress: 100,
-        result: summary,
-        ...(passed ? {} : { haltReason: summary }),
-        confidence: passed ? 1 : 0,
-        loopConfig,
-        executionKind: 'loop',
-        executionSettlement: 'completed',
-        goalVerdict,
-        acceptanceDigest: workflow.acceptanceDigest,
-        workflowRunId: workflow.workflowRunId,
-        workflowVerdict: workflow.verdict,
-        workflowAcceptanceDigest: workflow.acceptanceDigest,
-        runnerCapabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        logs: [{ id: 'pi-workflow-end', timestamp: new Date().toISOString(), level: passed ? 'SUCCESS' : 'ERROR', message: summary }],
-        steps: Object.entries(workflow.nodeStatuses).map(([nodeId, nodeStatus], index) => ({
-          step: index + 1,
-          action: `workflow:${nodeId}`,
-          description: nodeId,
-          status: nodeStatus === 'passed' ? 'COMPLETED' as const : 'FAILED' as const,
-          result: nodeStatus,
-          durationMs: Date.now() - t0,
-          modelSource: 'primary' as const,
-        })),
-      })
-      publishRun(set, get, runId, final)
-      const postState = await consumeNextState(loopConfig.nextState, {
-        runId,
-        objective: text,
-        status: final.status,
-        loopType,
-        result: final.result,
-        finishedAt: final.finishedAt,
-        webhookTarget: overrides.webhookTarget,
-      })
-      get().applyPostState(runId, postState)
-      return
-    }
+    if (await executePiHostWorkflow({
+      set, get, text, runId, overrides, profile, loopConfig, loopType, startedAt, startedMs: t0,
+    })) return
     const result = await submitPiHostRun(piHost, {
       threadId: overrides.threadId!,
       title: text.slice(0, 48),

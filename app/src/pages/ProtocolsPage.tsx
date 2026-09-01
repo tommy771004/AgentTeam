@@ -14,7 +14,7 @@ import { ComposerQuickActions } from '../components/ComposerQuickActions'
 import { PermissionAskPanel } from '../components/PermissionAskModal'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import { IDLE_AGENT_STATE, useAgentStore } from '../store/agentStore'
-import { useRunActivityStore } from '../store/runActivityStore'
+import { useRunActivityStore, type FileChangeRecord, type RunTaskItem } from '../store/runActivityStore'
 import { useSlashExecutor } from '../hooks/useSlashExecutor'
 import { useThreadStore, type ThreadRunner } from '../store/threadStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -67,6 +67,24 @@ import type { ExternalRunOpts, ExternalRunResult } from '../agent/taskRunTypes'
 type RejectedFollowUp = {
   projection: PendingFollowUpProjection
   input: ExternalRunOpts
+}
+
+function ComposerExecutionContext({
+  live,
+  tasks,
+  fileChanges,
+}: {
+  live: boolean
+  tasks: readonly Pick<RunTaskItem, 'id' | 'text' | 'status'>[]
+  fileChanges?: readonly Pick<FileChangeRecord, 'added' | 'removed'>[]
+}) {
+  return (
+    <div className={live ? 'grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2' : 'flex min-w-0 items-center gap-2'}>
+      <ProjectContextBar />
+      {live ? <ExecutionStepsProgress tasks={tasks} fileChanges={fileChanges} /> : null}
+      {live ? <span aria-hidden="true" /> : null}
+    </div>
+  )
 }
 
 function visibleFollowUps(
@@ -891,16 +909,11 @@ export function ProtocolsPage() {
 
             {/* 專案 pill 置於輸入上方；其餘次要控制集中在左下＋選單。 */}
             <div className="shrink-0 w-full pt-3 pb-4 space-y-2">
-              <div className={lifecycle.live ? 'grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2' : 'flex min-w-0 items-center gap-2'}>
-                <ProjectContextBar />
-                {lifecycle.live ? (
-                  <ExecutionStepsProgress
-                    tasks={activity?.tasks.length ? activity.tasks : thread?.runPlan || []}
-                    fileChanges={activity?.fileChanges}
-                  />
-                ) : null}
-                {lifecycle.live ? <span aria-hidden="true" /> : null}
-              </div>
+              <ComposerExecutionContext
+                live={lifecycle.live}
+                tasks={activity?.tasks.length ? activity.tasks : thread?.runPlan || []}
+                fileChanges={activity?.fileChanges}
+              />
               {activeId ? <PermissionAskPanel threadId={activeId} /> : null}
               <CommandComposer
                 scopeKey={activeId || 'no-thread'}
