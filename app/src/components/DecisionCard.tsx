@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Icon } from './Icon'
 
 type DecisionCardProps = {
@@ -6,8 +6,9 @@ type DecisionCardProps = {
   titleId: string
   title: string
   reason: string
-  meta: string
+  meta?: string
   runId?: string
+  threadId?: string
   children: ReactNode
   denyLabel: string
   onDeny: () => void
@@ -24,6 +25,7 @@ export function DecisionCard({
   reason,
   meta,
   runId,
+  threadId,
   children,
   denyLabel,
   onDeny,
@@ -31,33 +33,18 @@ export function DecisionCard({
   approveDisabled = false,
   onApprove,
 }: DecisionCardProps) {
-  const dialogRef = useRef<HTMLDialogElement>(null)
-
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (!dialog) return
-    dialog.showModal()
-    return () => {
-      if (dialog.open) dialog.close()
-    }
-  }, [])
-
   return (
-    <dialog
-      ref={dialogRef}
-      role="dialog"
-      aria-modal="true"
+    <section
+      role="region"
       aria-labelledby={titleId}
-      aria-describedby={`${titleId}-reason ${titleId}-meta`}
-      onCancel={(event) => {
-        event.preventDefault()
-        onDeny()
-      }}
+      aria-describedby={`${titleId}-reason${meta ? ` ${titleId}-meta` : ''}`}
+      aria-live="polite"
       data-decision-kind={kind}
       data-run-id={runId || undefined}
-      className="agent-decision-card overflow-hidden rounded-card bg-surface text-ink animate-macos-sheet"
+      data-thread-id={threadId || undefined}
+      className="agent-decision-panel overflow-hidden rounded-control text-ink"
     >
-        <header className="agent-decision-header primitive-card-pad flex items-start gap-3">
+        <header className="agent-decision-header flex items-start gap-3 px-3.5 pb-3 pt-3.5">
           <Icon
             name={kind === 'question' ? 'question_mark' : 'shield'}
             size={18}
@@ -69,13 +56,13 @@ export function DecisionCard({
               <span className="text-[11px] font-medium text-orange">等待你的決定</span>
             </div>
             <p id={`${titleId}-reason`} className="mt-1 text-[13px] leading-relaxed text-ink-2">{reason}</p>
-            <p id={`${titleId}-meta`} aria-live="polite" className="mt-1 text-[11px] tabular-nums text-ink-3">{meta}</p>
+            {meta ? <p id={`${titleId}-meta`} className="mt-1 text-[11px] text-ink-3">{meta}</p> : null}
           </div>
         </header>
 
         <div className="agent-decision-body p-4">{children}</div>
 
-        <footer className="primitive-card-footer flex items-center justify-end gap-2 bg-inset">
+        <footer className="agent-decision-footer flex items-center justify-end gap-2 px-3 py-2.5">
           <button
             type="button"
             onClick={onDeny}
@@ -94,6 +81,6 @@ export function DecisionCard({
             </button>
           ) : null}
         </footer>
-    </dialog>
+    </section>
   )
 }

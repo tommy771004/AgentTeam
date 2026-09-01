@@ -6,8 +6,8 @@ import { normalizeContinuationItems } from '../../src/agent/continuation.ts'
  * Interaction and planning pack（互動與計畫包）.
  *
  * ask_user raises the SAME HITL prompt as any other approval — the question
- * travels out on host/approval-requested, waits the same budget, auto-denies
- * under the unattended policy instead of stalling forever. The user's answer
+ * travels out on host/approval-requested and waits for an attended user's
+ * explicit answer. Unattended runs still deny fail-closed. The user's answer
  * rides back inside the resolution as the tool result.
  *
  * update_plan drives the plan panel the user watches: one live snapshot per
@@ -47,8 +47,8 @@ const askUser: PiPackTool = {
     },
     required: ['question'],
   },
-  // The question IS an approval-shaped ask; unattended runs refuse it after
-  // their timeout rather than waiting out a person who is not there. hitl
+  // The question IS an approval-shaped ask; unattended runs refuse it rather
+  // than waiting for a person who is not there. hitl
   // makes it surface even under complete/full access: asking the user is the
   // tool's whole purpose, so no policy may silently auto-answer it.
   approval: () => ({ need: true, reason: 'ask_user 等待使用者回覆', hitl: true }),

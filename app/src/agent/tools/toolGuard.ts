@@ -195,12 +195,14 @@ export async function authorizeTool(opts: {
     } catch {
       /* metrics must never block */
     }
-    const timeoutMs =
-      opts.hitlTimeoutMs ??
-      (opts.unattended ? 45_000 : 90_000)
+    const timeoutMs = opts.unattended
+      ? (opts.hitlTimeoutMs ?? 45_000)
+      : undefined
     onLog?.(
       'AWAIT',
-      `權限 ask：${tool} — 等待使用者核准…（${Math.round(timeoutMs / 1000)}s 逾時自動拒絕${opts.unattended ? ' · 無人值守' : ''}）`,
+      opts.unattended
+        ? `權限 ask：${tool} - 無人值守，${Math.round((timeoutMs ?? 45_000) / 1000)}s 後自動拒絕`
+        : `權限 ask：${tool} - 等待使用者核准`,
     )
     try {
       const { usePermissionAskStore } = await import('../../store/permissionAskStore.ts')
@@ -210,10 +212,12 @@ export async function authorizeTool(opts: {
         tool,
         args: input,
         reason: decision.askSpec.reason,
-        timeoutMs,
+        ...(timeoutMs ? { timeoutMs } : {}),
       })
       if (hitl.decision === 'deny') {
-        const msg = `使用者拒絕或逾時拒絕工具：${tool}`
+        const msg = opts.unattended
+          ? `使用者拒絕或無人值守逾時拒絕工具：${tool}`
+          : `使用者拒絕工具：${tool}`
         onLog?.('WARN', msg)
         await emitPermissionDenied(settings, opts, tool, msg, onLog)
         return { allowed: false, output: msg }

@@ -36,7 +36,7 @@
 | `trusted` | 已採用且該 scope 已授權 | 可執行；`revokePluginGrants()` 隨時撤銷 |
 
 - **遠端/vendor 更新不會靜默取代 snapshot**：`refresh-required` 只回報，不寫入。
-- Capability 請求走既有 `permissionAskStore.requestAsk()`，維持 run/thread scope 與 unattended timeout（unattended 45s / interactive 90s）；**逾時自動 deny**，unattended 執行因此 fail closed。
+- Capability 請求走既有 `permissionAskStore.requestAsk()`，維持 run/thread scope；attended 請求等待使用者明確選擇，unattended 執行則直接 fail closed。
 - 部分授權仍然 blocked：只要還有未授權的 deny-by-default capability，狀態維持 `grant-required`。
 
 ## Plugin inputs

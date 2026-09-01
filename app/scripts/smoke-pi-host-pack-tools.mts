@@ -100,8 +100,6 @@ const host = spawn(process.execPath, [resolve(import.meta.dirname, '../dist-elec
     ...process.env,
     SUBAGENTS_PI_HOST_STATE_PATH: join(stateDir, 'state.json'),
     SUBAGENTS_PI_AGENT_DIR: agentDir,
-    // The interactive ask budget is shrunk for the timeout scenario only.
-    SUBAGENTS_PI_APPROVAL_TIMEOUT_MS: '700',
   },
   stdio: ['pipe', 'pipe', 'inherit'],
 })
@@ -226,7 +224,7 @@ try {
   submitTurn(8, 'pack-ask-allow', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: false }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } }, ['messaging'])
   const askEvent = await waitForEvent('host/approval-requested', (payload) => payload.runId === 'pack-ask-allow')
   assert.equal(askEvent.payload.tool, 'message_send')
-  assert.ok(Number(askEvent.payload.timeoutMs) > 0, 'the ask carries its own timeout budget')
+  assert.equal(askEvent.payload.timeoutMs, 0, 'attended asks carry the no-countdown sentinel')
   send(9, 'approvals/resolve', { runId: askEvent.payload.runId, callId: askEvent.payload.callId, decision: 'allow' })
   const allowResolved = await waitFor(9)
   assert.equal(allowResolved.error, undefined)
@@ -248,21 +246,26 @@ try {
   assert.ok(userDeniedResult, 'user-denied call recorded')
   assert.equal(userDeniedResult.settlement, 'denied')
 
-  // An ask nobody resolves expires into a denial at the ask's own timeout.
-  // The run carries its own HITL timeout so the expiry is exercised in
-  // seconds instead of racing the 90s interactive default — the wait below
-  // used to be shorter than the timeout it was waiting for, so this test could
-  // only ever pass by accident.
-  submitTurn(12, 'pack-ask-timeout', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: false }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } }, ['messaging'], {
+  // Attended asks ignore the old approval budget and stay pending until the
+  // user explicitly chooses. Cancellation remains a separate run lifecycle.
+  submitTurn(12, 'pack-ask-wait', '送出訊息', { provider: 'loopback', model: 'smoke-model', thinkingLevel: 'off', compaction: 'manual', approvalMode: 'auto', unattended: false }, sessionId, { tool: 'message_send', args: { chatId: 'ops', text: 'hello' } }, ['messaging'], {
     memoryEnabled: false, memoryWriteEnabled: false, referenceChatHistory: false, temporary: false,
     approvalTimeoutMs: 1_500,
   })
-  await waitForEvent('host/approval-requested', (payload) => payload.runId === 'pack-ask-timeout')
-  const timeoutSettled = await waitFor(12)
-  assert.equal(timeoutSettled.result.settlement, 'answered', 'an expired ask does not hang the run forever')
-  const timeoutResult = timeoutSettled.result.record.entries.find((entry: { kind: string; tool?: string; settlement?: string }) => entry.kind === 'tool-result' && entry.tool === 'message_send')
-  assert.ok(timeoutResult, 'timed-out ask still lands in the record')
-  assert.equal(timeoutResult.settlement, 'denied')
+  const waitingAsk = await waitForEvent('host/approval-requested', (payload) => payload.runId === 'pack-ask-wait')
+  assert.equal(waitingAsk.payload.timeoutMs, 0, 'zero announces an attended ask with no countdown')
+  await new Promise((resolve) => setTimeout(resolve, 1_800))
+  assert.equal(messages.some((message) => message.id === 12), false, 'the old approval budget cannot settle an attended ask')
+  send(13, 'approvals/resolve', { runId: waitingAsk.payload.runId, callId: waitingAsk.payload.callId, decision: 'deny' })
+  await waitFor(13)
+  const resolvedEvent = await waitForEvent(
+    'host/approval-resolved',
+    (payload) => payload.runId === 'pack-ask-wait' && payload.callId === waitingAsk.payload.callId,
+  )
+  assert.equal(resolvedEvent.payload.decision, 'deny', 'Host projects settlement so the renderer can remove stale UI')
+  const deniedAfterChoice = await waitFor(12)
+  const waitedDenyResult = deniedAfterChoice.result.record.entries.find((entry: { kind: string; tool?: string; settlement?: string }) => entry.kind === 'tool-result' && entry.tool === 'message_send')
+  assert.equal(waitedDenyResult?.settlement, 'denied')
 
   console.log('Pi Host extension-tool seam owns http_fetch: catalog, execution, approvals across modes, and record coordinates all hold')
 } finally {

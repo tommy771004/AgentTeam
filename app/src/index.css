@@ -1035,24 +1035,19 @@ html:not([data-sidebar-solid='true']) .sidebar-panel::before {
   transition: background 120ms ease, color 120ms ease;
 }
 .agent-result-action:hover { background: var(--color-hover-2); }
-.agent-decision-card {
-  width: min(32rem, calc(100vw - 2rem));
-  max-height: min(680px, calc(100vh - 32px));
-  margin: auto;
-  border: 0;
-  padding: 0;
-  box-shadow: none;
+.agent-decision-panel {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--color-orange) 34%, var(--color-line));
+  border-left-width: 3px;
+  background: var(--color-surface-container-low);
 }
-.agent-decision-card::backdrop {
-  background: color-mix(in srgb, black 48%, transparent);
-  backdrop-filter: blur(12px);
-}
-.agent-decision-header { background: var(--color-surface-container-low); }
+.agent-decision-header { background: transparent; }
 .agent-decision-body {
-  max-height: min(460px, calc(100vh - 230px));
+  max-height: min(360px, calc(100vh - 300px));
   overflow-y: auto;
 }
-.agent-decision-card:focus-visible,
+.agent-decision-footer { border-top: 1px solid var(--color-line); }
+.agent-decision-panel:focus-visible,
 .working-state-summary:focus-visible,
 .working-state-evidence > summary:focus-visible,
 .working-state-constraints > summary:focus-visible {
@@ -1466,9 +1461,7 @@ html[data-theme='light'] .agent-run-queue-header:hover { background: rgba(15, 23
 .agent-summary-section,
 .agent-summary-diff { border-color: var(--color-line); }
 
-.agent-decision-card {
-  background: var(--color-surface);
-}
+.agent-decision-panel { background: var(--color-surface-container-low); }
 .agent-approval-session:hover { background: var(--color-hover-2); }
 .agent-question-option:hover { background: var(--color-hover-2); }
 .agent-question-option[data-selected='true'] { color: var(--color-ink); }
@@ -1511,7 +1504,7 @@ html[data-theme='light'] .agent-composer {
 html[data-theme='light'] .agent-process-chip,
 html[data-theme='light'] .agent-file-chip,
 html[data-theme='light'] .agent-summary-card,
-html[data-theme='light'] .agent-decision-card { background: var(--color-surface); }
+html[data-theme='light'] .agent-decision-panel { background: var(--color-surface-container-low); }
 
 .agent-streaming-body .markdown-body > :not(.agent-code-block) { animation: stream-in 420ms cubic-bezier(0.22, 0.61, 0.25, 1) both; }
 

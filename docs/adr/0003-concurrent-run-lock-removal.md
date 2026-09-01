@@ -1,5 +1,7 @@
 # Break the global single-run lock for independent conversation execution
 
+> ADR-0055 supersedes this record's single-modal/FIFO presentation choice. Run/thread identity and targeted cancellation remain authoritative.
+
 **Status**: accepted · **implemented** (2026-07-14; docs aligned in Phase 6 of `TASK_AGENT_WORKFLOW_INTEGRATION_PLAN_2026-07-14.md`)
 
 ## Product rule (current)

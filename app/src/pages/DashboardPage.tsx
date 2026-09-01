@@ -282,8 +282,8 @@ export function DashboardPage() {
                 control={<Mono className="text-error">{String(hitlStats.denied)}</Mono>}
               />
               <SettingsRow
-                title="逾時自動拒絕"
-                description="無人值守 45s / 互動 90s"
+                title="無人值守逾時拒絕"
+                description="互動任務會等待使用者選擇"
                 control={<Mono className="text-amber-300">{String(hitlStats.timedOut)}</Mono>}
               />
               {hitlStats.recentTimeouts.length > 0 && (

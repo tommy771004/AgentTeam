@@ -61,6 +61,7 @@ async function resolveReattachedApproval(
       args: pending.args || {},
       reason: pending.reason,
       timeoutMs: pending.timeoutMs,
+      callId: pending.callId,
     })
     await window.subagents?.piHost?.approvals?.resolve?.({
       runId: pending.runId,
@@ -69,7 +70,10 @@ async function resolveReattachedApproval(
       ...(outcome.answer ? { answer: outcome.answer } : {}),
     })
   } catch {
-    // A transport failure leaves the Host's own approval timeout in charge.
+    // The Host remains authoritative. A later attachment reconciliation can
+    // present the same unresolved request again.
+  } finally {
+    reattachedApprovalKeys.delete(`${pending.runId}:${pending.callId}`)
   }
 }
 

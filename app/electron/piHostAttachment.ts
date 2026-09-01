@@ -179,7 +179,7 @@ export function normalizePiHostPendingApproval(value: unknown): PiHostPendingApp
   const tool = boundedString(candidate.tool)
   const callId = boundedString(candidate.callId)
   const timeoutMs = typeof candidate.timeoutMs === 'number' && Number.isFinite(candidate.timeoutMs)
-    ? Math.max(1, Math.floor(candidate.timeoutMs))
+    ? Math.max(0, Math.floor(candidate.timeoutMs))
     : undefined
   if (!runId || !sessionId || !tool || !callId || timeoutMs === undefined) return undefined
   const args = boundedApprovalArgs(candidate.args)

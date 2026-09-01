@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react'
 import { Icon } from './Icon'
 import { DecisionCard } from './DecisionCard'
 import { canSubmitDecision, nextSelectedOptions, submitsChoiceImmediately } from './decisionPresentation'
-import { usePermissionAskStore } from '../store/permissionAskStore'
+import {
+  permissionAsksForThread,
+  unscopedPermissionAsks,
+  usePermissionAskStore,
+} from '../store/permissionAskStore'
 import { useAgentStore } from '../store/agentStore'
 
 const DECISION_COPY = {
@@ -13,27 +17,35 @@ const DECISION_COPY = {
 /**
  * Ask-permission HITL.
  *
- * ask_user-shaped asks (hitl) surface the question itself: options from the
+ * ask_user-shaped asks (hitl) surface the question inline: options from the
  * tool call become the decision surface (single-select sends on click,
  * multi-select collects picks until 送出回覆), and a freeform box rides along
  * whenever the tool allows it. Every other tool keeps the plain 核准/拒絕 UI.
  */
-export function PermissionAskModal() {
-  const current = usePermissionAskStore((s) => s.current)
-  const queue = usePermissionAskStore((s) => s.queue)
+type PermissionAskPanelProps = {
+  threadId?: string
+  unscoped?: boolean
+}
+
+export function PermissionAskPanel({ threadId, unscoped = false }: PermissionAskPanelProps) {
+  const current = usePermissionAskStore((state) => {
+    if (unscoped) return unscopedPermissionAsks(state)[0] || null
+    return threadId ? permissionAsksForThread(state, threadId)[0] || null : null
+  })
+  const pendingBehind = usePermissionAskStore((state) => {
+    const requests = unscoped
+      ? unscopedPermissionAsks(state)
+      : threadId
+        ? permissionAsksForThread(state, threadId)
+        : []
+    return Math.max(0, requests.length - 1)
+  })
   const resolve = usePermissionAskStore((s) => s.resolve)
   const getSessionAllow = usePermissionAskStore((s) => s.getSessionAllow)
   const setSessionAllow = usePermissionAskStore((s) => s.setSessionAllow)
   const hasManualIntervention = useAgentStore((s) =>
-    Object.values(s.runStates).some((state) => state.intervention?.active),
+    Boolean(current?.runId && s.runStates[current.runId]?.intervention?.active),
   )
-  /**
-   * 這個倒數以前只在 store 變動時重算，所以數字實際上是凍結的 —— 一個講「45s 後
-   * 自動拒絕」卻不會動的安全提示會誤導人。改成每秒 tick，只是讓顯示誠實，
-   * 逾時與自動拒絕的機制完全沒有改變。
-   */
-  const expiresAt = current?.expiresAt ?? 0
-  const [remainSec, setRemainSec] = useState(0)
   const [selected, setSelected] = useState<string[]>([])
   const [freeform, setFreeform] = useState('')
 
@@ -43,19 +55,10 @@ export function PermissionAskModal() {
     setFreeform('')
   }, [requestKey])
 
-  useEffect(() => {
-    if (!expiresAt) return
-    const update = () => setRemainSec(Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)))
-    update()
-    const timer = setInterval(update, 1000)
-    return () => clearInterval(timer)
-  }, [expiresAt])
-
-  // Keep the decision surface singular. A safety intervention has priority;
-  // queued tool permission asks remain in their store and appear afterwards.
+  // A run-scoped safety intervention has priority. Other conversations remain
+  // independently actionable when the user switches to them.
   if (!current || hasManualIntervention) return null
 
-  const pendingBehind = queue.length
   const sessionAllow = getSessionAllow(current.threadId)
 
   const isQuestion = current.hitl === true
@@ -93,17 +96,18 @@ export function PermissionAskModal() {
     else resolve(current.id, 'allow')
   }
 
-  const meta = `逾時 ${remainSec}s 自動拒絕${pendingBehind > 0 ? ` · 佇列尚有 ${pendingBehind} 筆` : ''}`
+  const meta = pendingBehind > 0 ? `另有 ${pendingBehind} 筆待處理` : undefined
 
   return (
     <DecisionCard
       key={current.id}
       kind={decisionKind}
-      titleId="permission-title"
+      titleId={`${current.id}-title`}
       title={decisionCopy.title}
       reason={current.reason}
       meta={meta}
       runId={current.runId}
+      threadId={current.threadId}
       denyLabel={decisionCopy.deny}
       onDeny={() => resolve(current.id, 'deny')}
       approveLabel={showPrimary ? decisionCopy.primary : undefined}

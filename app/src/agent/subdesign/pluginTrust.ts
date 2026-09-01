@@ -135,9 +135,9 @@ export type CapabilityGrantOutcome = {
 }
 
 /**
- * Route each still-denied capability through the existing HITL ask. A timeout
- * auto-denies (the store's own policy), so an unattended run fails closed
- * rather than inheriting authority it was never given.
+ * Route each still-denied capability through the existing HITL ask. Attended
+ * requests wait for an explicit decision; unattended work keeps a bounded,
+ * fail-closed timeout rather than inheriting authority it was never given.
  */
 export async function requestCapabilityGrants(input: {
   snapshot: PluginResolvedSnapshot
@@ -149,7 +149,7 @@ export async function requestCapabilityGrants(input: {
   const pending = deniedCapabilities(input.snapshot, input.scope)
   if (!pending.length) return { snapshot: input.snapshot, granted: [], denied: [] }
 
-  const timeoutMs = input.hitlTimeoutMs ?? (input.unattended ? 45_000 : 90_000)
+  const timeoutMs = input.unattended ? (input.hitlTimeoutMs ?? 45_000) : undefined
   const ask = usePermissionAskStore.getState().requestAsk
   const granted: string[] = []
   const denied: string[] = []
@@ -166,7 +166,7 @@ export async function requestCapabilityGrants(input: {
         source: input.snapshot.source.sourcePath,
       },
       reason: `Plugin「${input.snapshot.pluginId}」要求 ${capability} 權限，預設不授權。`,
-      timeoutMs,
+      ...(timeoutMs ? { timeoutMs } : {}),
     })
     if (decision.decision === 'allow') granted.push(capability)
     else denied.push(capability)

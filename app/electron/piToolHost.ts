@@ -440,18 +440,13 @@ export function setPiApprovalBridge(bridge: PiApprovalBridge, audit?: (record: P
   turnAudit = audit
 }
 
-/** Interactive asks wait this long before auto-denying (matches toolGuard's 90s). */
-export const PI_INTERACTIVE_APPROVAL_TIMEOUT_MS = 90_000
-
-function piApprovalTimeoutMs(): number {
-  const configured = Number(process.env.SUBAGENTS_PI_APPROVAL_TIMEOUT_MS)
-  return Number.isFinite(configured) && configured > 0 ? configured : PI_INTERACTIVE_APPROVAL_TIMEOUT_MS
-}
+/** Zero is the wire-level sentinel for an attended ask that waits for the user. */
+export const PI_INTERACTIVE_APPROVAL_TIMEOUT_MS = 0
 
 const pendingApprovals = new Map<string, {
   request: PiApprovalRequest
   resolve: (resolution: PiApprovalResolution) => void
-  timer: NodeJS.Timeout
+  timer?: NodeJS.Timeout
 }>()
 
 function approvalKey(runId: string, callId: string): string {
@@ -469,7 +464,7 @@ export function resolvePiApproval(params: {
   const callId = typeof params.callId === 'string' ? params.callId : ''
   const pending = pendingApprovals.get(approvalKey(runId, callId))
   if (!pending) return false
-  clearTimeout(pending.timer)
+  if (pending.timer) clearTimeout(pending.timer)
   pendingApprovals.delete(approvalKey(runId, callId))
   let resolution: PiApprovalResolution
   if (params.decision === 'allow') {
@@ -493,7 +488,7 @@ export function cancelPiApprovalsForRun(runId: string): number {
   let cancelled = 0
   for (const [key, pending] of [...pendingApprovals.entries()]) {
     if (!key.startsWith(`${runId}::`)) continue
-    clearTimeout(pending.timer)
+    if (pending.timer) clearTimeout(pending.timer)
     pendingApprovals.delete(key)
     cancelled += 1
     const resolution = { decision: 'cancel' as const, reason: 'Approval cancelled with its run' }
@@ -512,19 +507,13 @@ export function cancelPiApprovalsForRun(runId: string): number {
  */
 export async function requestPiToolApproval(request: Omit<PiApprovalRequest, 'timeoutMs'> & { timeoutMs?: number; unattended?: boolean }): Promise<PiApprovalResolution> {
   if (request.unattended) {
-    return { decision: 'deny', reason: 'Unattended approval denied after timeout' }
+    return { decision: 'deny', reason: 'Unattended approval denied' }
   }
-  const timeoutMs = request.timeoutMs ?? piApprovalTimeoutMs()
+  const timeoutMs = PI_INTERACTIVE_APPROVAL_TIMEOUT_MS
   const pendingRequest: PiApprovalRequest = { ...request, timeoutMs }
   return new Promise<PiApprovalResolution>((resolvePromise) => {
     const key = approvalKey(request.runId, request.callId)
-    const timer = setTimeout(() => {
-      pendingApprovals.delete(key)
-      const resolution = { decision: 'timeout' as const, reason: 'Approval timed out' }
-      resolvePromise(resolution)
-      approvalBridge?.resolved?.(pendingRequest, resolution)
-    }, timeoutMs)
-    pendingApprovals.set(key, { request: pendingRequest, resolve: resolvePromise, timer })
+    pendingApprovals.set(key, { request: pendingRequest, resolve: resolvePromise })
     approvalBridge?.request(pendingRequest)
   })
 }

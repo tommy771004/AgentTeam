@@ -11,6 +11,7 @@ import { ExecutionStepsProgress } from '../components/ExecutionStepsProgress'
 import { WorkspacePanelSession } from '../components/WorkspacePanelSession'
 import { RunProcessFeed } from '../components/RunProcessFeed'
 import { ComposerQuickActions } from '../components/ComposerQuickActions'
+import { PermissionAskPanel } from '../components/PermissionAskModal'
 import { usePermissionAskStore } from '../store/permissionAskStore'
 import { IDLE_AGENT_STATE, useAgentStore } from '../store/agentStore'
 import { useRunActivityStore } from '../store/runActivityStore'
@@ -896,6 +897,7 @@ export function ProtocolsPage() {
                   <ExecutionStepsProgress tasks={activity?.tasks.length ? activity.tasks : thread?.runPlan || []} />
                 ) : null}
               </div>
+              {activeId ? <PermissionAskPanel threadId={activeId} /> : null}
               <CommandComposer
                 scopeKey={activeId || 'no-thread'}
                 value={activeId ? threadDraft : draftInput}
@@ -1036,7 +1038,7 @@ export function ProtocolsPage() {
                       <button
                         type="button"
                         onClick={() => setSessionAllow(false, activeId || undefined)}
-                        title="本次 session 其餘 ask 一律允許中 — 點擊取消"
+                        title="本次 session 其餘 ask 一律允許中，點擊取消"
                         className="inline-flex items-center gap-1 text-[11px] text-amber-300/90 hover:text-amber-200"
                       >
                         <Icon name="verified_user" size={14} />

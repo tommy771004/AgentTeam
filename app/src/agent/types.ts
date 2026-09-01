@@ -275,12 +275,10 @@ export interface RunContextPolicy {
    */
   gitPolicy?: GitCommandPolicy
   /**
-   * How long a HITL ask waits before it expires, for THIS run.
+   * How long an unattended HITL ask waits before it expires, for THIS run.
    *
-   * The Host otherwise falls back to 45s unattended / 90s interactive. The
-   * renderer already resolved a per-run value (`hitlTimeoutMs`) but it only
-   * ever reached the browser loop, so on the Pi Host path the policy was not
-   * actually configurable — CLAUDE.md describes the adapter handing it over.
+   * Attended asks ignore this budget and wait for an explicit user decision.
+   * The value remains admission-frozen for unattended compatibility paths.
    */
   approvalTimeoutMs?: number
 }
@@ -366,10 +364,10 @@ export interface RuntimeOverrides {
   contextPolicySnapshot?: RunContextPolicy
   /**
    * Unattended run (scheduler / webhook / telegram).
-   * HITL ask & safety intervention auto-deny on timeout so an unattended run cannot hang overnight.
+   * HITL asks and safety interventions fail closed so an unattended run cannot hang overnight.
    */
   unattended?: boolean
-  /** Override HITL timeout (ms). Default: interactive 90s · unattended 45s */
+  /** Override the unattended HITL timeout (ms). Attended asks have no deadline. */
   hitlTimeoutMs?: number
   /**
    * Preload deferred capability ids at start of each step

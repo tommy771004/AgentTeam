@@ -16,9 +16,11 @@ export type PermissionAskRequest = {
   multiSelect?: boolean
   allowFreeform?: boolean
   createdAt: string
-  /** Auto-deny after this many ms (interactive default 90s; unattended shorter) */
-  timeoutMs: number
-  expiresAt: number
+  /** Optional fail-closed budget. Interactive asks omit it and wait for a decision. */
+  timeoutMs?: number
+  expiresAt?: number
+  /** Host call identity used to reconcile cancellation and renderer reattachment. */
+  callId?: string
 }
 
 export type PermissionAskStats = {
@@ -34,7 +36,7 @@ export type PermissionAskOutcome = { decision: 'allow' | 'deny'; answer?: string
 type Resolver = (outcome: PermissionAskOutcome) => void
 
 interface PermissionAskStore {
-  /** Head of FIFO queue (shown in modal) */
+  /** Oldest pending ask across all conversations. */
   current: PermissionAskRequest | null
   /** Pending asks behind current */
   queue: PermissionAskRequest[]
@@ -59,7 +61,7 @@ interface PermissionAskStore {
     timedOut: number
     toolsTimedOut?: string[]
   }
-  /** Promise that resolves when user decides or timeout */
+  /** Promise that resolves when the user decides, the run ends, or an explicit timeout fires. */
   requestAsk: (input: {
     threadId?: string
     runId?: string
@@ -68,9 +70,11 @@ interface PermissionAskStore {
     reason?: string
     timeoutMs?: number
     hitl?: boolean
+    callId?: string
   }) => Promise<PermissionAskOutcome>
   /** The ask_user answer rides back inside the resolution as the tool result. */
   resolve: (requestId: string, decision: 'allow' | 'deny', answer?: string) => void
+  resolveHostRequest: (runId: string, callId: string, decision: 'allow' | 'deny' | 'timeout' | 'cancel') => void
   cancelRun: (runId: string) => void
 }
 
@@ -103,6 +107,23 @@ function promote(get: () => PermissionAskStore, set: (p: Partial<PermissionAskSt
 
 const GLOBAL_SCOPE = '__global__'
 export const MAX_RUN_HITL_AUDITS = 100
+
+type PermissionAskCollection = Pick<PermissionAskStore, 'current' | 'queue'>
+
+export function permissionAsksForThread(
+  state: PermissionAskCollection,
+  threadId: string,
+): PermissionAskRequest[] {
+  return [state.current, ...state.queue].filter(
+    (request): request is PermissionAskRequest => Boolean(request && request.threadId === threadId),
+  )
+}
+
+export function unscopedPermissionAsks(state: PermissionAskCollection): PermissionAskRequest[] {
+  return [state.current, ...state.queue].filter(
+    (request): request is PermissionAskRequest => Boolean(request && !request.threadId),
+  )
+}
 
 function trimRecord<T>(record: Record<string, T>, max: number): Record<string, T> {
   const keys = Object.keys(record)
@@ -207,7 +228,7 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
     }
   },
 
-  requestAsk: ({ threadId, runId, tool, args, reason, timeoutMs, hitl }) => {
+  requestAsk: ({ threadId, runId, tool, args, reason, timeoutMs, hitl, callId }) => {
     // ask_user is human-in-the-loop by definition: it always pops, even when
     // the session is set to auto-approve. Deriving the flag from the tool name
     // keeps external callers honest without trusting a caller-passed flag.
@@ -225,11 +246,14 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
       : []
 
     const id = `ask_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
-    const ms = Math.max(5_000, timeoutMs ?? 90_000)
+    const ms = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? Math.max(5_000, timeoutMs)
+      : undefined
     const req: PermissionAskRequest = {
       id,
       threadId: threadId?.trim() || undefined,
       runId: runId?.trim() || undefined,
+      callId: callId?.trim() || undefined,
       tool,
       argsJson: JSON.stringify(args, null, 2),
       reason: reason || `工具「${tool}」需要核准後才能執行`,
@@ -241,30 +265,31 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
         allowFreeform: args.allowFreeform !== false,
       } : {}),
       createdAt: new Date().toISOString(),
-      timeoutMs: ms,
-      expiresAt: Date.now() + ms,
+      ...(ms ? { timeoutMs: ms, expiresAt: Date.now() + ms } : {}),
     }
 
     return new Promise<PermissionAskOutcome>((resolve) => {
       resolvers.set(id, resolve)
-      timers.set(
-        id,
-        setTimeout(() => {
-          const r = resolvers.get(id)
-          if (!r) return
-          resolvers.delete(id)
-          clearTimer(id)
-          const state = get()
-          if (state.current?.id === id) {
-            set({ current: null })
-            promote(get, set)
-          } else {
-            set({ queue: state.queue.filter((q) => q.id !== id) })
-          }
-          bumpTimeout(get, set, tool, req)
-          r({ decision: 'deny' })
-        }, ms),
-      )
+      if (ms) {
+        timers.set(
+          id,
+          setTimeout(() => {
+            const r = resolvers.get(id)
+            if (!r) return
+            resolvers.delete(id)
+            clearTimer(id)
+            const state = get()
+            if (state.current?.id === id) {
+              set({ current: null })
+              promote(get, set)
+            } else {
+              set({ queue: state.queue.filter((q) => q.id !== id) })
+            }
+            bumpTimeout(get, set, tool, req)
+            r({ decision: 'deny' })
+          }, ms),
+        )
+      }
 
       const state = get()
       if (!state.current) {
@@ -276,17 +301,32 @@ export const usePermissionAskStore = create<PermissionAskStore>((set, get) => ({
   },
 
   resolve: (requestId, decision, answer) => {
-    const cur = get().current
-    if (!cur || cur.id !== requestId) return
+    const state = get()
+    const cur = state.current?.id === requestId
+      ? state.current
+      : state.queue.find((request) => request.id === requestId)
+    if (!cur) return
     const r = resolvers.get(requestId)
     resolvers.delete(requestId)
     clearTimer(requestId)
-    set({ current: null })
-    promote(get, set)
+    if (state.current?.id === requestId) {
+      set({ current: null })
+      promote(get, set)
+    } else {
+      set({ queue: state.queue.filter((request) => request.id !== requestId) })
+    }
     if (decision === 'allow') bumpAllow(get, set, cur)
     else bumpDeny(get, set, cur)
     const text = answer?.trim()
     r?.({ decision, ...(decision === 'allow' && text ? { answer: text } : {}) })
+  },
+
+  resolveHostRequest: (runId, callId, decision) => {
+    const request = [get().current, ...get().queue].find(
+      (item) => item?.runId === runId && item.callId === callId,
+    )
+    if (!request) return
+    get().resolve(request.id, decision === 'allow' ? 'allow' : 'deny')
   },
 
   cancelRun: (runId) => {

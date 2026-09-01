@@ -21,7 +21,6 @@ import {
   startBackgroundJobSubscription,
   useGatewayStore,
 } from './store/gatewayStore'
-import { PermissionAskModal } from './components/PermissionAskModal'
 import type { ScheduledJob } from './agent/types'
 import { createScheduleTriggerSnapshot } from './agent/scheduler'
 import { scheduleSkillCurator } from './agent/hermes/curator'
@@ -42,6 +41,7 @@ import { presentReattachedApproval, reattachPiHostRuns } from './agent/activeRun
 import { usePiHostEventStore } from './store/piHostEventStore'
 import { useRunActivityStore } from './store/runActivityStore'
 import { useWorkingStateProjectionStore } from './store/workingStateProjectionStore'
+import { usePermissionAskStore } from './store/permissionAskStore'
 import { isElectronPiProduction } from './agent/piProduction'
 import { startHostAgentQueuePump } from './agent/hostAgentQueuePump.ts'
 import {
@@ -168,8 +168,19 @@ function PiHostEventBootstrap() {
         if (payload) {
           presentReattachedApproval({
             ...payload,
-            timeoutMs: payload.timeoutMs || 90_000,
+            timeoutMs: payload.timeoutMs ?? 0,
           }, payload.threadId)
+        }
+        return
+      }
+      if ((event as { event?: string }).event === 'host/approval-resolved') {
+        const payload = (event as { payload?: { runId?: string; callId?: string; decision?: 'allow' | 'deny' | 'timeout' | 'cancel' } }).payload
+        if (payload?.runId && payload.callId && payload.decision) {
+          usePermissionAskStore.getState().resolveHostRequest(
+            payload.runId,
+            payload.callId,
+            payload.decision,
+          )
         }
         return
       }
@@ -1276,7 +1287,6 @@ export default function App() {
         <GatewayBootstrap />
         <PluginTokenRefreshBootstrap />
         <PluginProjectRebindBootstrap />
-        <PermissionAskModal />
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<ProtocolsPage />} />

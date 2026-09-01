@@ -1080,7 +1080,7 @@ await test('runActivityStore isolates concurrent streams and bounds terminal dig
   activity.getState().clear()
 })
 
-await test('permission asks keep FIFO source identity and request-scoped resolution', async () => {
+await test('permission asks stay thread-scoped and can resolve without global head-of-line blocking', async () => {
   const asks = usePermissionAskStore
   asks.getState().setSessionAllow(false)
   asks.getState().resetStats()
@@ -1104,12 +1104,24 @@ await test('permission asks keep FIFO source identity and request-scoped resolut
   assert.equal(asks.getState().queue[0]?.runId, 'smoke-run-b')
   asks.getState().resolve('stale-request', 'deny')
   assert.equal(asks.getState().current?.runId, 'smoke-run-a')
+  const queued = asks.getState().queue[0]
+  asks.getState().resolve(queued!.id, 'deny')
+  assert.equal((await second).decision, 'deny')
+  assert.equal(asks.getState().current?.runId, 'smoke-run-a')
   asks.getState().resolve(head!.id, 'allow')
   assert.equal((await first).decision, 'allow')
-  const next = asks.getState().current
-  assert.equal(next?.runId, 'smoke-run-b')
-  asks.getState().resolve(next!.id, 'deny')
-  assert.equal((await second).decision, 'deny')
+
+  const waiting = asks.getState().requestAsk({
+    threadId: 'smoke-thread-waiting',
+    runId: 'smoke-run-waiting',
+    tool: 'ask_user',
+    args: { question: '等待明確回覆' },
+  })
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  assert.equal(asks.getState().current?.runId, 'smoke-run-waiting')
+  assert.equal(asks.getState().current?.expiresAt, undefined)
+  asks.getState().resolve(asks.getState().current!.id, 'allow', '繼續')
+  assert.deepEqual(await waiting, { decision: 'allow', answer: '繼續' })
   for (let i = 0; i < 120; i++) asks.getState().beginRunAudit(`smoke-audit-${i}`)
   assert.ok(Object.keys(asks.getState().runStatsByRun).length <= 100)
   asks.getState().resetStats()

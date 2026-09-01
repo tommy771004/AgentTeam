@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Icon } from './Icon'
+import { PermissionAskPanel } from './PermissionAskModal'
 import { FloatingConsole } from './FloatingConsole'
 import { useWorkspaceUiStore } from '../store/workspaceUiStore'
 import { useThreadStore } from '../store/threadStore'
@@ -285,6 +286,9 @@ export function Layout() {
         <main className="flex-1 min-h-0 overflow-hidden">
           <Outlet />
         </main>
+        <div className="shrink-0 px-3">
+          <PermissionAskPanel unscoped />
+        </div>
         <footer
           className="app-status-bar no-drag flex h-7 shrink-0 items-center justify-end border-t border-line bg-surface/90"
           aria-label="應用程式狀態"
