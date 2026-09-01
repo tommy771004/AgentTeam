@@ -60,6 +60,7 @@ import {
 import { v4 as uuid } from 'uuid'
 import {
   getJournalEntry,
+  markRunAppFinalized,
   recordRunAdmitted,
   recordRunStarted,
   recordRunTerminal,
@@ -677,6 +678,19 @@ async function persistTerminalRunRecords(input: FinalizeTaskRunInput, agent: Age
   await recordPermanentUsage(input, agent, status)
 }
 
+function terminalJournalSettlement(input: FinalizeTaskRunInput, agent: AgentState) {
+  return {
+    ...orchestrationFromAgent(agent),
+    executionSettlement: agent.executionSettlement,
+    goalVerdict: agent.goalVerdict,
+    goalContractDigest: agent.goalContractDigest,
+    acceptanceDigest: agent.acceptanceDigest,
+    appFinalization: input.dispatchResult?.executionKind === 'loop' ? 'pending' as const : 'not-applicable' as const,
+    stopReason: agent.stopReason || input.dispatchResult?.stopReason || input.dispatchResult?.error || agent.haltReason || agent.interruptReason,
+    interruptReason: agent.interruptReason,
+  }
+}
+
 /**
  * Per-run finalization claim. The first entry owns the whole terminal
  * sequence; every later entry — the outer catch in `coordinateTaskRun` above
@@ -803,6 +817,7 @@ async function completePiHostFinalization(
       },
     )
     if (!complete?.completed) return
+    markRunAppFinalized(runId)
     piFinalizationAckable.add(runId)
     await window.subagents?.piHost?.runs?.ack?.(runId)
   } catch {
@@ -1336,10 +1351,7 @@ async function runFinalizationSequence(
       resultWrittenToThread: true,
       rendererPresent: rendererPresent(),
     },
-    settlement: {
-      ...orchestrationFromAgent(finalAgent),
-      interruptReason: finalAgent.interruptReason,
-    },
+    settlement: terminalJournalSettlement(input, finalAgent),
   })
 
   try {
@@ -1470,6 +1482,11 @@ export async function finalizeRecoveredPiHostRun(input: {
         path: 'builtin',
         executionKind: 'loop',
         status,
+        executionSettlement: input.agent.executionSettlement,
+        goalVerdict: input.agent.goalVerdict,
+        goalContractDigest: input.agent.goalContractDigest,
+        acceptanceDigest: input.agent.acceptanceDigest,
+        stopReason: input.agent.stopReason,
         orchestration: orchestrationFromAgent(input.agent),
         ...(input.agent.result ? { result: input.agent.result } : {}),
         ...(status === 'failed' && input.agent.result ? { error: input.agent.result } : {}),

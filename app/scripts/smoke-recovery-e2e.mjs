@@ -50,7 +50,7 @@ async function seedInterruptedState(page, cycle, queuedSchedule = false) {
     )
     const at = new Date().toISOString()
     localStorage.setItem(
-      'subagents.runJournal.v1',
+      'subagents.runJournal.v2',
       JSON.stringify({
         version: 1,
         updatedAt: at,
@@ -170,7 +170,7 @@ async function runCycle(mode, queuedSchedule = false) {
     try {
       await page.waitForFunction(({ suffix, queuedSchedule }) => {
         try {
-          const journal = JSON.parse(localStorage.getItem('subagents.runJournal.v1') || '{}')
+          const journal = JSON.parse(localStorage.getItem('subagents.runJournal.v2') || '{}')
           if (queuedSchedule) {
             const queueEntry = (journal.entries || []).find(
               (entry) => entry.kind === 'queue' && entry.id === `real-queue-${suffix}`,
@@ -195,14 +195,14 @@ async function runCycle(mode, queuedSchedule = false) {
       }, { suffix: mode, queuedSchedule }, { timeout: 30_000 })
     } catch (error) {
       const debug = await page.evaluate(() => ({
-        journal: localStorage.getItem('subagents.runJournal.v1'),
+        journal: localStorage.getItem('subagents.runJournal.v2'),
         recovery: localStorage.getItem('subagents.recoveryReports.v1'),
         threads: localStorage.getItem('subagents.threads.v5'),
       })).catch(() => ({}))
       throw new Error(`${error instanceof Error ? error.message : String(error)} · recovery-debug=${JSON.stringify(debug)}`)
     }
     const evidence = await page.evaluate(async (suffix) => {
-      const journal = JSON.parse(localStorage.getItem('subagents.runJournal.v1') || '{}')
+      const journal = JSON.parse(localStorage.getItem('subagents.runJournal.v2') || '{}')
       const reports = JSON.parse(localStorage.getItem('subagents.recoveryReports.v1') || '[]')
       const jobs = (await window.subagents?.scheduler?.list?.()) || []
       const entries = (journal.entries || []).filter((entry) => entry.id.endsWith(`-${suffix}`))

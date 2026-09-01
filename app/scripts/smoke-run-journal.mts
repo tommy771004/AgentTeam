@@ -129,15 +129,15 @@ assert.equal(getJournalEntry('queue', 'queue-safe')?.status, 'success')
 // A corrupt primary is restored from the last-known-good journal backup.
 recordRunAdmitted({ runId: 'run-backup', objective: 'backup' })
 recordRunStarted({ runId: 'run-backup', threadId: 'thread-backup' })
-memory.setItem('subagents.runJournal.v1', '{broken')
+memory.setItem('subagents.runJournal.v2', '{broken')
 assert.equal(getJournalEntry('run', 'run-backup')?.status, 'admitted')
 assert.ok(consumeRecoveryReports().some((entry) => entry.items.some((item) => item.action === 'restored')))
 
 // If both copies are corrupt, the invalid payload is quarantined and startup
 // still returns a usable empty state rather than silently pretending history
 // never existed.
-memory.setItem('subagents.runJournal.v1', '{primary-broken')
-memory.setItem('subagents.runJournal.v1.backup', '{backup-broken')
+memory.setItem('subagents.runJournal.v2', '{primary-broken')
+memory.setItem('subagents.runJournal.v2.backup', '{backup-broken')
 assert.equal(getJournalEntry('run', 'missing') ?? null, null)
 const quarantineReports = consumeRecoveryReports()
 assert.ok(quarantineReports.some((entry) => entry.items.some((item) => item.action === 'quarantined')))
@@ -147,9 +147,9 @@ assert.ok(quarantineReports.some((entry) => entry.items.some((item) => item.acti
 resetRunJournalForTests()
 recordRunAdmitted({ runId: 'run-semantic', objective: 'semantic backup' })
 recordRunStarted({ runId: 'run-semantic', threadId: 'thread-semantic' })
-const validBackup = memory.getItem('subagents.runJournal.v1')
+const validBackup = memory.getItem('subagents.runJournal.v2')
 memory.setItem(
-  'subagents.runJournal.v1',
+  'subagents.runJournal.v2',
   JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), entries: [{ id: 'bad', kind: 'run', status: 'unknown' }] }),
 )
 assert.equal(getJournalEntry('run', 'run-semantic')?.status, 'admitted')
@@ -167,7 +167,7 @@ assert.equal('secret' in safeEntry, false)
 for (let i = 0; i < 305; i += 1) {
   recordRunAdmitted({ runId: `active-${i}`, objective: `active ${i}` })
 }
-const retained = JSON.parse(memory.getItem('subagents.runJournal.v1') || '{}')
+const retained = JSON.parse(memory.getItem('subagents.runJournal.v2') || '{}')
 assert.ok(retained.entries.length <= 300)
 assert.equal(getJournalEntry('run', 'active-304')?.status, 'admitted')
 

@@ -65,6 +65,9 @@ export type JournalEntry = {
   turnSettlement?: PiTurnSettlement
   executionSettlement?: RunExecutionSettlement
   goalVerdict?: GoalVerdict
+  goalContractDigest?: string
+  acceptanceDigest?: string
+  stopReason?: string
   /** Conservative read model for legacy entries; never canonical Goal truth. */
   goalProjection?: GoalOutcomeProjection
   appFinalization?: AppFinalizationStatus
@@ -136,13 +139,15 @@ export type StartupHostTruth = {
 }
 
 type JournalState = {
-  version: 1
+  version: 2
   entries: JournalEntry[]
   updatedAt: string
 }
 
-const JOURNAL_KEY = 'subagents.runJournal.v1'
-const JOURNAL_BACKUP_KEY = 'subagents.runJournal.v1.backup'
+const JOURNAL_KEY = 'subagents.runJournal.v2'
+const JOURNAL_BACKUP_KEY = 'subagents.runJournal.v2.backup'
+const LEGACY_JOURNAL_KEY = 'subagents.runJournal.v1'
+const LEGACY_JOURNAL_BACKUP_KEY = 'subagents.runJournal.v1.backup'
 const REPORT_KEY = 'subagents.recoveryReports.v1'
 const MAX_ENTRIES = 300
 const MAX_REPORTS = 20
@@ -214,6 +219,12 @@ function bounded(value: unknown, max: number): string | undefined {
   return text ? text.slice(0, max) : undefined
 }
 
+const SHA256_DIGEST = /^[a-f0-9]{64}$/
+
+function boundedDigest(value: unknown): string | undefined {
+  return typeof value === 'string' && SHA256_DIGEST.test(value) ? value : undefined
+}
+
 /**
  * Bounded non-negative counter; anything else is simply absent.
  *
@@ -229,14 +240,14 @@ function counter(value: unknown, max = 10_000): number | undefined {
 const MAX_TOKEN_COUNT = 100_000_000
 
 function emptyState(): JournalState {
-  return { version: 1, entries: [], updatedAt: now() }
+  return { version: 2, entries: [], updatedAt: now() }
 }
 
 function parseState(raw: string | null): JournalState | null {
   if (!raw || raw.length > MAX_RAW_BYTES) return null
   try {
     const value = JSON.parse(raw) as Record<string, unknown>
-    if (value.version !== 1 || !Array.isArray(value.entries)) return null
+    if ((value.version !== 1 && value.version !== 2) || !Array.isArray(value.entries)) return null
     if (value.entries.length > MAX_ENTRIES * 2) return null
     const entries = value.entries
       .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
@@ -268,6 +279,9 @@ function parseState(raw: string | null): JournalState | null {
           ? entry.executionSettlement
           : undefined,
         goalVerdict: isGoalVerdict(entry.goalVerdict) ? entry.goalVerdict : undefined,
+        goalContractDigest: boundedDigest(entry.goalContractDigest),
+        acceptanceDigest: boundedDigest(entry.acceptanceDigest),
+        stopReason: bounded(entry.stopReason, 1_024),
         goalProjection: isGoalOutcomeProjection(entry.goalProjection) ? entry.goalProjection : undefined,
         appFinalization: isAppFinalizationStatus(entry.appFinalization) ? entry.appFinalization : undefined,
         dodMet: typeof entry.dodMet === 'boolean' ? entry.dodMet : undefined,
@@ -289,6 +303,24 @@ function parseState(raw: string | null): JournalState | null {
               .slice(-MAX_COMPACTIONS_PER_RUN)
           : undefined,
       }))
+      .map((entry) => {
+        const legacy = deriveRunOutcome({
+          turnSettlement: entry.turnSettlement,
+          executionSettlement: entry.executionSettlement,
+          goalVerdict: entry.goalVerdict,
+          legacyGoalProjection: entry.goalProjection,
+          executionKind: entry.executionKind as 'loop' | 'external' | undefined,
+          legacyStatus: entry.status,
+          legacyDodMet: entry.dodMet,
+          iterations: entry.iterations,
+          maxIterations: entry.maxIterations,
+        })
+        return {
+          ...entry,
+          executionSettlement: legacy.executionSettlement,
+          goalProjection: legacy.goalProjection,
+        }
+      })
       .filter(
         (entry) =>
           Boolean(entry.id) &&
@@ -296,7 +328,7 @@ function parseState(raw: string | null): JournalState | null {
           JOURNAL_STATUSES.has(entry.status),
       )
     if (entries.length !== value.entries.length) return null
-    return { version: 1, entries: entries as JournalEntry[], updatedAt: bounded(value.updatedAt, 40) || now() }
+    return { version: 2, entries: entries as JournalEntry[], updatedAt: bounded(value.updatedAt, 40) || now() }
   } catch {
     return null
   }
@@ -372,8 +404,8 @@ function loadState(preferred?: Storage): JournalState {
   let primaryRaw: string | null = null
   let backupRaw: string | null = null
   try {
-    primaryRaw = store.getItem(JOURNAL_KEY)
-    backupRaw = store.getItem(JOURNAL_BACKUP_KEY)
+    primaryRaw = store.getItem(JOURNAL_KEY) || store.getItem(LEGACY_JOURNAL_KEY)
+    backupRaw = store.getItem(JOURNAL_BACKUP_KEY) || store.getItem(LEGACY_JOURNAL_BACKUP_KEY)
   } catch {
     return emptyState()
   }
@@ -525,11 +557,44 @@ export type RunTerminalSettlement = {
   turnSettlement?: PiTurnSettlement
   executionSettlement?: RunExecutionSettlement
   goalVerdict?: GoalVerdict
+  goalContractDigest?: string
+  acceptanceDigest?: string
+  stopReason?: string
   appFinalization?: AppFinalizationStatus
   dodMet?: boolean
   iterations?: number
   maxIterations?: number
   interruptReason?: 'user' | 'timeout'
+}
+
+function canonicalTerminalJournalFacts(settlement: RunTerminalSettlement | undefined) {
+  const value: RunTerminalSettlement = settlement || {}
+  const external = value.executionKind === 'external'
+  const outcome = deriveRunOutcome({
+    turnSettlement: value.turnSettlement,
+    executionSettlement: value.executionSettlement,
+    goalVerdict: value.goalVerdict,
+    appFinalization: value.appFinalization,
+    executionKind: value.executionKind,
+    legacyDodMet: value.dodMet,
+    iterations: value.iterations,
+    maxIterations: value.maxIterations,
+  })
+  return {
+    executionKind: value.executionKind,
+    turnSettlement: outcome.turnSettlement,
+    executionSettlement: outcome.executionSettlement,
+    goalVerdict: outcome.goalVerdict,
+    goalContractDigest: boundedDigest(value.goalContractDigest),
+    acceptanceDigest: boundedDigest(value.acceptanceDigest),
+    stopReason: bounded(value.stopReason, 1_024),
+    goalProjection: outcome.goalProjection,
+    appFinalization: outcome.appFinalization,
+    dodMet: external ? undefined : value.dodMet,
+    iterations: external ? undefined : counter(value.iterations),
+    maxIterations: external ? undefined : counter(value.maxIterations),
+    interruptReason: value.interruptReason,
+  }
 }
 
 export function recordRunTerminal(input: {
@@ -540,18 +605,8 @@ export function recordRunTerminal(input: {
   settlement?: RunTerminalSettlement
 }): void {
   const finishedAt = now()
-  const external = input.settlement?.executionKind === 'external'
-  const outcome = deriveRunOutcome({
-    turnSettlement: input.settlement?.turnSettlement,
-    executionSettlement: input.settlement?.executionSettlement,
-    goalVerdict: input.settlement?.goalVerdict,
-    appFinalization: input.settlement?.appFinalization,
-    executionKind: input.settlement?.executionKind,
-    legacyStatus: input.status,
-    legacyDodMet: input.settlement?.dodMet,
-    iterations: input.settlement?.iterations,
-    maxIterations: input.settlement?.maxIterations,
-  })
+  const facts = canonicalTerminalJournalFacts(input.settlement)
+  const legacy = deriveRunOutcome({ ...facts, legacyStatus: input.status })
   upsert({
     id: input.runId,
     kind: 'run',
@@ -562,19 +617,19 @@ export function recordRunTerminal(input: {
     // Written in the same synchronous statement as the terminal marker: there
     // is no second write point that could disagree about delivery.
     delivery: input.delivery ? classifyRunDelivery(input.delivery) : 'pending-delivery',
-    executionKind: input.settlement?.executionKind,
-    turnSettlement: outcome.turnSettlement,
-    executionSettlement: outcome.executionSettlement,
-    goalVerdict: outcome.goalVerdict,
-    goalProjection: outcome.goalProjection,
-    appFinalization: outcome.appFinalization,
-    // An external CLI exit is never a DoD claim, so its settlement carries no
-    // DoD verdict at all rather than an unmet one.
-    dodMet: external ? undefined : input.settlement?.dodMet,
-    iterations: external ? undefined : counter(input.settlement?.iterations),
-    maxIterations: external ? undefined : counter(input.settlement?.maxIterations),
-    interruptReason: input.settlement?.interruptReason,
+    ...facts,
+    goalProjection: legacy.goalProjection,
   })
+}
+
+/** App closeout bookkeeping; canonical execution/Goal fields remain untouched. */
+export function markRunAppFinalized(runId: string): void {
+  const state = loadState()
+  const entry = state.entries.find((item) => item.kind === 'run' && item.id === runId)
+  if (!entry || !entry.finishedAt || entry.appFinalization === 'not-applicable') return
+  entry.appFinalization = 'completed'
+  entry.updatedAt = now()
+  persistState(state)
 }
 
 /**
@@ -834,7 +889,7 @@ export function completeStartupRecovery(): void {
 export function resetRunJournalForTests(): void {
   const store = storage()
   if (!store) return
-  for (const key of [JOURNAL_KEY, JOURNAL_BACKUP_KEY, REPORT_KEY]) store.removeItem(key)
+  for (const key of [JOURNAL_KEY, JOURNAL_BACKUP_KEY, LEGACY_JOURNAL_KEY, LEGACY_JOURNAL_BACKUP_KEY, REPORT_KEY]) store.removeItem(key)
   for (let i = 0; i < store.length; i += 1) {
     const key = store.key(i)
     if (key?.startsWith(`${JOURNAL_KEY}.corrupt.`)) store.removeItem(key)

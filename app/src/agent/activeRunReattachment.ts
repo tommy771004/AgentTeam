@@ -7,6 +7,7 @@ import { markRunRegistryReconciled, useAgentStore } from '../store/agentStore.ts
 import { useRunActivityStore } from '../store/runActivityStore.ts'
 import { useThreadStore } from '../store/threadStore.ts'
 import type { AgentState } from './types.ts'
+import type { GoalVerdict, RunExecutionSettlement } from './goalOutcome.ts'
 import type { TurnRecordEntry } from './turnRecord.ts'
 
 export type PiHostAttachmentProjection = {
@@ -17,6 +18,11 @@ export type PiHostAttachmentProjection = {
   latestSeq: number
   total: number
   settlement?: string
+  executionSettlement?: RunExecutionSettlement
+  goalVerdict?: GoalVerdict
+  goalContractDigest?: string
+  acceptanceDigest?: string
+  stopReason?: string
   interruptReason?: 'user' | 'timeout'
   summary?: string
   pendingApproval?: {
@@ -126,6 +132,12 @@ function piHostAttachmentAgent(
       message: active ? 'Pi Core Host 執行中（renderer reattached）' : `Pi Core Host settlement=${attachment.settlement || 'failed'}`,
     }],
     executionKind: 'loop',
+    executionSettlement: attachment.executionSettlement,
+    goalVerdict: attachment.goalVerdict,
+    goalContractDigest: attachment.goalContractDigest,
+    acceptanceDigest: attachment.acceptanceDigest,
+    stopReason: attachment.stopReason,
+    appFinalization: active ? undefined : 'pending',
   })
 }
 

@@ -480,8 +480,12 @@ export interface AgentState {
   turnSettlement?: import('./piHostRun.ts').PiTurnSettlement
   executionSettlement?: import('./goalOutcome.ts').RunExecutionSettlement
   goalVerdict?: import('./goalOutcome.ts').GoalVerdict
+  /** Digest of the immutable Host Goal Contract that governed this run. */
+  goalContractDigest?: string
   /** Digest of the Host Acceptance Snapshot that governed goalVerdict. */
   acceptanceDigest?: string
+  /** Host-authored terminal reason; app finalization may display but not rewrite it. */
+  stopReason?: string
   appFinalization?: import('./goalOutcome.ts').AppFinalizationStatus
   /**
    * Declared adapter capabilities for this run (honest matrix).
@@ -557,7 +561,9 @@ export interface ArchiveRecord {
   turnSettlement?: import('./piHostRun.ts').PiTurnSettlement
   executionSettlement?: import('./goalOutcome.ts').RunExecutionSettlement
   goalVerdict?: import('./goalOutcome.ts').GoalVerdict
+  goalContractDigest?: string
   acceptanceDigest?: string
+  stopReason?: string
   /** Display-only conservative mapping for legacy records. */
   goalProjection?: import('./goalOutcome.ts').GoalOutcomeProjection
   appFinalization?: import('./goalOutcome.ts').AppFinalizationStatus

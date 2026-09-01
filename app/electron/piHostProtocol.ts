@@ -5359,6 +5359,19 @@ async function recordAcceptanceForTerminal(input: {
   return { acceptanceSnapshot: acceptance.snapshot, goalVerdict }
 }
 
+function attachmentGoalTerminalFacts(
+  goalContract: GoalContractSnapshot | undefined,
+  acceptance: Partial<{ acceptanceSnapshot: AcceptanceSnapshot; goalVerdict: GoalVerdict }>,
+  stopReason: string,
+) {
+  return {
+    goalVerdict: acceptance.goalVerdict,
+    goalContractDigest: goalContract?.digest,
+    acceptanceDigest: acceptance.acceptanceSnapshot?.digest,
+    stopReason,
+  }
+}
+
 async function recordGoalContractAdmission(input: {
   state: HostState
   session: SessionRecord
@@ -5397,7 +5410,10 @@ async function recordGoalContractAdmission(input: {
     entries: input.session.record.entries.slice(-input.recorder.entries.length),
   }
   input.state.snapshot.cursor += 1
-  input.state.attachmentJournal.settle(input.runId, 'empty', reason, turnRecordSlice.entries.at(-1)?.seq)
+  input.state.attachmentJournal.settle(
+    input.runId, 'empty', reason, turnRecordSlice.entries.at(-1)?.seq, undefined,
+    attachmentGoalTerminalFacts(input.goalContract, acceptance, reason),
+  )
   flushDeferredAgentLifecycle(input.state, input.sessionId, input.recorder, input.emit)
   if (activeTurnRecorders.get(input.sessionId) === input.recorder) activeTurnRecorders.delete(input.sessionId)
   return [...input.turnEvents, {
@@ -5688,7 +5704,10 @@ async function submitPiHostTurn(
         entries: session.record.entries.slice(-recorder.entries.length),
       }
       state.snapshot.cursor += 1
-      state.attachmentJournal.settle(runId, settlement, pluginExecution.summary, session.record.entries.at(-1)?.seq)
+      state.attachmentJournal.settle(
+        runId, settlement, pluginExecution.summary, session.record.entries.at(-1)?.seq, undefined,
+        attachmentGoalTerminalFacts(goalContract, acceptance, pluginExecution.summary),
+      )
       return [...turnEvents, {
         id,
         result: {
@@ -6180,6 +6199,8 @@ async function submitPiHostTurn(
       orchestration.settlement,
       orchestration.result,
       turnRecordSlice.entries.at(-1)?.seq,
+      orchestration.interruptReason,
+      attachmentGoalTerminalFacts(goalContract, acceptance, orchestration.interruptReason || orchestration.settlement),
     )
     flushDeferredAgentLifecycle(state, sessionId, recorder, emit)
     return [...turnEvents, {
@@ -6223,7 +6244,10 @@ async function submitPiHostTurn(
       const terminalSeq = session.record.entries.at(-1)?.seq
       flushDeferredAgentLifecycle(state, sessionId, recorder, emit)
       state.snapshot.cursor += 1
-      state.attachmentJournal.settle(runId, 'failed', reason, terminalSeq)
+      state.attachmentJournal.settle(
+        runId, 'failed', reason, terminalSeq, undefined,
+        attachmentGoalTerminalFacts(goalContract, {}, reason),
+      )
       return [...turnEvents, errorResponse(id, 'runtime_error', reason)]
     }).finally(() => {
     deadline?.cancel()

@@ -358,6 +358,25 @@ function acceptanceDigestFromResult(result: { acceptanceSnapshot?: { digest: str
   return result.acceptanceSnapshot?.digest
 }
 
+function hostStopReason(result: { interruptReason?: string; settlement: string }): string {
+  return result.interruptReason || result.settlement
+}
+
+function hostGoalOutcomeFacts(result: {
+  goalVerdict?: AgentState['goalVerdict']
+  goalContract?: { digest: string }
+  acceptanceSnapshot?: { digest: string }
+  interruptReason?: string
+  settlement: string
+}) {
+  return {
+    goalVerdict: result.goalVerdict,
+    goalContractDigest: result.goalContract?.digest,
+    acceptanceDigest: acceptanceDigestFromResult(result),
+    stopReason: hostStopReason(result),
+  }
+}
+
 async function executePiHostTurn(
   set: (partial: Partial<AgentStore>) => void,
   get: () => AgentStore,
@@ -494,8 +513,7 @@ async function executePiHostTurn(
       executionKind: 'loop',
       turnSettlement: runOutcome.turnSettlement,
       executionSettlement: runOutcome.executionSettlement,
-      goalVerdict: result.goalVerdict,
-      acceptanceDigest: acceptanceDigestFromResult(result),
+      ...hostGoalOutcomeFacts(result),
       runnerCapabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
       startedAt,
       finishedAt: new Date().toISOString(),
@@ -1197,7 +1215,9 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         turnSettlement: outcome.turnSettlement,
         executionSettlement: outcome.executionSettlement,
         goalVerdict: outcome.goalVerdict,
+        goalContractDigest: agent.goalContractDigest,
         acceptanceDigest: agent.acceptanceDigest,
+        stopReason: agent.stopReason,
         goalProjection: outcome.goalProjection,
         appFinalization: outcome.appFinalization,
         id: agent.id,

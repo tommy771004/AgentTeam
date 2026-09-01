@@ -1,4 +1,11 @@
 import { isPiTurnSettlement, type PiTurnInterruptReason, type PiTurnSettlement } from '../src/agent/piHostRun.ts'
+import {
+  executionSettlementFromTurnSettlement,
+  isGoalVerdict,
+  isRunExecutionSettlement,
+  type GoalVerdict,
+  type RunExecutionSettlement,
+} from '../src/agent/goalOutcome.ts'
 import type { TurnRecordEntry } from '../src/agent/turnRecord.ts'
 import { isLegacyPiMemory, type PiMemory } from './piMemory.ts'
 
@@ -83,6 +90,12 @@ export type PiHostAttachment = {
   latestSeq: number
   total: number
   settlement?: PiTurnSettlement
+  /** Immutable Host terminal facts. App finalization may consume, never replace, these fields. */
+  executionSettlement?: RunExecutionSettlement
+  goalVerdict?: GoalVerdict
+  goalContractDigest?: string
+  acceptanceDigest?: string
+  stopReason?: string
   interruptReason?: PiTurnInterruptReason
   summary?: string
   pendingApproval?: PiHostPendingApproval
@@ -136,6 +149,12 @@ function boundedSummary(summary: unknown): string | undefined {
 
 function boundedString(value: unknown, max = 160): string | undefined {
   return typeof value === 'string' && value.trim() ? value.slice(0, max) : undefined
+}
+
+const SHA256_DIGEST = /^[a-f0-9]{64}$/
+
+function boundedDigest(value: unknown): string | undefined {
+  return typeof value === 'string' && SHA256_DIGEST.test(value) ? value : undefined
 }
 
 function sanitizeApprovalValue(value: unknown, depth = 0): unknown {
@@ -272,6 +291,21 @@ function normalizeFinalization(value: unknown): PiHostFinalizationState | undefi
   }
 }
 
+function normalizedTerminalFacts(record: PiHostAttachment): Partial<PiHostAttachment> {
+  const executionSettlement = isRunExecutionSettlement(record.executionSettlement) ? record.executionSettlement : undefined
+  const goalVerdict = isGoalVerdict(record.goalVerdict) ? record.goalVerdict : undefined
+  const goalContractDigest = boundedDigest(record.goalContractDigest)
+  const acceptanceDigest = boundedDigest(record.acceptanceDigest)
+  const stopReason = boundedString(record.stopReason, 1_024)
+  return {
+    ...(executionSettlement ? { executionSettlement } : {}),
+    ...(goalVerdict ? { goalVerdict } : {}),
+    ...(goalContractDigest ? { goalContractDigest } : {}),
+    ...(acceptanceDigest ? { acceptanceDigest } : {}),
+    ...(stopReason ? { stopReason } : {}),
+  }
+}
+
 /** Pick the attachment schema explicitly; never reflect persisted unknown fields. */
 function normalizeRecord(record: PiHostAttachment): PiHostAttachment | undefined {
   if (!record || typeof record !== 'object') return undefined
@@ -288,6 +322,7 @@ function normalizeRecord(record: PiHostAttachment): PiHostAttachment | undefined
     latestSeq: boundedCount(record.latestSeq),
     total: boundedCount(record.total),
     ...(settlement ? { settlement } : {}),
+    ...normalizedTerminalFacts(record),
     ...(record.interruptReason === 'user' || record.interruptReason === 'timeout' ? { interruptReason: record.interruptReason } : {}),
     ...(boundedSummary(record.summary) ? { summary: boundedSummary(record.summary) } : {}),
     ...(normalizePiHostPendingApproval(record.pendingApproval) ? { pendingApproval: normalizePiHostPendingApproval(record.pendingApproval) } : {}),
@@ -379,7 +414,14 @@ export class PiHostAttachmentJournal {
     this.changed()
   }
 
-  settle(runId: string, settlement: PiTurnSettlement, summary?: string, latestSeq?: number, interruptReason?: PiTurnInterruptReason): PiHostAttachment | undefined {
+  settle(
+    runId: string,
+    settlement: PiTurnSettlement,
+    summary?: string,
+    latestSeq?: number,
+    interruptReason?: PiTurnInterruptReason,
+    terminal?: Partial<Pick<PiHostAttachment, 'executionSettlement' | 'goalVerdict' | 'goalContractDigest' | 'acceptanceDigest' | 'stopReason'>>,
+  ): PiHostAttachment | undefined {
     const record = this.state.records.find((candidate) => candidate.runId === runId)
     if (!record) return undefined
     // Terminal state is immutable: a late provider response cannot resurrect
@@ -388,6 +430,16 @@ export class PiHostAttachmentJournal {
     record.status = 'terminal'
     delete record.pendingApproval
     record.settlement = settlement
+    record.executionSettlement = isRunExecutionSettlement(terminal?.executionSettlement)
+      ? terminal.executionSettlement
+      : executionSettlementFromTurnSettlement(settlement)
+    if (isGoalVerdict(terminal?.goalVerdict)) record.goalVerdict = terminal.goalVerdict
+    const goalContractDigest = boundedDigest(terminal?.goalContractDigest)
+    const acceptanceDigest = boundedDigest(terminal?.acceptanceDigest)
+    const stopReason = boundedString(terminal?.stopReason, 1_024)
+    if (goalContractDigest) record.goalContractDigest = goalContractDigest
+    if (acceptanceDigest) record.acceptanceDigest = acceptanceDigest
+    if (stopReason) record.stopReason = stopReason
     record.terminalAt = this.clock()
     record.acknowledged = false
     delete record.finalization
