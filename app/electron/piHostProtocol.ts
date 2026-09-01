@@ -4,6 +4,8 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
 import { GOAL_CONTRACT_CAPABILITY, goalContractFromWorkingState, hasExecutableGoalCriterion, type GoalContractSnapshot } from '../src/agent/goalContract.ts'
+import type { AcceptanceSnapshot } from '../src/agent/acceptanceContract.ts'
+import { evaluateAcceptanceGate, goalVerdictFromAcceptance } from './acceptanceGate.ts'
 import type { GoalVerdict } from '../src/agent/goalOutcome.ts'
 import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatalog.ts'
 import { isSubscriptionProviderPreset } from '../src/agent/apiProviders.ts'
@@ -123,6 +125,8 @@ export type PiHostResponse = {
     goalContract?: GoalContractSnapshot
     /** Terminal Goal fact; independent from the turn settlement. */
     goalVerdict?: GoalVerdict
+    /** Immutable Host Checker result governing goalVerdict. */
+    acceptanceSnapshot?: AcceptanceSnapshot
     contractRevision?: number
     contractDigest?: string
     contract?: PiTurnToolContract
@@ -5144,10 +5148,10 @@ async function admitGoalContractForTurn(input: {
   maxWallClockMs: number
   unattended: boolean
 }): Promise<GoalContractSnapshot | undefined> {
-  if (!input.negotiated || !input.enabled || input.pattern !== 'Goal-based') return undefined
+  if (!input.negotiated || !input.enabled || (input.pattern !== 'Goal-based' && input.pattern !== 'Turn-based')) return undefined
   return goalContractFromWorkingState({
     state: input.workingState,
-    mode: 'goal',
+    mode: input.pattern === 'Turn-based' ? 'turn' : 'goal',
     maxIterations: input.maxIterations,
     maxWallClockMs: input.maxWallClockMs,
     unattended: input.unattended,
@@ -5169,7 +5173,41 @@ function shellSandboxVerificationForTurn(
 const goalContractResult = (goalContract: GoalContractSnapshot | undefined) =>
   goalContract ? { goalContract } : {}
 
-function recordGoalContractAdmission(input: {
+async function recordAcceptanceForTerminal(input: {
+  sessionId: string
+  runId: string
+  workspaceRoot: string
+  iteration: number
+  settlement: PiTurnSettlement
+  answer: string
+  goalContract?: GoalContractSnapshot
+}): Promise<Partial<{ acceptanceSnapshot: AcceptanceSnapshot; goalVerdict: GoalVerdict }>> {
+  if (!input.goalContract) return {}
+  const acceptance = await evaluateAcceptanceGate({
+    runId: input.runId,
+    iteration: input.iteration,
+    goalContract: input.goalContract,
+    workspaceRoot: input.workspaceRoot,
+    settlement: input.settlement,
+    answer: input.answer,
+  })
+  for (const evidence of acceptance.evidence) {
+    recordTurnEntry(input.sessionId, { kind: 'criterion-evidence', source: 'host', evidence })
+  }
+  recordTurnEntry(input.sessionId, { kind: 'acceptance-snapshot', source: 'host', snapshot: acceptance.snapshot })
+  const goalVerdict: GoalVerdict = input.goalContract.mode === 'goal' && input.settlement === 'cancelled' ? 'cancelled'
+    : input.goalContract.mode === 'goal' && input.settlement === 'interrupted' ? 'interrupted'
+      : goalVerdictFromAcceptance({ mode: input.goalContract.mode, snapshot: acceptance.snapshot })
+  recordTurnEntry(input.sessionId, {
+    kind: 'goal-verdict',
+    source: 'host',
+    verdict: goalVerdict,
+    acceptanceDigest: acceptance.snapshot.digest,
+  })
+  return { acceptanceSnapshot: acceptance.snapshot, goalVerdict }
+}
+
+async function recordGoalContractAdmission(input: {
   state: HostState
   session: SessionRecord
   sessionId: string
@@ -5183,12 +5221,21 @@ function recordGoalContractAdmission(input: {
   pattern: PiLoopPattern
   iterationLimit: number
   definitionOfDone?: string
-}): PiHostMessage[] | undefined {
+}): Promise<PiHostMessage[] | undefined> {
   if (!input.goalContract) return undefined
   recordTurnEntry(input.sessionId, { kind: 'goal-contract', source: 'host', snapshot: input.goalContract })
   if (hasExecutableGoalCriterion(input.goalContract)) return undefined
   const reason = 'Goal Contract has no executable criterion'
   recordTurnEntry(input.sessionId, { kind: 'notice', source: 'host', topic: 'goal-unverifiable', text: reason })
+  const acceptance = await recordAcceptanceForTerminal({
+    sessionId: input.sessionId,
+    runId: input.runId,
+    workspaceRoot: input.recorder.cwd,
+    iteration: 0,
+    settlement: 'empty',
+    answer: '',
+    goalContract: input.goalContract,
+  })
   recordTerminalAgentLifecycle(input.state, input.sessionId, input.runId, 'empty', input.recorder.entries)
   recordTurnEntry(input.sessionId, { kind: 'turn-end', source: 'host', settlement: 'empty' })
   input.session.record = appendTurnRecord(input.session.record, input.recorder.entries)
@@ -5210,7 +5257,8 @@ function recordGoalContractAdmission(input: {
       record: turnRecordSlice,
       workingState: input.workingState,
       goalContract: input.goalContract,
-      goalVerdict: 'unverifiable',
+      acceptanceSnapshot: acceptance.acceptanceSnapshot,
+      goalVerdict: acceptance.goalVerdict || 'unverifiable',
       orchestration: {
         pattern: input.pattern,
         iterations: 0,
@@ -5326,7 +5374,7 @@ async function submitPiHostTurn(
   recordGoverningMemoryControlPackage(state, sessionId, governingPackage)
   let workingState = initialWorkingState
   recordTurnEntry(sessionId, { kind: 'working-state', source: 'host', state: workingState })
-  const goalAdmissionResult = recordGoalContractAdmission({
+  const goalAdmissionResult = await recordGoalContractAdmission({
     state, session, sessionId, runId, id, emit, recorder, turnEvents, workingState,
     goalContract, pattern, iterationLimit, definitionOfDone,
   })
@@ -5473,6 +5521,10 @@ async function submitPiHostTurn(
     if (pluginExecution && shouldStopForProviderProjection(pluginExecution)) {
       const settlement = pluginExecution.state === 'cancelled' ? 'cancelled' as const : 'failed' as const
       publishOrchestration(settlement === 'cancelled' ? 'cancelled' : 'settlement', 0, pluginExecution.state)
+      const acceptance = await recordAcceptanceForTerminal({
+        sessionId, runId, workspaceRoot: cwd, iteration: 0, settlement,
+        answer: pluginExecution.summary, goalContract,
+      })
       // A turn stopped by its provider stage is still a turn: it closes on
       // the record like any other, so the account has no silent gap.
       recordTurnEntry(sessionId, { kind: 'turn-end', source: 'host', settlement })
@@ -5493,6 +5545,7 @@ async function submitPiHostTurn(
           record: stoppedRecord,
           workingState,
           ...goalContractResult(goalContract),
+          ...acceptance,
           pluginExecution,
           orchestration: { pattern, iterations: 0, maxIterations: iterationLimit, definitionOfDone, dodMet: false },
         },
@@ -5925,6 +5978,15 @@ async function submitPiHostTurn(
         : orchestration.settlement,
     )
     recorder.step = orchestration.iterations || recorder.step
+    const acceptance = await recordAcceptanceForTerminal({
+      sessionId,
+      runId,
+      workspaceRoot: cwd,
+      iteration: orchestration.iterations,
+      settlement: orchestration.settlement,
+      answer: orchestration.result,
+      goalContract,
+    })
     recordTerminalAgentLifecycle(state, sessionId, runId, orchestration.settlement, recorder.entries)
     recordTurnEntry(sessionId, {
       kind: 'turn-end',
@@ -5963,6 +6025,7 @@ async function submitPiHostTurn(
         record: turnRecordSlice,
         workingState,
         ...goalContractResult(goalContract),
+        ...acceptance,
         orchestration: {
           pattern: orchestration.pattern,
           iterations: orchestration.iterations,

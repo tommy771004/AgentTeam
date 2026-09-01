@@ -354,6 +354,10 @@ async function failedPiHostRunSnapshot(
   }
 }
 
+function acceptanceDigestFromResult(result: { acceptanceSnapshot?: { digest: string } }): string | undefined {
+  return result.acceptanceSnapshot?.digest
+}
+
 async function executePiHostTurn(
   set: (partial: Partial<AgentStore>) => void,
   get: () => AgentStore,
@@ -491,6 +495,7 @@ async function executePiHostTurn(
       turnSettlement: runOutcome.turnSettlement,
       executionSettlement: runOutcome.executionSettlement,
       goalVerdict: result.goalVerdict,
+      acceptanceDigest: acceptanceDigestFromResult(result),
       runnerCapabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
       startedAt,
       finishedAt: new Date().toISOString(),
@@ -1192,6 +1197,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         turnSettlement: outcome.turnSettlement,
         executionSettlement: outcome.executionSettlement,
         goalVerdict: outcome.goalVerdict,
+        acceptanceDigest: agent.acceptanceDigest,
         goalProjection: outcome.goalProjection,
         appFinalization: outcome.appFinalization,
         id: agent.id,

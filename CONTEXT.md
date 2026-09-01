@@ -13,6 +13,8 @@ _Avoid_: using "turn" and "run" interchangeably, or describing concurrency as al
 _Avoid_: calling `dispatchThreadTask` or `startExecution` from UI pages.
 
 **Goal Contract（目標契約）** — an immutable, Host-validated and digested snapshot binding a Goal-based Task run to executable acceptance criteria, budgets, constraints, outputs, and escalation policy before its first provider call. Free-form Definition of Done text remains a display/rubric source until a registered checker mapping makes it executable; a Goal run with no executable criterion is `unverifiable`, not successful because the assistant answered.
+
+**Acceptance Snapshot（驗收快照）** — an immutable, digested Host Checker result over one Goal Contract revision and one settled iteration. Criterion verdicts cite Host-issued evidence; a terminal `passed` Goal verdict must cite the governing Acceptance Snapshot digest. `assistant-answer-present` applies only to Turn mode, while `file-content` is decided from the workspace file's actual SHA-256 and becomes `invalidated` if later content drifts.
 _Avoid_: model-authored success claims, arbitrary shell commands as criteria, or treating prose acceptance criteria as executable evidence.
 
 **Pi Core tool loop（Pi Core 工具迴圈）** — the production execution core is Pi Core in the supervised Electron utility process: tool loop, tool approval, step settlement, host-side execution evidence. `agentEngine` / `runDispatch` adapt the coordinator snapshot to it; external CLI is a separate runner contract. Renderer `agent/loop/` exists only for plain-browser compatibility until the ADR-0045 deletion gate is met.

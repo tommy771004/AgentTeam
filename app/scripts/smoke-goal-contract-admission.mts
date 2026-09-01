@@ -118,9 +118,29 @@ try {
     path: predicate.path,
     sha256: predicate.sha256,
   }])
+  assert.notEqual(verifiedShape.result?.goalVerdict, 'passed', 'model completion text cannot pass a missing file checker')
+  assert.equal(verifiedShape.result?.acceptanceSnapshot?.overall, 'unmet')
+  assert.match(String(verifiedShape.result?.acceptanceSnapshot?.digest), /^[a-f0-9]{64}$/)
+  const goalVerdictEntry = verifiedShape.result?.record?.entries.find((entry: Record<string, unknown>) => entry.kind === 'goal-verdict')
+  assert.equal(goalVerdictEntry?.acceptanceDigest, verifiedShape.result?.acceptanceSnapshot?.digest)
   const contractSeq = verifiedShape.result?.record?.entries.find((entry: Record<string, unknown>) => entry.kind === 'goal-contract')?.seq
   const providerSeq = verifiedShape.result?.record?.entries.find((entry: Record<string, unknown>) => entry.kind === 'provider-prompt')?.seq
   assert.ok(Number(contractSeq) < Number(providerSeq), 'canonical contract is recorded before provider dispatch')
+
+  await writeFile(join(workspace, predicate.path), 'verified\n')
+  const accepted = await call('turn/submit', {
+    ...base,
+    runId: 'goal-file-content-pass',
+    prompt: 'check the already-settled typed output',
+    workingGoal: predicate,
+    goalContractV1: true,
+  })
+  assert.equal(accepted.error, undefined)
+  assert.equal(providerCalls, 2)
+  assert.equal(accepted.result?.goalVerdict, 'passed')
+  assert.equal(accepted.result?.acceptanceSnapshot?.overall, 'passed')
+  const acceptedVerdict = accepted.result?.record?.entries.find((entry: Record<string, unknown>) => entry.kind === 'goal-verdict')
+  assert.equal(acceptedVerdict?.acceptanceDigest, accepted.result?.acceptanceSnapshot?.digest)
 
   const flagOff = await call('turn/submit', {
     ...base,
@@ -129,7 +149,7 @@ try {
     definitionOfDone: 'legacy prose',
   })
   assert.equal(flagOff.error, undefined)
-  assert.equal(providerCalls, 2, 'feature flag is default-off')
+  assert.equal(providerCalls, 3, 'feature flag is default-off')
   assert.equal(flagOff.result?.goalContract, undefined)
 
   assert.equal((await call('initialize', { protocolVersion: 5, capabilities: ['tool-contract-v1'] })).error, undefined)
@@ -140,7 +160,7 @@ try {
     goalContractV1: true,
   })
   assert.equal(capabilityOff.error, undefined)
-  assert.equal(providerCalls, 3, 'feature flag alone cannot enable unnegotiated guarantees')
+  assert.equal(providerCalls, 4, 'feature flag alone cannot enable unnegotiated guarantees')
   assert.equal(capabilityOff.result?.goalContract, undefined)
 
   console.log('Goal Contract admission passed: frozen/digested/recorded before provider, typed mapping lossless, fail-closed rollout gated')

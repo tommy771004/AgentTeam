@@ -74,14 +74,51 @@ export function isGoalCriterion(value: unknown): value is GoalCriterion {
     && SHA256.test(criterion.sha256)
 }
 
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).every((key) => keys.includes(key))
+}
+
+function isGoalOutputs(value: unknown): boolean {
+  return Array.isArray(value) && value.length <= 100 && value.every((item) => Boolean(item) && typeof item === 'object'
+    && hasOnlyKeys(item as Record<string, unknown>, ['id', 'schemaId', 'required'])
+    && boundedString((item as Record<string, unknown>).id, 1_024)
+    && boundedString((item as Record<string, unknown>).schemaId, 1_024)
+    && typeof (item as Record<string, unknown>).required === 'boolean')
+}
+
+function isGoalCriteria(value: unknown): boolean {
+  return Array.isArray(value) && value.length <= 100
+    && value.every(isGoalCriterion)
+    && new Set(value.map((item) => (item as GoalCriterion).id)).size === value.length
+}
+
+function isGoalBudgets(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const budgets = value as Record<string, unknown>
+  return hasOnlyKeys(budgets, ['maxIterations', 'maxWallClockMs', 'maxTokens', 'maxCostUsd', 'maxNodeAttempts'])
+    && Number.isSafeInteger(budgets.maxIterations) && Number(budgets.maxIterations) >= 1
+    && Number.isSafeInteger(budgets.maxWallClockMs) && Number(budgets.maxWallClockMs) >= 1
+    && (budgets.maxTokens === undefined || (Number.isSafeInteger(budgets.maxTokens) && Number(budgets.maxTokens) >= 1))
+    && (budgets.maxCostUsd === undefined || (typeof budgets.maxCostUsd === 'number' && Number.isFinite(budgets.maxCostUsd) && budgets.maxCostUsd > 0))
+    && (budgets.maxNodeAttempts === undefined || (Number.isSafeInteger(budgets.maxNodeAttempts) && Number(budgets.maxNodeAttempts) >= 1))
+}
+
+function isGoalEscalation(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const escalation = value as Record<string, unknown>
+  return hasOnlyKeys(escalation, ['onBlocked', 'onUnverifiable', 'onBudgetExceeded', 'onNoProgress'])
+    && (escalation.onBlocked === 'hitl' || escalation.onBlocked === 'fail')
+    && (escalation.onUnverifiable === 'hitl' || escalation.onUnverifiable === 'fail')
+    && (escalation.onBudgetExceeded === 'checkpoint' || escalation.onBudgetExceeded === 'fail')
+    && (escalation.onNoProgress === 'hitl' || escalation.onNoProgress === 'fail')
+}
+
 function isGoalContractBody(value: unknown): value is GoalContractBody {
   if (!value || typeof value !== 'object') return false
   const contract = value as Record<string, unknown>
-  const budgets = contract.budgets as Record<string, unknown> | undefined
-  const escalation = contract.escalation as Record<string, unknown> | undefined
-  return Object.keys(contract).every((key) => [
+  return hasOnlyKeys(contract, [
     'schemaVersion', 'id', 'revision', 'mode', 'objective', 'constraints', 'outputs', 'criteria', 'budgets', 'escalation',
-  ].includes(key))
+  ])
     && contract.schemaVersion === 1
     && boundedString(contract.id, 1_024)
     && Number.isSafeInteger(contract.revision) && Number(contract.revision) >= 1
@@ -89,28 +126,10 @@ function isGoalContractBody(value: unknown): value is GoalContractBody {
     && boundedString(contract.objective, 800)
     && Array.isArray(contract.constraints) && contract.constraints.length <= 100
     && contract.constraints.every((item) => boundedString(item, 400))
-    && Array.isArray(contract.outputs) && contract.outputs.length <= 100
-    && contract.outputs.every((item) => Boolean(item) && typeof item === 'object'
-      && Object.keys(item as Record<string, unknown>).every((key) => ['id', 'schemaId', 'required'].includes(key))
-      && boundedString((item as Record<string, unknown>).id, 1_024)
-      && boundedString((item as Record<string, unknown>).schemaId, 1_024)
-      && typeof (item as Record<string, unknown>).required === 'boolean')
-    && Array.isArray(contract.criteria) && contract.criteria.length <= 100
-    && contract.criteria.every(isGoalCriterion)
-    && new Set(contract.criteria.map((item) => (item as GoalCriterion).id)).size === contract.criteria.length
-    && Boolean(budgets)
-    && Object.keys(budgets || {}).every((key) => ['maxIterations', 'maxWallClockMs', 'maxTokens', 'maxCostUsd', 'maxNodeAttempts'].includes(key))
-    && Number.isSafeInteger(budgets?.maxIterations) && Number(budgets?.maxIterations) >= 1
-    && Number.isSafeInteger(budgets?.maxWallClockMs) && Number(budgets?.maxWallClockMs) >= 1
-    && (budgets?.maxTokens === undefined || (Number.isSafeInteger(budgets.maxTokens) && Number(budgets.maxTokens) >= 1))
-    && (budgets?.maxCostUsd === undefined || (typeof budgets.maxCostUsd === 'number' && Number.isFinite(budgets.maxCostUsd) && budgets.maxCostUsd > 0))
-    && (budgets?.maxNodeAttempts === undefined || (Number.isSafeInteger(budgets.maxNodeAttempts) && Number(budgets.maxNodeAttempts) >= 1))
-    && Boolean(escalation)
-    && Object.keys(escalation || {}).every((key) => ['onBlocked', 'onUnverifiable', 'onBudgetExceeded', 'onNoProgress'].includes(key))
-    && (escalation?.onBlocked === 'hitl' || escalation?.onBlocked === 'fail')
-    && (escalation?.onUnverifiable === 'hitl' || escalation?.onUnverifiable === 'fail')
-    && (escalation?.onBudgetExceeded === 'checkpoint' || escalation?.onBudgetExceeded === 'fail')
-    && (escalation?.onNoProgress === 'hitl' || escalation?.onNoProgress === 'fail')
+    && isGoalOutputs(contract.outputs)
+    && isGoalCriteria(contract.criteria)
+    && isGoalBudgets(contract.budgets)
+    && isGoalEscalation(contract.escalation)
 }
 
 export function isGoalContractSnapshot(value: unknown): value is GoalContractSnapshot {
@@ -127,7 +146,8 @@ export async function verifyGoalContractSnapshot(value: unknown): Promise<boolea
 }
 
 export function hasExecutableGoalCriterion(contract: GoalContractSnapshot): boolean {
-  return contract.criteria.some((criterion) => criterion.kind === 'file-content')
+  return contract.criteria.some((criterion) => criterion.kind === 'file-content'
+    || (criterion.kind === 'assistant-answer-present' && contract.mode === 'turn'))
 }
 
 export async function goalContractFromWorkingState(input: {
@@ -145,9 +165,11 @@ export async function goalContractFromWorkingState(input: {
     objective: input.state.objective,
     constraints: [...input.state.constraints],
     outputs: [],
-    criteria: input.state.goals.flatMap((goal) => goal.completionPredicate?.kind === 'file-content'
-      ? [{ id: goal.id, kind: 'file-content' as const, path: goal.completionPredicate.path, sha256: goal.completionPredicate.sha256 }]
-      : []),
+    criteria: input.mode === 'turn'
+      ? [{ id: `turn-answer:${input.state.runId}`, kind: 'assistant-answer-present' }]
+      : input.state.goals.flatMap((goal) => goal.completionPredicate?.kind === 'file-content'
+        ? [{ id: goal.id, kind: 'file-content' as const, path: goal.completionPredicate.path, sha256: goal.completionPredicate.sha256 }]
+        : []),
     budgets: {
       maxIterations: input.maxIterations,
       maxWallClockMs: input.maxWallClockMs,

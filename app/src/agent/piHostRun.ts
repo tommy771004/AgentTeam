@@ -4,6 +4,7 @@ import { clampPiIterations } from './loopBounds.ts'
 import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from './subdesign/pluginExecution.ts'
 import { isWorkingState, type WorkingGoalCompletionPredicate, type WorkingState } from './workingState.ts'
 import type { GoalContractSnapshot } from './goalContract.ts'
+import type { AcceptanceSnapshot } from './acceptanceContract.ts'
 import type { GoalVerdict } from './goalOutcome.ts'
 
 export type PiHostRunConfigInput = {
@@ -269,6 +270,7 @@ export type PiHostRunnerApi = {
       workingState?: WorkingState
       goalContract?: GoalContractSnapshot
       goalVerdict?: GoalVerdict
+      acceptanceSnapshot?: AcceptanceSnapshot
       interruptReason?: PiTurnInterruptReason
       orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
       pluginExecution?: SubDesignPluginExecutionProjection
@@ -314,6 +316,7 @@ export type SubmitPiHostRunResult = {
   workingState?: WorkingState
   goalContract?: GoalContractSnapshot
   goalVerdict?: GoalVerdict
+  acceptanceSnapshot?: AcceptanceSnapshot
   orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
   pluginExecution?: SubDesignPluginExecutionProjection
 }
@@ -469,6 +472,7 @@ export async function submitPiHostRun(
     ...(turn.workingState ? { workingState: turn.workingState } : {}),
     ...(turn.goalContract ? { goalContract: turn.goalContract } : {}),
     ...(turn.goalVerdict ? { goalVerdict: turn.goalVerdict } : {}),
+    ...(turn.acceptanceSnapshot ? { acceptanceSnapshot: turn.acceptanceSnapshot } : {}),
     orchestration: turn.orchestration,
     pluginExecution: turn.pluginExecution,
   }

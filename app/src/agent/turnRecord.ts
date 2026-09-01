@@ -41,6 +41,8 @@ import type { RecordedInstructionSnapshot } from './instructionSnapshot.ts'
 import { isAgentLifecycleEvent, type AgentLifecycleEvent } from './agentLifecycle.ts'
 import { isAgentCollaborationEvent, type AgentCollaborationEvent } from './agentCollaboration.ts'
 import { isGoalContractSnapshot, type GoalContractSnapshot } from './goalContract.ts'
+import { isAcceptanceEvidence, isAcceptanceSnapshot, type AcceptanceEvidence, type AcceptanceSnapshot } from './acceptanceContract.ts'
+import type { GoalVerdict } from './goalOutcome.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
@@ -59,9 +61,10 @@ import { isGoalContractSnapshot, type GoalContractSnapshot } from './goalContrac
  * Version 13 records Host-owned agent tree lifecycle transitions.
  * Version 14 records Host-owned collaboration, mailbox, lease and result events.
  * Version 15 records the immutable Host-admitted Goal Contract.
+ * Version 16 records Host-owned criterion evidence, Acceptance Snapshot, and Goal verdict linkage.
  */
-export const TURN_RECORD_FORMAT_VERSION = 15
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
+export const TURN_RECORD_FORMAT_VERSION = 16
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -395,6 +398,9 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         source: 'host'
         snapshot: GoalContractSnapshot
       }
+    | { kind: 'criterion-evidence'; source: 'host'; evidence: AcceptanceEvidence }
+    | { kind: 'acceptance-snapshot'; source: 'host'; snapshot: AcceptanceSnapshot }
+    | { kind: 'goal-verdict'; source: 'host'; verdict: GoalVerdict; acceptanceDigest: string }
     | { kind: 'delegation-assignment'; source: 'host'; assignment: DelegatedGoalAssignment }
     | { kind: 'delegation-observation'; source: 'host'; observation: DelegatedGoalObservation }
     | { kind: 'delegation-check'; source: 'host'; check: DelegatedGoalCheck; packageIdentity?: MemoryControlPackageIdentity }
@@ -475,6 +481,9 @@ const KINDS = new Set([
   'state-check',
   'working-state',
   'goal-contract',
+  'criterion-evidence',
+  'acceptance-snapshot',
+  'goal-verdict',
   'delegation-assignment',
   'delegation-observation',
   'delegation-check',
@@ -597,6 +606,8 @@ function isHostContextEntry(entry: Record<string, unknown>): boolean {
   }
   if (entry.kind === 'memory-recall') return isMemoryRecallEntry(entry)
   if (entry.kind === 'instruction-snapshot' || entry.kind === 'goal-contract') return isAdmissionSnapshotEntry(entry)
+  const acceptanceEntry = isAcceptanceContextEntry(entry)
+  if (acceptanceEntry !== undefined) return acceptanceEntry
   const workingStateEntry = isWorkingStateContextEntry(entry)
   if (workingStateEntry !== undefined) return workingStateEntry
   if (entry.kind === 'notice') return typeof entry.topic === 'string' && typeof entry.text === 'string'
@@ -606,6 +617,15 @@ function isHostContextEntry(entry: Record<string, unknown>): boolean {
     return entry.executionEvidence === undefined || isWorkingExecutionEvidence(entry.executionEvidence)
   }
   return true
+}
+
+function isAcceptanceContextEntry(entry: Record<string, unknown>): boolean | undefined {
+  if (entry.kind === 'criterion-evidence') return entry.source === 'host' && isAcceptanceEvidence(entry.evidence)
+  if (entry.kind === 'acceptance-snapshot') return entry.source === 'host' && isAcceptanceSnapshot(entry.snapshot)
+  if (entry.kind !== 'goal-verdict') return undefined
+  return entry.source === 'host'
+    && ['passed', 'failed', 'blocked', 'unverifiable', 'exhausted', 'not-applicable'].includes(String(entry.verdict))
+    && typeof entry.acceptanceDigest === 'string' && /^[a-f0-9]{64}$/.test(entry.acceptanceDigest)
 }
 
 function isAdmissionSnapshotEntry(entry: Record<string, unknown>): boolean {
@@ -798,6 +818,7 @@ function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
   if (version === 1 && kind === 'memory-recall') return true
   if (version <= 2 && kind === 'working-state') return true
   if (version < 15 && kind === 'goal-contract') return true
+  if (version < 16 && ['criterion-evidence', 'acceptance-snapshot', 'goal-verdict'].includes(kind)) return true
   if (isLegacyLifecycleEntry(version, kind, entry)) return true
   if (isLegacySkillEntry(version, kind, entry)) return true
   return version < 5 && ['delegation-assignment', 'delegation-observation', 'delegation-check'].includes(kind)
