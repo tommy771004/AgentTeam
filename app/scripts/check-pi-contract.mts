@@ -43,31 +43,31 @@ for (const removed of ['workspace_read.ts', 'workspace_list.ts', 'workspace_grep
   assert.equal(existsSync(path), false, `${removed} was removed after parity evidence (ADR-0027 / issue 18); it must not return`)
 }
 
-// ── Guard 3: hermes/skills.ts consumer set is FROZEN, and the window EXPIRES ──
-// ADR-0034 makes Pi's resource loader the ONLY skill discovery path. The
-// localStorage copy survives READ-ONLY as migration rollback (issue 16); its
-// existing consumers may keep reading during that window, and nothing new may
-// reference it.
+// ── Guard 3: hermes/skills.ts authoring bridge is FROZEN and expires ──
+// ADR-0034 makes Pi's resource loader the ONLY runtime skill discovery path.
+// Learning/Settings still author a renderer compatibility copy and push full
+// state into the Host. This is not read-only and not runtime authority; the
+// exact consumers and the deliberate extension are recorded one hop away.
 //
 // "One release" used to be the whole plan, which is how a temporary file
 // becomes permanent: nobody is reminded, so nobody removes it. The window is
 // pinned to a version instead, and the build fails once the app ships past it
 // — the reminder arrives by itself, at the release that was supposed to be the
 // last one carrying this file.
-const SKILLS_ROLLBACK_WINDOW_ENDS_BEFORE = '1.2.0'
+const SKILLS_AUTHORING_BRIDGE_ENDS_BEFORE = '1.3.0'
 const skillsFile = read('src/agent/hermes/skills.ts')
 void skillsFile
 const appVersion = String((JSON.parse(read('package.json')) as { version?: unknown }).version || '0.0.0')
 const asNumbers = (version: string) => version.split('.').map((part) => Number(part) || 0)
 const [appMajor, appMinor] = asNumbers(appVersion)
-const [endMajor, endMinor] = asNumbers(SKILLS_ROLLBACK_WINDOW_ENDS_BEFORE)
+const [endMajor, endMinor] = asNumbers(SKILLS_AUTHORING_BRIDGE_ENDS_BEFORE)
 assert.ok(
   appMajor < endMajor || (appMajor === endMajor && appMinor < endMinor),
-  `hermes/skills.ts was kept only as a one-release migration rollback and this build is ${appVersion}, at or past ${SKILLS_ROLLBACK_WINDOW_ENDS_BEFORE}. `
-  + 'Delete the file and its consumers, or make a deliberate decision to extend the window by moving SKILLS_ROLLBACK_WINDOW_ENDS_BEFORE.',
+  `hermes/skills.ts authoring compatibility expired: this build is ${appVersion}, at or past ${SKILLS_AUTHORING_BRIDGE_ENDS_BEFORE}. `
+  + 'Delete the bridge after Host authoring cutover, or record a new deliberate deadline and exit evidence.',
 )
 const ALLOWED_SKILLS_CONSUMERS = new Set([
-  // rollback copy readers + the learning subsystem scheduled for its own removal
+  // Frozen compatibility authoring/readers. Runtime discovery is not here.
   'src/App.tsx',
   'src/store/learningStore.ts',
   'src/pages/SettingsPage.tsx',
@@ -79,6 +79,7 @@ const ALLOWED_SKILLS_CONSUMERS = new Set([
   'src/agent/hermes/promptBuilder.ts',
   'src/agent/hermes/plugins.ts',
   'src/agent/hermes/sessionSearch.ts',
+  'src/agent/hermes/skillHostSync.ts',
 ])
 const sourceFiles: string[] = []
 const walk = (dir: string): void => {
@@ -95,11 +96,14 @@ for (const file of sourceFiles) {
   const rel = file.slice(root.length + 1).replaceAll('\\', '/')
   if (rel === 'src/agent/hermes/skills.ts') continue
   const content = readFileSync(file, 'utf8')
-  if (/hermes\/skills/.test(content) && !ALLOWED_SKILLS_CONSUMERS.has(rel)) {
+  const importsLegacySkills = /(?:from\s+['"](?:\.\/skills(?:\.ts)?|[^'"]*hermes\/skills(?:\.ts)?)['"]|import\(\s*['"][^'"]*hermes\/skills(?:\.ts)?['"]\s*\))/.test(content)
+  if (importsLegacySkills && !ALLOWED_SKILLS_CONSUMERS.has(rel)) {
     offenders.push(rel)
   }
 }
 assert.deepEqual(offenders, [], `hermes/skills gained a new consumer: ${offenders.join(', ')}. Skills are Pi resources (ADR-0034) — do not re-couple the renderer.`)
+assert.equal(ALLOWED_SKILLS_CONSUMERS.size, 12, 'authoring bridge consumer inventory changed; update the explicit compatibility decision')
+assert.equal(existsSync(join(root, '..', '.scratch/hermes-skills-authoring-compatibility.md')), true, 'Hermes skill authoring extension must retain its exit plan')
 
 // ── Guard 4: piTurnContext carries no skill branch ──
 const turnContext = read('src/agent/piTurnContext.ts')

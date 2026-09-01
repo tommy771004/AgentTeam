@@ -20,6 +20,7 @@ import { PluginTrustPanel } from './PluginTrustPanel'
 import { SubDesignConversationPane } from './SubDesignConversationPane'
 import { ExperimentalSurfaceControl } from './ExperimentalSurfaceControl'
 import { StorybookContextControl } from './StorybookContextControl'
+import { SubDesignDirectionApprovalCard } from './SubDesignDirectionApprovalCard'
 import type { ExperimentalSurfaceSettings, StorybookProviderSettings } from '../../agent/subdesign/providers/providerSettings.ts'
 import type { SubDesignPluginExecutionProjection } from '../../agent/subdesign/pluginExecution.ts'
 import type { SubDesignStreamingPresentation } from '../../agent/subdesign/streamingProjection.ts'
@@ -47,6 +48,7 @@ type SubDesignProjectStudioProps = {
   onOpenTranscript: () => void
   onSelectArtifact: (artifact: SubDesignArtifact) => void
   onSelectDirection: (directionId: string) => void
+  onCreateDirection: (title: string) => void
   storybookSettings: StorybookProviderSettings
   latestStorybookRun: SubDesignPluginExecutionProjection | null
   /** Experimental surface support, shown so users can see what degrades. */
@@ -114,6 +116,7 @@ export function SubDesignProjectStudio({
   onOpenTranscript,
   onSelectArtifact,
   onSelectDirection,
+  onCreateDirection,
   storybookSettings,
   latestStorybookRun,
   artifactStream,
@@ -145,7 +148,6 @@ export function SubDesignProjectStudio({
   )
   const hasArtifact = Boolean(selectedArtifact)
   const canCritique = workspace.hasCompleteArtifact
-  const awaitingChoice = brief.directions.length > 0 && !brief.selectedDirectionId
 
   const tabs: Array<{ id: StudioTab; label: string; disabled?: boolean }> = [
     { id: 'files', label: '輸出' },
@@ -353,51 +355,25 @@ export function SubDesignProjectStudio({
                         })
                       }}
                       fallback={(surfaceActions) => (
-                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                          {brief.directions.map((direction, index) => {
-                            const selected = direction.id === candidateDirectionId
-                            const committed = direction.id === brief.selectedDirectionId
-                            return (
-                              <button
-                                key={direction.id}
-                                type="button"
-                                aria-pressed={selected}
-                                onClick={() => surfaceActions.choose(direction.id)}
-                                className={`min-h-[92px] rounded-xl px-3 py-3 text-left transition-colors ${
-                                  selected ? 'bg-primary/[0.09] text-on-surface' : 'bg-white/[0.025] text-on-surface-variant hover:bg-white/[0.045]'
-                                }`}
-                              >
-                                <span className="flex items-center gap-2 text-[10px]">
-                                  <span className={`grid h-5 w-5 place-items-center rounded-full ${selected ? 'bg-primary/18 text-primary' : 'bg-white/[0.05] text-outline'}`}>
-                                    {committed ? <Icon name="check" size={11} /> : index + 1}
-                                  </span>
-                                  <span className="font-semibold">{direction.title}</span>
-                                </span>
-                                <span className="mt-2 line-clamp-2 block text-[10px] leading-relaxed text-outline">{direction.summary}</span>
-                              </button>
-                            )
-                          })}
-                        </div>
+                        <SubDesignDirectionApprovalCard
+                          directions={brief.directions}
+                          selectedId={candidateDirectionId}
+                          committedId={brief.selectedDirectionId}
+                          onSelect={setCandidateDirectionId}
+                          onSubmit={surfaceActions.choose}
+                          onSubmitCustom={onCreateDirection}
+                        />
                       )}
                     />
                     <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <p className="min-w-0 text-[10px] leading-relaxed text-outline">
                         {selectedDirection?.rationale || selectedDirection?.summary || '比較訊息、受眾與延展性後再鎖定方向。'}
                       </p>
-                      {awaitingChoice ? (
-                        <button
-                          type="button"
-                          disabled={!selectedDirection}
-                          onClick={() => selectedDirection && onSelectDirection(selectedDirection.id)}
-                          className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-[10px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-35"
-                        >
-                          <Icon name="check" size={14} />採用此方向
-                        </button>
-                      ) : (
+                      {brief.selectedDirectionId ? (
                         <span className="inline-flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-primary">
                           <Icon name="lock" size={13} />方向已鎖定
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   </section>
                 ) : (

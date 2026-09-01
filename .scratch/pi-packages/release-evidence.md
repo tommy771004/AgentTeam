@@ -2,6 +2,14 @@
 
 Date: 2026-08-31. Baseline: `8efe5b4`. Implementation and review ran in the main agent, without subagents.
 
+## 01–03 closure rerun（2026-09-01）
+
+- `npm run smoke:pi-packages` — pass against the shipped Host bundle.
+- `smoke-instruction-run-snapshot.mts` — pass; the historical durable-memory revision mismatch did not reproduce.
+- `smoke-durable-memory-store.mts` and `smoke-sqlite-durable-memory-store.mts` — pass.
+
+These results remove the only recorded blocker on tickets 01–03. All six Pi Packages tickets are now `resolved`; no package or memory behavior was weakened to obtain the result. A fresh monolithic repository smoke remains part of the final repository-wide verification, not a prerequisite invented separately for this already-gated domain.
+
 ## Package qualification
 
 - `npm run build`: passed (TypeScript + renderer/main/preload/Host bundles).

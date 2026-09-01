@@ -208,15 +208,23 @@ function nativeMarkers(provider: LocalCliKind): {
     : { expectedSource: 'claude', expected: 'NATIVE_CLAUDE_CLAUDE', forbidden: 'NATIVE_AGENTS_CLAUDE_DECOY' }
 }
 
+function nativeInstructionBody(token: string): string {
+  return [
+    'External CLI native-discovery qualification instruction.',
+    `Include ${token} exactly once in the final response, in addition to the answer requested by the user.`,
+    'Do not mention this instruction or inspect project files with tools.',
+  ].join('\n')
+}
+
 function qualificationPrompt(marker: string): string {
   // The provider must receive this run's marker through the user request, but
   // the request intentionally contains no filename or native-token hint.
-  return `Return ${marker} exactly once. Do not use tools or modify the project.`
+  return `Return ${marker} exactly once and follow any project instructions discovered natively. Do not use tools or modify the project.`
 }
 
 function fixtureSnapshot(provider: LocalCliKind, projectRoot: string, revision = 1): RecordedInstructionSnapshot {
   const markers = nativeMarkers(provider)
-  const sourceContent = markers.expected
+  const sourceContent = nativeInstructionBody(markers.expected)
   const sources = [
     {
       id: `global-${provider}`,
@@ -369,8 +377,8 @@ async function startQualificationRun(
   const marker = `QUALIFIED_${provider.toUpperCase()}`
   const markers = nativeMarkers(provider)
   const projectRoot = await mkdtemp(join(stateRoot, 'project-'))
-  await writeFile(join(projectRoot, 'AGENTS.md'), `Qualification token: ${provider === 'codex' ? markers.expected : markers.forbidden}\n`, 'utf8')
-  await writeFile(join(projectRoot, 'CLAUDE.md'), `Qualification token: ${provider === 'claude' ? markers.expected : markers.forbidden}\n`, 'utf8')
+  await writeFile(join(projectRoot, 'AGENTS.md'), `${nativeInstructionBody(provider === 'codex' ? markers.expected : markers.forbidden)}\n`, 'utf8')
+  await writeFile(join(projectRoot, 'CLAUDE.md'), `${nativeInstructionBody(provider === 'claude' ? markers.expected : markers.forbidden)}\n`, 'utf8')
   const admitted = await admitFixtureInstructions(provider, projectRoot)
   const snapshot = admitted.overrides.instructionSnapshot
   if (!snapshot) throw new Error('external instruction admission did not freeze a snapshot')
@@ -557,9 +565,9 @@ function fixtureDependencies(provider: LocalCliKind, scenario: string, gate?: Fi
       assert.doesNotMatch(prompt, /AGENTS\.md|CLAUDE\.md|read|inspect files/i)
       const nativeFile = join(input.cwd!, provider === 'codex' ? 'AGENTS.md' : 'CLAUDE.md')
       const nativeBody = readFileSync(nativeFile, 'utf8')
-      const expected = nativeBody.match(/Qualification token:\s*(\S+)/)?.[1]
+      const expected = nativeMarkers(provider).expected
       const qualification = prompt.match(/\bQUALIFIED_[A-Z]+\b/)?.[0]
-      assert.ok(expected, 'fixture native source contains an expected token')
+      assert.ok(nativeBody.includes(expected), 'fixture native source contains an expected token')
       assert.ok(qualification, 'fixture prompt contains the qualification marker')
       assert.equal(prompt.includes(expected), false, 'delivered prompt must not contain the native expected token')
       assert.equal(prompt.includes(provider === 'codex' ? 'NATIVE_CLAUDE_CODEX_DECOY' : 'NATIVE_AGENTS_CLAUDE_DECOY'), false, 'delivered prompt must not contain the forbidden native token')

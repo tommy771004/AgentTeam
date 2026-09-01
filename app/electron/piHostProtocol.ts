@@ -7,7 +7,14 @@ import { GOAL_CONTRACT_CAPABILITY, goalContractFromWorkingState, hasExecutableGo
 import { WORKFLOW_GRAPH_CAPABILITY } from '../src/agent/workflowGraph.ts'
 import { WORKFLOW_RECORD_CAPABILITY } from '../src/agent/workflowRecord.ts'
 import { WORKFLOW_SCHEDULER_CAPABILITY } from './workflowScheduler.ts'
-import { FRESH_SEMANTIC_VERIFIER_CAPABILITY } from './criterionCheckers/semanticVerifier.ts'
+import { PiWorkflowRuntime, type PiWorkflowNodeExecutor } from './piWorkflowRuntime.ts'
+import type { WorkflowNodeExecutionRequest } from './workflowScheduler.ts'
+import { FRESH_SEMANTIC_VERIFIER_CAPABILITY, type SemanticRubric } from './criterionCheckers/semanticVerifier.ts'
+import {
+  createFreshSemanticVerifierRunner,
+  semanticAcceptanceRuntimeForAnswer,
+  semanticRubricFromDefinitionOfDone,
+} from './piSemanticVerifierRuntime.ts'
 import type { AcceptanceSnapshot } from '../src/agent/acceptanceContract.ts'
 import { evaluateAcceptanceGate, goalVerdictFromAcceptance } from './acceptanceGate.ts'
 import type { GoalVerdict } from '../src/agent/goalOutcome.ts'
@@ -35,6 +42,7 @@ import { BUILTIN_BASELINE_POLICY, emptySupplementalPolicy } from '../src/agent/o
 import { compileProviderSecurityProfile } from '../src/agent/outbound/policyMerge.ts'
 import { ensureLocalPolicyTree } from '../src/agent/outbound/policyStore.ts'
 import { connectionIdForBuiltinLlm } from '../src/agent/outbound/providerConnectionId.ts'
+import { readBuildFlavorFromEnv } from '../src/agent/outbound/outboundGate.ts'
 import { captureReviewWorkspaceAdmission } from './reviewWorkspaceBinding.ts'
 import { InMemoryReviewArtifactStore, type ReviewArtifactStore } from './reviewArtifactStore.ts'
 import { captureRunReviewSnapshot, type TrustedReviewMutation } from './reviewSnapshotCapture.ts'
@@ -85,6 +93,7 @@ export type PiHostRequest = {
   id: string | number
   method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'packages/list' | 'packages/install' | 'packages/remove' | 'packages/set-tools-enabled' | 'packages/catalog-search' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'agents/spawn' | 'agents/send' | 'agents/mailbox' | 'agents/ack' | 'agents/follow-up' | 'agents/wait' | 'agents/lease/resolve' | 'agents/interrupt' | 'agents/cancel' | 'agents/close' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/update' | 'runs/reorder' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
     | 'review/v1/finalize' | 'review/v1/read' | 'review/v1/payload-page' | 'review/v1/describe' | 'review/v1/files' | 'review/v1/file-diff' | 'review/v1/refresh' | 'review/v1/comments/list' | 'review/v1/draft/save' | 'review/v1/draft/delete' | 'review/v1/comment/transition' | 'review/v1/file-state/list' | 'review/v1/file-state/mark' | 'review/v1/state/inherit' | 'review/v1/feedback/prepare' | 'review/v1/feedback/claim' | 'review/v1/feedback/release' | 'review/v1/verification/list' | 'review/v1/verification/run' | 'review/v1/verification/output' | 'review/v1/mutation/preview' | 'review/v1/mutation/apply' | 'review/v1/delivery/preview' | 'review/v1/delivery/apply' | 'review/v1/artifact/export' | 'review/v1/artifact/import-preview' | 'review/v1/artifact/import-apply' | 'review/v1/artifact/rebind' | 'review/v1/artifact/retention' | 'review/v1/artifact/hard-delete'
+    | 'workflow/run' | 'workflow/repair' | 'workflow/status' | 'workflow/record' | 'workflow/checkpoint'
   params: Record<string, unknown>
 }
 
@@ -132,6 +141,9 @@ export type PiHostResponse = {
     goalVerdict?: GoalVerdict
     /** Immutable Host Checker result governing goalVerdict. */
     acceptanceSnapshot?: AcceptanceSnapshot
+    workflow?: import('./piWorkflowRuntime.ts').PiWorkflowProjection
+    workflowRecord?: readonly import('../src/agent/workflowRecord.ts').WorkflowRecordEntry[]
+    workflowCheckpoint?: import('../src/agent/goalRuntimeCheckpoint.ts').WorkflowRecoveryCheckpoint
     contractRevision?: number
     contractDigest?: string
     contract?: PiTurnToolContract
@@ -525,6 +537,7 @@ type HostState = {
   workflowGraphNegotiated: boolean
   workflowRecordNegotiated: boolean
   workflowSchedulerNegotiated: boolean
+  workflowRuntime: PiWorkflowRuntime
   freshSemanticVerifierNegotiated: boolean
   agentCommunication: PiAgentCommunicationDomain
   reviewArtifactStore: ReviewArtifactStore
@@ -2376,6 +2389,7 @@ async function evaluateCriterionRepairForTurn(input: {
   workspaceRoot: string
   goalContract?: GoalContractSnapshot
   previousAcceptance?: HostAcceptanceResult
+  semanticVerifier?: HostSemanticVerifierContext
   priorProgressIdentity: string
   legacyDone?: boolean
   publish: (phase: 'dod' | 'replan', iteration: number, detail: string) => void
@@ -2391,6 +2405,7 @@ async function evaluateCriterionRepairForTurn(input: {
     state: input.state, runId: input.runId, iteration: input.iteration, goalContract: input.goalContract,
     workspaceRoot: input.workspaceRoot, settlement: input.settlement, answer: input.answer,
     previous: input.previousAcceptance,
+    semanticVerifier: input.semanticVerifier,
   })
   recordAcceptanceEvaluation(input.sessionId, acceptance)
   if (input.goalContract.mode === 'turn') {
@@ -5272,6 +5287,7 @@ async function admitGoalContractForTurn(input: {
   maxIterations: number
   maxWallClockMs: number
   unattended: boolean
+  semanticRubricId?: string
 }): Promise<GoalContractSnapshot | undefined> {
   if (!input.negotiated || !input.enabled || (input.pattern !== 'Goal-based' && input.pattern !== 'Turn-based')) return undefined
   return goalContractFromWorkingState({
@@ -5280,6 +5296,7 @@ async function admitGoalContractForTurn(input: {
     maxIterations: input.maxIterations,
     maxWallClockMs: input.maxWallClockMs,
     unattended: input.unattended,
+    ...(input.semanticRubricId ? { semanticRubricId: input.semanticRubricId } : {}),
   })
 }
 
@@ -5299,6 +5316,82 @@ const goalContractResult = (goalContract: GoalContractSnapshot | undefined) =>
   goalContract ? { goalContract } : {}
 
 type HostAcceptanceResult = Awaited<ReturnType<typeof evaluateAcceptanceGate>>
+
+type HostSemanticVerifierContext = Readonly<{
+  rubric: SemanticRubric
+  runtime: (answer: string, evidenceRefs: readonly string[]) => ReturnType<typeof semanticAcceptanceRuntimeForAnswer>
+  consume: (usage: HostAcceptanceResult['verifierUsage']) => void
+}>
+
+function createHostSemanticVerifierContext(input: {
+  runId: string
+  workspaceRoot: string
+  rubric: SemanticRubric
+  settings: PiSettings
+  effectiveMode?: 'required' | 'optional' | 'demo' | 'off'
+  providerConnectionId?: string
+  maxTokens?: number
+  maxCostUsd?: number
+}): HostSemanticVerifierContext {
+  let consumedTokens = 0
+  let consumedCostUsd = 0
+  const runner = createFreshSemanticVerifierRunner(async ({ verifierSessionId, verifierRunId, instruction }) => {
+    try {
+      const turn = await runPiTurn(
+        verifierSessionId,
+        input.workspaceRoot,
+        instruction,
+        [],
+        undefined,
+        verifierRunId,
+        undefined,
+        {
+          provider: input.settings.provider,
+          model: input.settings.model,
+          thinkingLevel: input.settings.thinkingLevel,
+          activeTools: [],
+          activeToolsRestricted: true,
+          unlockedTools: [],
+          temporaryChat: true,
+          verifierIsolation: true,
+        },
+        '',
+        false,
+      )
+      const usage = 'timing' in turn ? turn.timing?.usage : undefined
+      const tokens = usage?.total ?? (usage?.input || 0) + (usage?.output || 0)
+      return {
+        settlement: turn.settlement,
+        text: piTurnFinalAnswer(turn.items),
+        usage: { tokens, ...(usage?.costUsd === undefined ? {} : { costUsd: usage.costUsd }) },
+      }
+    } finally {
+      await disposePiSession(verifierSessionId)
+    }
+  })
+  return {
+    rubric: input.rubric,
+    runtime: (answer, evidenceRefs) => semanticAcceptanceRuntimeForAnswer({
+      runId: input.runId,
+      answer,
+      rubric: input.rubric,
+      evidenceRefs,
+      budget: {
+        ...(input.maxTokens === undefined ? {} : { remainingTokens: Math.max(0, input.maxTokens - consumedTokens) }),
+        ...(input.maxCostUsd === undefined ? {} : { remainingCostUsd: Math.max(0, input.maxCostUsd - consumedCostUsd) }),
+      },
+      effectiveMode: input.effectiveMode || 'off',
+      buildFlavor: readBuildFlavorFromEnv(),
+      providerConnectionId: input.providerConnectionId
+        || connectionIdForBuiltinLlm({ apiProvider: input.settings.provider, baseUrl: '' }),
+      runner,
+    }),
+    consume: (usage) => {
+      consumedTokens += usage.tokens
+      consumedCostUsd += usage.costUsd
+    },
+  }
+}
 
 async function reviewBindingsForGoalContract(state: HostState, contract: GoalContractSnapshot) {
   const snapshotIds = [...new Set(contract.criteria.flatMap((criterion) =>
@@ -5323,8 +5416,9 @@ async function evaluateHostAcceptance(input: {
   settlement: PiTurnSettlement
   answer: string
   previous?: HostAcceptanceResult
+  semanticVerifier?: HostSemanticVerifierContext
 }): Promise<HostAcceptanceResult> {
-  return evaluateAcceptanceGate({
+  const acceptance = await evaluateAcceptanceGate({
     runId: input.runId,
     iteration: input.iteration,
     goalContract: input.goalContract,
@@ -5333,7 +5427,15 @@ async function evaluateHostAcceptance(input: {
     answer: input.answer,
     previousEvidence: input.previous?.evidence,
     reviewBindings: await reviewBindingsForGoalContract(input.state, input.goalContract),
+    ...(input.semanticVerifier && input.settlement === 'answered' ? {
+      semanticVerifier: input.semanticVerifier.runtime(
+        input.answer,
+        input.previous?.evidence.map((evidence) => evidence.id) || [],
+      ),
+    } : {}),
   })
+  input.semanticVerifier?.consume(acceptance.verifierUsage)
+  return acceptance
 }
 
 function recordAcceptanceEvaluation(sessionId: string, acceptance: HostAcceptanceResult): void {
@@ -5354,6 +5456,7 @@ async function recordAcceptanceForTerminal(input: {
   goalContract?: GoalContractSnapshot
   acceptance?: HostAcceptanceResult
   goalVerdictOverride?: GoalVerdict
+  semanticVerifier?: HostSemanticVerifierContext
 }): Promise<Partial<{ acceptanceSnapshot: AcceptanceSnapshot; goalVerdict: GoalVerdict }>> {
   if (!input.goalContract) return {}
   const acceptance = input.acceptance || await evaluateHostAcceptance(input as Parameters<typeof evaluateHostAcceptance>[0])
@@ -5491,6 +5594,12 @@ async function submitPiHostTurn(
   const working = prepareTurnWorkingState(state, input, id, session, runId, prompt, checkpointWriter)
   if (working.response) return working.response
   const { resumed, initialWorkingState, governingPackage, memoryControl } = working.value!
+  const semanticRubric = state.freshSemanticVerifierNegotiated
+    && input.params?.goalContractV1 === true
+    && pattern === 'Goal-based'
+    && definitionOfDone
+    ? semanticRubricFromDefinitionOfDone(definitionOfDone)
+    : undefined
   const goalContract = await admitGoalContractForTurn({
     negotiated: state.goalContractNegotiated,
     enabled: input.params?.goalContractV1 === true,
@@ -5499,7 +5608,20 @@ async function submitPiHostTurn(
     maxIterations: iterationLimit,
     maxWallClockMs: goalContractMaxWallClock(input.params?.timeoutMs),
     unattended: turnSettings.unattended,
+    ...(semanticRubric ? { semanticRubricId: semanticRubric.id } : {}),
   })
+  const semanticVerifier = semanticRubric && goalContract
+    ? createHostSemanticVerifierContext({
+        runId,
+        workspaceRoot: cwd,
+        rubric: semanticRubric,
+        settings: turnSettings,
+        effectiveMode: contextPolicy.outboundShellMode,
+        providerConnectionId: contextPolicy.outboundConnectionId,
+        maxTokens: goalContract.budgets.maxTokens,
+        maxCostUsd: goalContract.budgets.maxCostUsd,
+      })
+    : undefined
   const recorder: ActiveTurnRecorder = {
     cwd,
     turn: nextTurnNumber(session.record),
@@ -6124,6 +6246,7 @@ async function submitPiHostTurn(
           state, sessionId, runId, iteration, settlement: turn.settlement, answer,
           goalAwarePrompt, workspaceRoot: cwd, goalContract,
           previousAcceptance: lastAcceptance, priorProgressIdentity: priorRepairProgressIdentity,
+          semanticVerifier,
           legacyDone, publish: publishOrchestration,
         })
         const done = repair.done
@@ -6188,6 +6311,7 @@ async function submitPiHostTurn(
       goalContract,
       acceptance: lastAcceptance,
       goalVerdictOverride,
+      semanticVerifier,
     })
     recordTerminalAgentLifecycle(state, sessionId, runId, orchestration.settlement, recorder.entries)
     recordTurnEntry(sessionId, {
@@ -6279,6 +6403,164 @@ async function submitPiHostTurn(
   })
 }
 
+function workflowEnvelope(answer: string): Array<{ artifactId: string; schemaId: string; value: unknown }> {
+  const trimmed = answer.trim()
+  const json = trimmed.startsWith('```')
+    ? trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+    : trimmed
+  const parsed = JSON.parse(json) as { outputs?: unknown }
+  if (!Array.isArray(parsed.outputs) || parsed.outputs.length > 100) {
+    throw new Error('Workflow node must return a bounded JSON outputs array')
+  }
+  return parsed.outputs.map((value) => {
+    if (!value || typeof value !== 'object') throw new Error('Workflow output must be an object')
+    const output = value as Record<string, unknown>
+    if (Object.keys(output).some((key) => !['artifactId', 'schemaId', 'value'].includes(key))
+      || typeof output.artifactId !== 'string' || typeof output.schemaId !== 'string') {
+      throw new Error('Workflow output identity is invalid')
+    }
+    return { artifactId: output.artifactId, schemaId: output.schemaId, value: output.value }
+  })
+}
+
+function workflowNodePrompt(request: WorkflowNodeExecutionRequest): string {
+  const payload = JSON.stringify({
+    task: request.node.task,
+    inputs: request.inputs.map((input) => ({
+      name: request.node.inputs.find((candidate) => candidate.artifactRef === input.artifactId)?.name || input.artifactId,
+      artifactId: input.artifactId,
+      schemaId: input.schemaId,
+      value: input.value,
+    })),
+    requiredOutputs: request.node.outputs,
+  })
+  if (Buffer.byteLength(payload, 'utf8') > 256 * 1_024) throw new Error('Workflow node payload exceeds 256 KiB')
+  return [
+    'Execute this admitted workflow node in a fresh Host session.',
+    'Return only one JSON object shaped as {"outputs":[{"artifactId":"...","schemaId":"...","value":...}]}.',
+    'Every required output must be present exactly once; do not add undeclared outputs.',
+    payload,
+  ].join('\n')
+}
+
+function createWorkflowNodeExecutor(input: {
+  state: HostState
+  cwd: string
+  profile?: Record<string, unknown>
+  threadId?: string
+  emit?: (message: PiHostMessage) => void
+  checkpointWriter?: CompactionCheckpointWriter
+}): PiWorkflowNodeExecutor {
+  return async (request) => {
+    if (request.node.kind === 'human-gate') {
+      return { settlement: 'failed', resultRef: `${request.attemptId}:human-gate-unavailable`, outputs: [] }
+    }
+    const sessionId = `pi-workflow-${createHash('sha256').update(request.attemptId).digest('hex').slice(0, 24)}`
+    if (input.state.snapshot.sessions.some((session) => session.id === sessionId)) {
+      throw new Error('Workflow node session identity already exists')
+    }
+    const session: SessionRecord = {
+      id: sessionId,
+      title: `Workflow · ${request.node.id}`,
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(input.profile ? { profile: { ...input.profile } } : {}),
+      messages: [],
+    }
+    input.state.snapshot.sessions = [...input.state.snapshot.sessions, session]
+    input.state.snapshot.cursor += 1
+    recordAgentLifecycle(input.state.snapshot.sessions, sessionId, 'admitted', undefined, undefined, (entry) => {
+      publishAgentLifecycleEntry(input.emit, sessionId, entry)
+    })
+    const runId = `${request.attemptId}:run`
+    const messages = await submitPiHostTurn(input.state, {
+      id: request.attemptId,
+      method: 'turn/submit',
+      params: {
+        sessionId,
+        runId,
+        cwd: input.cwd,
+        profile: input.profile || {},
+        prompt: workflowNodePrompt(request),
+        pattern: 'Turn-based',
+        maxIterations: 1,
+        goalContractV1: true,
+      },
+    }, request.attemptId, input.emit, input.checkpointWriter)
+    const response = messages.find((message) => 'id' in message && message.id === request.attemptId)
+    if (!response || !('result' in response) || !response.result) {
+      const message = response && 'error' in response && response.error
+        ? response.error.message
+        : 'Workflow node turn returned no result'
+      throw new Error(message)
+    }
+    const settlement = response.result.settlement
+    const executionSettlement = settlement === 'answered' || settlement === 'empty'
+      ? 'completed' as const
+      : settlement === 'cancelled' || settlement === 'interrupted' ? settlement : 'failed' as const
+    const answer = piTurnFinalAnswer(response.result.items || [])
+    const entries = response.result.record?.entries || []
+    return {
+      settlement: executionSettlement,
+      resultRef: `${request.attemptId}:turn`,
+      agentSessionId: sessionId,
+      runId,
+      ...(entries.length ? { turnRecordRef: { sessionId, fromSeq: entries[0].seq, toSeq: entries.at(-1)!.seq } } : {}),
+      outputs: executionSettlement === 'completed' ? workflowEnvelope(answer) : [],
+    }
+  }
+}
+
+function handleWorkflowRequest(
+  state: HostState,
+  input: Partial<InternalPiHostRequest>,
+  id: string | number,
+  emit?: (message: PiHostMessage) => void,
+  checkpointWriter?: CompactionCheckpointWriter,
+): PiHostMessage[] | Promise<PiHostMessage[]> | undefined {
+  if (!input.method?.startsWith('workflow/')) return undefined
+  if (!state.workflowGraphNegotiated || !state.workflowRecordNegotiated || !state.workflowSchedulerNegotiated) {
+    return [errorResponse(id, 'forbidden', 'Workflow Graph, Record, and Scheduler capabilities must all be negotiated')]
+  }
+  const workflowRunId = typeof input.params?.workflowRunId === 'string' ? input.params.workflowRunId : ''
+  const fail = (error: unknown) => [errorResponse(id, 'runtime_error', error instanceof Error ? error.message : 'Workflow request failed')]
+  if (input.method === 'workflow/record') {
+    if (!workflowRunId) return [errorResponse(id, 'invalid_request', 'workflowRunId is required')]
+    return [{ id, result: { workflowRecord: state.workflowRuntime.record(workflowRunId) } }]
+  }
+  if (input.method === 'workflow/status') {
+    if (!workflowRunId) return [errorResponse(id, 'invalid_request', 'workflowRunId is required')]
+    const workflow = state.workflowRuntime.status(workflowRunId)
+    return workflow ? [{ id, result: { workflow } }] : [errorResponse(id, 'not_found', 'Workflow run is unknown or not terminal')]
+  }
+  if (input.method === 'workflow/checkpoint') {
+    if (!workflowRunId) return [errorResponse(id, 'invalid_request', 'workflowRunId is required')]
+    return state.workflowRuntime.checkpoint(workflowRunId)
+      .then((workflowCheckpoint) => [{ id, result: { workflowCheckpoint } }])
+      .catch(fail)
+  }
+  if (input.method === 'workflow/repair') {
+    if (!workflowRunId) return [errorResponse(id, 'invalid_request', 'workflowRunId is required')]
+    return state.workflowRuntime.repair(workflowRunId, input.params?.repairPlan)
+      .then((workflow) => [{ id, result: { workflow } }])
+      .catch(fail)
+  }
+  const taskRunId = typeof input.params?.taskRunId === 'string' ? input.params.taskRunId : ''
+  const cwd = typeof input.params?.cwd === 'string' ? input.params.cwd : ''
+  if (!taskRunId || !workflowRunId || !cwd || input.params?.definition === undefined) {
+    return [errorResponse(id, 'invalid_request', 'taskRunId, workflowRunId, cwd, and definition are required')]
+  }
+  const profile = input.params?.profile && typeof input.params.profile === 'object' && !Array.isArray(input.params.profile)
+    ? input.params.profile as Record<string, unknown>
+    : undefined
+  const threadId = typeof input.params?.threadId === 'string' ? input.params.threadId : undefined
+  return state.workflowRuntime.run({
+    definition: input.params.definition,
+    taskRunId,
+    workflowRunId,
+    executeNode: createWorkflowNodeExecutor({ state, cwd, profile, threadId, emit, checkpointWriter }),
+  }).then((workflow) => [{ id, result: { workflow } }]).catch(fail)
+}
+
 export function handlePiHostRequest(
   state: HostState,
   request: unknown,
@@ -6314,6 +6596,8 @@ export function handlePiHostRequest(
   if (input.method === 'state/snapshot') {
     return projectPiHostStateSnapshot(state, id)
   }
+  const workflowResponse = handleWorkflowRequest(state, input, id, emit, checkpointWriter)
+  if (workflowResponse) return workflowResponse
   const runResponse = handleRunRequest(state, input, id, emit)
   if (runResponse) return runResponse
   const agentResponse = handleAgentRequest(state, input, id, emit)
@@ -6892,6 +7176,7 @@ export function createPiHostServer(
     workflowGraphNegotiated: false,
     workflowRecordNegotiated: false,
     workflowSchedulerNegotiated: false,
+    workflowRuntime: new PiWorkflowRuntime(),
     freshSemanticVerifierNegotiated: false,
     agentCommunication: new PiAgentCommunicationDomain(),
     reviewArtifactStore,

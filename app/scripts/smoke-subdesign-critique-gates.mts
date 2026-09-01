@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { buildSubDesignPack } from '../electron/piExtensionPacks/subdesignPack.ts'
 import { configurePiHostServiceTransport, resolvePiHostServiceResponse } from '../electron/piHostServices.ts'
+import { SUBDESIGN_CRITIQUE_CAPABILITY } from '../src/agent/capabilities/subDesign.ts'
 import {
   SUBDESIGN_CRITIQUE_GATE_REGISTRY,
   SUBDESIGN_SCORE_GATE_MAP,
@@ -134,6 +135,26 @@ await test('pass verdict is downgraded when a required gate ran but failed', () 
   assert.ok(result.critique.findings.some((finding) => finding.severity === 'blocker' && finding.message.includes('contrast')))
 })
 
+await test('each registered gate has a store-level failed-measurement path', () => {
+  for (const failedGate of SUBDESIGN_CRITIQUE_GATE_REGISTRY) {
+    useSubDesignCritiqueStore.setState({ critiques: [] })
+    const gateEvidence = SUBDESIGN_CRITIQUE_GATE_REGISTRY.map((gate, index) => ({
+      kind: 'gate',
+      gateId: gate.id,
+      passed: gate.id !== failedGate.id,
+      summary: gate.id === failedGate.id ? `${gate.id} failed measurement` : `${gate.id} passed measurement`,
+      ...ATTESTED_FIELDS(gate.id, index),
+    }))
+    const result = useSubDesignCritiqueStore.getState().record(baseCritiqueInput({
+      evidence: [...baseCritiqueInput().evidence as unknown[], ...gateEvidence],
+    }))
+    assert.equal(result.ok, true)
+    if (!result.ok) continue
+    assert.equal(result.critique.verdict, 'needs-revision')
+    assert.ok(result.critique.findings.some((finding) => finding.message.includes(failedGate.id)))
+  }
+})
+
 await test('score-gate map covers every score dimension deterministically', () => {
   for (const scoreKey of ['briefCoverage', 'brandConformance', 'accessibility', 'implementationReadiness'] as const) {
     assert.ok(Array.isArray(SUBDESIGN_SCORE_GATE_MAP[scoreKey]))
@@ -155,12 +176,13 @@ await test('self-asserted gate evidence without attested fields is dropped fail-
   assert.equal(gateEvidence.length, 0)
 })
 
-await test('Pi gate schema cannot accept a model-supplied verdict and uses Host measurement', async () => {
+await test('all five gates are critique-only, listed in the critique capability, and use Host measurements', async () => {
   const root = await mkdtemp(join(tmpdir(), 'subdesign-gate-'))
   const artifactId = 'artifact_host_gate_qa'
+  const briefId = 'brief_host_gate_qa'
   const manifest = {
     id: artifactId,
-    briefId: 'brief_host_gate_qa',
+    briefId,
     kind: 'html',
     title: 'Host gate QA',
     entry: 'subdesign/gate.html',
@@ -173,18 +195,34 @@ await test('Pi gate schema cannot accept a model-supplied verdict and uses Host 
     updatedAt: new Date().toISOString(),
   }
   const manifestDir = join(root, '.subagents/subdesign/artifacts', artifactId)
+  const briefDir = join(root, '.subagents/subdesign/briefs')
   await mkdir(manifestDir, { recursive: true })
+  await mkdir(briefDir, { recursive: true })
   await writeFile(join(manifestDir, 'manifest.json'), JSON.stringify(manifest), 'utf8')
+  const brief = {
+    id: briefId,
+    threadId: 'thread_gate_qa',
+    surface: 'prototype',
+    objective: 'verify gates',
+    constraints: [],
+    acceptanceCriteria: [],
+    directions: [],
+    stage: 'critique',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+  await writeFile(join(briefDir, `${briefId}.json`), JSON.stringify(brief), 'utf8')
 
-  const gate = buildSubDesignPack().tools.find((tool) => tool.name === 'design_gate_contrast')
-  assert.ok(gate)
-  const properties = (gate.parameters.properties || {}) as Record<string, unknown>
-  assert.deepEqual(Object.keys(properties), ['artifactId'])
-  assert.deepEqual(gate.parameters.required, ['artifactId'])
+  const pack = buildSubDesignPack()
+  const expectedToolNames = SUBDESIGN_CRITIQUE_GATE_REGISTRY.map((gate) => `design_gate_${gate.id.replaceAll('-', '_')}`)
+  assert.ok(expectedToolNames.every((name) => SUBDESIGN_CRITIQUE_CAPABILITY.tools.includes(name)))
+
+  let expectedGateId = ''
+  let hostPassed = false
 
   configurePiHostServiceTransport((request) => {
     assert.equal(request.payload.service, 'subdesign/run-gate')
-    assert.equal(request.payload.input.gateId, 'contrast')
+    assert.equal(request.payload.input.gateId, expectedGateId)
     queueMicrotask(() => resolvePiHostServiceResponse({
       event: 'host/service-response',
       payload: {
@@ -192,19 +230,39 @@ await test('Pi gate schema cannot accept a model-supplied verdict and uses Host 
         result: {
           ok: true,
           evidence: {
-            kind: 'gate', gateId: 'contrast', passed: false, summary: 'Host measured a violation.',
+            kind: 'gate', gateId: expectedGateId, passed: hostPassed, summary: hostPassed ? 'Host measured pass.' : 'Host measured a violation.',
             path: '.subagents/subdesign/artifacts/evidence.json', sha256: 'a'.repeat(64),
-            evidenceId: 'evidence_hostmeasure000001', capturedAt: new Date().toISOString(),
+            evidenceId: `evidence_hostmeasure${expectedGateId.replaceAll('-', '').padEnd(12, '0')}`.slice(0, 73), capturedAt: new Date().toISOString(),
           },
         },
       },
     }))
   })
-  const output = await gate.execute(
-    { artifactId, passed: true, summary: '模型宣稱通過' },
+
+  for (const registeredGate of SUBDESIGN_CRITIQUE_GATE_REGISTRY) {
+    expectedGateId = registeredGate.id
+    const gate = pack.tools.find((tool) => tool.name === `design_gate_${registeredGate.id.replaceAll('-', '_')}`)
+    assert.ok(gate)
+    const properties = (gate.parameters.properties || {}) as Record<string, unknown>
+    assert.deepEqual(Object.keys(properties), ['artifactId'])
+    assert.deepEqual(gate.parameters.required, ['artifactId'])
+    for (const measuredPass of [true, false]) {
+      hostPassed = measuredPass
+      const output = await gate.execute(
+        { artifactId, passed: !measuredPass, summary: '模型嘗試覆寫 Host 結果' },
+        { sessionId: 'session_gate_qa', cwd: root },
+      )
+      assert.equal((output.details as { passed?: boolean }).passed, measuredPass)
+    }
+  }
+
+  await writeFile(join(briefDir, `${briefId}.json`), JSON.stringify({ ...brief, stage: 'build' }), 'utf8')
+  const outsideCritique = await pack.tools.find((tool) => tool.name === 'design_gate_contrast')!.execute(
+    { artifactId },
     { sessionId: 'session_gate_qa', cwd: root },
   )
-  assert.equal((output.details as { passed?: boolean }).passed, false)
+  assert.equal((outsideCritique.details as { ok?: boolean }).ok, false)
+  assert.match(String((outsideCritique.details as { error?: string }).error), /只允許在 Critique stage/)
 })
 
 await test('design_critique rejects model evidence and requires Host verification of the draft', async () => {

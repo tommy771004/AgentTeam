@@ -8,8 +8,14 @@ import {
   type FreshSemanticVerifierRunner,
 } from '../electron/criterionCheckers/semanticVerifier.ts'
 import { verifyAcceptanceEvidence } from '../src/agent/acceptanceContract.ts'
-import { createGoalContractSnapshot, type GoalCriterion } from '../src/agent/goalContract.ts'
+import { createGoalContractSnapshot, goalContractFromWorkingState, type GoalCriterion } from '../src/agent/goalContract.ts'
 import { setOutboundGateObserver } from '../src/agent/outbound/outboundGate.ts'
+import {
+  createFreshSemanticVerifierRunner,
+  semanticAcceptanceRuntimeForAnswer,
+  semanticRubricFromDefinitionOfDone,
+} from '../electron/piSemanticVerifierRuntime.ts'
+import { createInitialWorkingState } from '../src/agent/workingState.ts'
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
 const rubric = { id: 'rubric.release', instructions: 'Verify correctness, freshness, and source validity.', digest: '' }
@@ -173,4 +179,37 @@ const unavailable = await evaluateAcceptanceGate({
 })
 assert.equal(unavailable.snapshot.overall, 'blocked', 'semantic criteria fail closed without a fresh verifier runtime')
 
-console.log('Fresh semantic verifier smoke: context isolation, outbound gate, parallel checks, deterministic quorum, mandatory veto, and Goal budget accounting passed')
+const productRubric = semanticRubricFromDefinitionOfDone('The answer must explain the release evidence accurately.')
+const productContract = await goalContractFromWorkingState({
+  state: createInitialWorkingState({ runId: 'run-product-semantic', objective: 'Explain the release evidence' }),
+  mode: 'goal', maxIterations: 2, maxWallClockMs: 60_000, unattended: false,
+  semanticRubricId: productRubric.id,
+})
+assert.equal(productContract.criteria[0]?.kind, 'semantic-rubric', 'negotiated product DoD becomes an executable criterion')
+assert.ok(productContract.budgets.maxTokens && productContract.budgets.maxCostUsd, 'product semantic verification is bounded')
+
+let freshInstruction = ''
+const productRunner = createFreshSemanticVerifierRunner(async ({ request, instruction }) => {
+  freshInstruction = instruction
+  return {
+    settlement: 'answered',
+    text: JSON.stringify({ verdict: 'passed', reason: `${request.check} passed from sanitized evidence` }),
+    usage: { tokens: 25, costUsd: 0.002 },
+  }
+})
+const productRuntime = semanticAcceptanceRuntimeForAnswer({
+  runId: 'run-product-semantic', answer: 'A bounded worker answer', rubric: productRubric,
+  evidenceRefs: [], budget: { remainingTokens: 500, remainingCostUsd: 0.05 },
+  effectiveMode: 'off', buildFlavor: 'standard', runner: productRunner,
+})
+const productAcceptance = await evaluateAcceptanceGate({
+  runId: 'run-product-semantic', iteration: 1, goalContract: productContract,
+  workspaceRoot: process.cwd(), settlement: 'answered', answer: 'A bounded worker answer',
+  semanticVerifier: productRuntime,
+})
+assert.equal(productAcceptance.snapshot.overall, 'passed')
+assert.deepEqual(productAcceptance.verifierUsage, { tokens: 75, costUsd: 0.006 })
+assert.match(freshInstruction, /worker conversation; none is available/)
+assert.equal(freshInstruction.includes('workerTranscript'), false)
+
+console.log('Fresh semantic verifier smoke: product rubric mapping, context isolation, outbound gate, fresh runner, quorum, mandatory veto, and Goal budget accounting passed')

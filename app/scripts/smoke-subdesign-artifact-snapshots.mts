@@ -157,18 +157,20 @@ await test('register fails closed and does not commit when snapshot APIs are una
 })
 
 
-function fakePresentation(runIsLive: boolean) {
+function fakePresentation(runIsLive: boolean, activeBrief?: { id: string; threadId: string }) {
   return {
     projectRoot: '/project',
-    activeBrief: null,
-    briefs: [],
+    activeBrief: activeBrief || null,
+    briefs: activeBrief ? [activeBrief] : [],
     threads: [],
-    runningThreadIds: [],
+    runningThreadIds: runIsLive && activeBrief ? [activeBrief.threadId] : [],
     linkedThread: null,
-    linkedThreadRunId: null,
-    linkedAgent: null,
-    activityActive: false,
-    runIsLive,
+    linkedThreadRunId: runIsLive ? 'run_live' : null,
+    linkedAgent: runIsLive ? { status: 'running' } : null,
+    activityActive: runIsLive,
+    // Legacy adapter hint is deliberately stale. The workspace must derive
+    // lifecycle from the scoped run facts above for both UI and write guards.
+    runIsLive: false,
     artifacts: [],
     critiques: [],
     critiqueSession: null,
@@ -188,8 +190,9 @@ function fakePresentation(runIsLive: boolean) {
 await test('controller restoreArtifactRevision refuses while the run is live', async () => {
   const { createSubDesignWorkspace } = await import('../src/agent/subdesign/workspace.ts')
   let restoreCalls = 0
+  const liveBrief = { id: 'brief_live', threadId: 'thread_snap', objective: 'x', stage: 'deliver', constraints: [], acceptanceCriteria: [], directions: [], createdAt: '', updatedAt: '' }
   const deps = {
-    findBrief: () => null,
+    findBrief: (id: string) => id === liveBrief.id ? liveBrief : null,
     getThread: () => ({ runner: 'builtin', loopType: null }),
     createThread: () => 'thread_snap',
     bindBriefToThread: () => undefined,
@@ -202,7 +205,7 @@ await test('controller restoreArtifactRevision refuses while the run is live', a
     createRunId: (() => { let n = 0; return () => `run_${++n}` })(),
     getProjectRoot: () => '/project',
     getCapabilities: () => ({ electron: false, hostEvents: false }),
-    readPresentation: () => fakePresentation(true) as never,
+    readPresentation: () => fakePresentation(true, liveBrief) as never,
     restoreArtifact: async () => { restoreCalls += 1; return { ok: true, artifact: {} } },
   } as never
   const workspace = createSubDesignWorkspace(deps)
@@ -218,8 +221,9 @@ await test('controller restoreArtifactRevision refuses while the run is live', a
 await test('controller restoreArtifactRevision delegates when not live', async () => {
   const { createSubDesignWorkspace } = await import('../src/agent/subdesign/workspace.ts')
   let restoreCalls = 0
+  const quietBrief = { id: 'brief_ok', threadId: 'thread_snap', objective: 'x', stage: 'deliver', constraints: [], acceptanceCriteria: [], directions: [], createdAt: '', updatedAt: '' }
   const deps = {
-    findBrief: (id: string) => ({ id, threadId: 'thread_snap', objective: 'x', stage: 'deliver', constraints: [], acceptanceCriteria: [], directions: [], createdAt: '', updatedAt: '' }),
+    findBrief: (id: string) => id === quietBrief.id ? quietBrief : null,
     getThread: () => ({ runner: 'builtin', loopType: null }),
     createThread: () => 'thread_snap',
     bindBriefToThread: () => undefined,
@@ -232,7 +236,7 @@ await test('controller restoreArtifactRevision delegates when not live', async (
     createRunId: (() => { let n = 0; return () => `run_${++n}` })(),
     getProjectRoot: () => '/project',
     getCapabilities: () => ({ electron: false, hostEvents: false }),
-    readPresentation: () => fakePresentation(false) as never,
+    readPresentation: () => fakePresentation(false, quietBrief) as never,
     restoreArtifact: async () => { restoreCalls += 1; return { ok: true, artifact: { id: 'artifact_any', revision: 3 } } },
   } as never
   const workspace = createSubDesignWorkspace(deps)
@@ -392,7 +396,7 @@ await test('controller submitPinnedComments compiles pins into a single runTask'
     createRunId: (() => { let n = 0; return () => `run_${++n}` })(),
     getProjectRoot: () => '/project',
     getCapabilities: () => ({ electron: false, hostEvents: false }),
-    readPresentation: () => fakePresentation(live) as never,
+    readPresentation: () => fakePresentation(live, brief) as never,
   } as never
   const workspace = createSubDesignWorkspace(deps)
   ;(workspace as unknown as { sync: (input: { routeBriefId: string | null }) => void }).sync({ routeBriefId: 'brief_pin' })

@@ -364,6 +364,7 @@ export function SubDesignPage() {
         onOpenTranscript={openTranscript}
         onSelectArtifact={(artifact) => workspaceController.setSelectedArtifact(`${artifact.id}:${artifact.revision}`)}
         onSelectDirection={(directionId) => { workspaceController.selectDirection(activeBrief.id, directionId, projectRoot || undefined) }}
+        onCreateDirection={(title) => { workspaceController.createDirection(activeBrief.id, title, projectRoot || undefined) }}
         storybookSettings={storybookSettings}
         latestStorybookRun={storybookRuns.find((item) => item.briefId === activeBrief.id) || storybookRuns[0] || null}
         experimentalSettings={experimentalSettings}

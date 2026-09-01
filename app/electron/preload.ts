@@ -37,6 +37,11 @@ import type { WorkingGoalCompletionPredicate } from '../src/agent/workingState'
 import type { GoalContractSnapshot } from '../src/agent/goalContract'
 import type { AcceptanceSnapshot } from '../src/agent/acceptanceContract'
 import type { GoalVerdict } from '../src/agent/goalOutcome'
+import type { WorkflowDefinition } from '../src/agent/workflowGraph'
+import type { PiWorkflowProjection } from './piWorkflowRuntime'
+import type { RepairPlan } from '../src/agent/repairPlan'
+import type { WorkflowRecordEntry } from '../src/agent/workflowRecord'
+import type { WorkflowRecoveryCheckpoint } from '../src/agent/goalRuntimeCheckpoint'
 
 type PiHostThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 type PiHostSettings = {
@@ -301,6 +306,18 @@ const api = {
         cancel: (runId: string) => ipcRenderer.invoke('pi-host:turn:cancel', runId) as Promise<{ runId: string; settlement: string }>,
         interrupt: (input: { runId: string; reason?: 'user' | 'timeout' }) =>
           ipcRenderer.invoke('pi-host:turn:interrupt', input) as Promise<{ runId: string; settlement: string; interruptReason?: 'user' | 'timeout' }>,
+      },
+      workflow: {
+        run: (input: { definition: WorkflowDefinition; taskRunId: string; workflowRunId: string; cwd: string; profile?: Record<string, unknown>; threadId?: string }) =>
+          ipcRenderer.invoke('pi-host:workflow:run', input) as Promise<{ workflow: PiWorkflowProjection }>,
+        repair: (input: { workflowRunId: string; repairPlan: RepairPlan }) =>
+          ipcRenderer.invoke('pi-host:workflow:repair', input) as Promise<{ workflow: PiWorkflowProjection }>,
+        status: (workflowRunId: string) =>
+          ipcRenderer.invoke('pi-host:workflow:status', workflowRunId) as Promise<{ workflow: PiWorkflowProjection }>,
+        record: (workflowRunId: string) =>
+          ipcRenderer.invoke('pi-host:workflow:record', workflowRunId) as Promise<{ workflowRecord: WorkflowRecordEntry[] }>,
+        checkpoint: (workflowRunId: string) =>
+          ipcRenderer.invoke('pi-host:workflow:checkpoint', workflowRunId) as Promise<{ workflowCheckpoint: WorkflowRecoveryCheckpoint }>,
       },
       tools: {
       list: () => ipcRenderer.invoke('pi-host:tools:list') as Promise<{ builtinTools: string[] }>,

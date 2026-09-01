@@ -4,10 +4,14 @@
 
 **Blocked by:** 01 — Gate evidence contract + fail-closed verdict
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] Contrast gate 註冊於 tool registry，僅在 critique stage 允許執行
-- [ ] Gate 輸出為結構化量測（元素/狀態/ratio/pass-fail）並寫入 `'gate'` evidence
-- [ ] Runner 能在 critique 迭代中呼叫 gate；gate 失敗不會偽造 pass verdict
-- [ ] Tool registry drift guard 斷言 gate 已註冊且 stage 限制正確
-- [ ] End-to-end smoke：帶 gate 證據的 critique 可 pass；無 gate 的 pass 被 fail-closed 拒絕
+- [x] Contrast gate 註冊於 tool registry，僅在 critique stage 允許執行
+- [x] Gate 輸出為結構化量測（元素/狀態/ratio/pass-fail）並寫入 `'gate'` evidence
+- [x] Runner 能在 critique 迭代中呼叫 gate；gate 失敗不會偽造 pass verdict
+- [x] Tool registry drift guard 斷言 gate 已註冊且 stage 限制正確
+- [x] End-to-end smoke：帶 gate 證據的 critique 可 pass；無 gate 的 pass 被 fail-closed 拒絕
+
+## Comments
+
+**2026-09-01 production closure**：`design_gate_contrast` 經 `design-critique` capability 暴露，tool execute 會回讀 artifact 對應 brief，非 Critique stage 直接 fail-closed。Host service 的實測結果覆蓋模型夾帶的 verdict；完整／缺少／失敗 gate evidence 的 store 路徑由 `smoke-subdesign-critique-gates.mts` 對帳。

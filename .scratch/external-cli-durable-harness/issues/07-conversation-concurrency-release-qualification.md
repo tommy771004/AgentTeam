@@ -34,6 +34,10 @@ adapters and the complete release suites have evidence.
 
 最新 metadata-only report 已覆寫至 `../evidence/real-cli-qualification.md`／`.json`：Codex CLI 0.150.1 的 process、checkpoint、restart projection 與 Turn Record 通過，但 native discovery marker 未出現，故為 `native_discovery_unproven`；Claude Code 2.1.246 實際啟動後回報 `auth_unavailable`。這次未安裝、登入或改動 provider；ticket 維持 open。
 
+## 2026-09-01 qualification repair and fresh rerun
+
+舊 probe 的專案 instruction 只包含 token，並未要求 provider 在回答中帶回 token，因此「marker 未出現」不能區分 discovery 未發生與 discovery 已發生但無可觀察行為。修正 probe 後，user prompt 仍不含檔名或 native token；Codex CLI 0.152.0 透過 shipped admission／adapter 回傳 expected marker 一次、forbidden marker 零次，且 checkpoint、restart projection、metadata-only Turn Record 均通過，現標為 `qualified`（native mode，非 exact snapshot parity）。Claude Code 2.1.246 仍為 `auth_unavailable`，ticket 維持 open。
+
 - [ ] Two different conversation threads can run external sessions independently up to `maxConcurrentRuns` without sharing activity, deadlines, output, cancellation, or settlement.
 - [ ] Same-thread follow-ups retain the configured steer/queue ordering and do not start an overlapping external process accidentally.
 - [ ] Every shipped external adapter uses the common session lifecycle and centrally defined timing policy or returns an explicit unsupported capability.

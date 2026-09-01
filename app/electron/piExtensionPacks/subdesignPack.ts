@@ -441,6 +441,11 @@ function gateTool(spec: GateSpec): PiPackTool {
       if (!artifactId) return structuredFailure('不安全的 artifactId')
       const validation = await loadManifest(ctx, artifactId)
       if (!validation.ok) return structuredFailure(`artifact manifest invalid：${validation.errors.join('；')}`)
+      const brief = normalizeBrief(await readJson(insideRoot(ctx.cwd, `${METADATA_ROOT}/briefs/${validation.manifest.briefId}.json`)!))
+      if (!brief) return structuredFailure(`找不到 artifact 對應的 brief：${validation.manifest.briefId}`)
+      if (brief.stage !== 'critique') {
+        return structuredFailure(`design gate 只允許在 Critique stage 執行；目前 stage：${brief.stage}`)
+      }
       const measured = await requestPiHostService<{ ok: boolean; evidence?: Record<string, unknown>; error?: string }>(
         'subdesign/run-gate',
         { gateId: spec.id, artifact: validation.manifest, projectRoot: ctx.cwd },

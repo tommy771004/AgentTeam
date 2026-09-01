@@ -2565,6 +2565,11 @@ ipcMain.handle('pi-host:tools:execute', async (_evt, input: { tool: 'read' | 'gr
 ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; workingGoal?: unknown; goalContractV1?: boolean; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; clientMessageId?: string; expectedActiveRunId?: string; pluginExecution?: unknown }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { contextPolicy: input.contextPolicy, pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, workingGoal: input.workingGoal, goalContractV1: input.goalContractV1, timeoutMs: input.timeoutMs, mode: input.mode, queue: input.queue, clientMessageId: input.clientMessageId, expectedActiveRunId: input.expectedActiveRunId, pluginExecution: input.pluginExecution }))
 ipcMain.handle('pi-host:turn:cancel', async (_evt, runId: string) => piHostSupervisor.cancelTurn(runId))
 ipcMain.handle('pi-host:turn:interrupt', async (_evt, input: { runId: string; reason?: 'user' | 'timeout' }) => piHostSupervisor.interruptTurn(input.runId, input.reason))
+ipcMain.handle('pi-host:workflow:run', async (_evt, input: { definition: unknown; taskRunId: string; workflowRunId: string; cwd: string; profile?: Record<string, unknown>; threadId?: string }) => piHostSupervisor.runWorkflow(input))
+ipcMain.handle('pi-host:workflow:repair', async (_evt, input: { workflowRunId: string; repairPlan: unknown }) => piHostSupervisor.repairWorkflow(input))
+ipcMain.handle('pi-host:workflow:status', async (_evt, workflowRunId: string) => piHostSupervisor.workflowStatus(workflowRunId))
+ipcMain.handle('pi-host:workflow:record', async (_evt, workflowRunId: string) => piHostSupervisor.workflowRecord(workflowRunId))
+ipcMain.handle('pi-host:workflow:checkpoint', async (_evt, workflowRunId: string) => piHostSupervisor.workflowCheckpoint(workflowRunId))
 
 // ── Durable compaction checkpoints (ADR-0040 storage layer, ADR-0042 resume) ──
 const compactionCheckpoints = new JsonCompactionCheckpointStore(

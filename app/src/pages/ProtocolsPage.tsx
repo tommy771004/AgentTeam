@@ -891,11 +891,15 @@ export function ProtocolsPage() {
 
             {/* 專案 pill 置於輸入上方；其餘次要控制集中在左下＋選單。 */}
             <div className="shrink-0 w-full pt-3 pb-4 space-y-2">
-              <div className="flex min-w-0 items-center gap-2">
+              <div className={lifecycle.live ? 'grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2' : 'flex min-w-0 items-center gap-2'}>
                 <ProjectContextBar />
                 {lifecycle.live ? (
-                  <ExecutionStepsProgress tasks={activity?.tasks.length ? activity.tasks : thread?.runPlan || []} />
+                  <ExecutionStepsProgress
+                    tasks={activity?.tasks.length ? activity.tasks : thread?.runPlan || []}
+                    fileChanges={activity?.fileChanges}
+                  />
                 ) : null}
+                {lifecycle.live ? <span aria-hidden="true" /> : null}
               </div>
               {activeId ? <PermissionAskPanel threadId={activeId} /> : null}
               <CommandComposer

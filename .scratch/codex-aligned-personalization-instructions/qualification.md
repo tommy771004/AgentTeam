@@ -1,8 +1,8 @@
 # Codex-aligned Personalization — Qualification status
 
-Updated: 2026-08-31
+Updated: 2026-09-01
 
-Status: needs-info / unqualified
+Status: needs-info / Codex qualified; Claude unqualified
 
 ## Evidence availability
 
@@ -10,7 +10,7 @@ Status: needs-info / unqualified
 [`../external-cli-durable-harness/evidence/real-cli-qualification.md`](../external-cli-durable-harness/evidence/real-cli-qualification.md)
 承載。2026-08-31 已從 shipped admission／adapter owner 重跑，報告只保存 metadata、hash、lifecycle 與安全 argv，不保存 prompt／output body／credentials。
 
-此證據是 fresh NO-GO qualification，不是 release approval。
+此證據是 provider-specific qualification，不是整體 release approval。
 
 ## Recorded local implementation status
 
@@ -22,14 +22,14 @@ been independently revalidated by reconstructing this document.
 
 ## External qualification remains open
 
-2026-08-31 fresh real-machine result：
+2026-09-01 fresh real-machine result：
 
 | Provider | Runtime result | Limitation | Qualification |
 |----------|----------------|------------|---------------|
-| Codex CLI 0.150.1 | exit 0；checkpoint、restart projection、Turn Record 通過 | native marker 未出現：`native_discovery_unproven` | unqualified |
+| Codex CLI 0.152.0 | exit 0；native marker、checkpoint、restart projection、Turn Record 通過 | provider-owned discovery，Host 仍不宣稱 exact snapshot parity | qualified（native mode） |
 | Claude Code 2.1.246 | 實際啟動後 exit 1 | `auth_unavailable` | unqualified |
 
-Native-discovery acceptance remains unchecked。不得由 CLI process success 推導 Definition of Done；Claude 也不得在未登入時冒充已測。完整 metadata-only report 見上方連結。
+Codex 的 native-discovery acceptance 已由 shipped path 證實；Claude remains unchecked。不得由 CLI process success 推導 Definition of Done，也不得把 Codex native mode 宣稱為 builtin Pi 的 exact snapshot parity；Claude 未登入時不得冒充已測。完整 metadata-only report 見上方連結。
 
 ## Repository-link repair verification
 

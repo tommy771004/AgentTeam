@@ -171,6 +171,8 @@ export type PiRuntimeSettings = {
   mcpGenerationKey?: string
   /** Owning capability was already loaded when this turn was admitted. */
   mcpCapabilityActive?: boolean
+  /** Fresh acceptance verifier: no skills, package extensions, or callable tools. */
+  verifierIsolation?: boolean
 }
 
 export type PiLegacyModelConfig = {
@@ -408,7 +410,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   // selected provider/model. Hash locally; no credential material leaves the
   // utility process or reaches logs/IPC.
   const { authPath, revision: authRevision } = await piAuthRevision(agentDir)
-  const skillSnapshot = await snapshotPiSkillResources(agentDir, sessionId, cwd)
+  const skillSnapshot = settings.verifierIsolation ? undefined : await snapshotPiSkillResources(agentDir, sessionId, cwd)
   const packageExtensions = await resolvePiPackageExtensionResources(agentDir)
   const activeToolsKey = JSON.stringify({ settings, cwd, skillSnapshotDigest: skillSnapshot?.digest, packageExtensionDigest: packageExtensions.digest, authRevision })
   if (skillSnapshot) bindPiSessionSkillResourceView(sessionId, skillSnapshot)
@@ -457,8 +459,8 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
       // never auto-load an untrusted extension behind this boundary.
       noExtensions: true,
       noContextFiles: true,
-      additionalExtensionPaths: packageExtensions.resources.map((resource) => resource.path),
-      additionalSkillPaths: piSkillsDir ? [piSkillsDir] : undefined,
+      additionalExtensionPaths: settings.verifierIsolation ? [] : packageExtensions.resources.map((resource) => resource.path),
+      additionalSkillPaths: !settings.verifierIsolation && piSkillsDir ? [piSkillsDir] : undefined,
       extensionsOverride: (base: { extensions: Array<{ path: string; tools: Map<string, unknown> }>; errors: unknown[]; runtime: unknown }) => {
         const reserved = new Set([...Object.keys(TOOL_FACTORIES), ...piAllPackToolNames(), ...mcpDynamic.tools.map((tool) => tool.modelName)])
         const discoveries = new Map<string, { names: string[]; collisions: string[] }>()
@@ -481,7 +483,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
         for (const [source, discovery] of discoveries) recordPiPackageToolDiscovery(source, discovery.names, discovery.collisions)
         return base
       },
-      extensionFactories: [
+      extensionFactories: settings.verifierIsolation ? [] : [
         ...packBundle.factories,
         piSkillPreflightExtensionFactory({ sessionId }),
         // ADR-0047: builtin shell stays outside the external-CLI sandbox and
@@ -541,7 +543,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   }
   const restrictedTools = configurePiToolOptions(options, settings, mcpDynamic, packageToolNames)
   if (settings.thinkingLevel) options.thinkingLevel = settings.thinkingLevel
-  options.customTools = [piWorkingStateWriteToolDefinition({
+  options.customTools = settings.verifierIsolation ? [] : [piWorkingStateWriteToolDefinition({
     sessionId,
     cwd,
     factory: piCodingAgent.createWriteToolDefinition,
@@ -564,13 +566,13 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
     contextWindowTokens = model.contextWindow
   }
   const created = await piCodingAgent.createAgentSession(options)
-  installPiSkillPreflightBatchBarrier(sessionId, created.session.agent)
+  if (!settings.verifierIsolation) installPiSkillPreflightBatchBarrier(sessionId, created.session.agent)
   // The active set is stated explicitly so the model sees exactly what the
   // catalog projection claims: restricted allowlists union their unlocked
   // capability tools; an unrestricted run gets the Pi defaults plus every
   // always-on pack tool. Without this, Pi would auto-activate every
   // registered extension tool and the catalog would understate reality.
-  const desiredActive = desiredPiTools(restrictedTools, settings, mcpDynamic, packageToolNames)
+  const desiredActive = settings.verifierIsolation ? [] : desiredPiTools(restrictedTools, settings, mcpDynamic, packageToolNames)
   try {
     created.session.setActiveToolsByName?.([...new Set(desiredActive)])
   } catch {
@@ -578,7 +580,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   }
   // The session handle is the ONLY thing packs may touch mid-run: activating
   // registered tools. load_capability drives it; nothing else is exposed.
-  registerPiPackSession(sessionId, {
+  if (!settings.verifierIsolation) registerPiPackSession(sessionId, {
     setActiveTools: (names) => {
       try {
         created.session.setActiveToolsByName?.(names)
@@ -611,7 +613,7 @@ async function ensurePiSessionRuntime(sessionId: string, cwd: string, history: P
   if (existing?.skillSnapshotRoot && existing.skillSnapshotRoot !== skillSnapshot?.root) {
     await rm(existing.skillSnapshotRoot, { recursive: true, force: true })
   }
-  commitPiPackExtensionBundle(sessionId, packBundle)
+  if (!settings.verifierIsolation) commitPiPackExtensionBundle(sessionId, packBundle)
   sessionRuntimes.set(sessionId, runtime)
   return runtime
   } catch (error) {

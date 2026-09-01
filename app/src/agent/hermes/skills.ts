@@ -1,6 +1,8 @@
 /**
- * Skills system — inspired by Hermes / agentskills.io
- * SKILL.md with YAML frontmatter + markdown body.
+ * @deprecated Renderer skill-authoring compatibility bridge, scheduled for
+ * removal before AgentStudio 1.3.0. Pi Host remains the only runtime discovery
+ * authority; this copy exists for current Learning/Settings authoring and is
+ * synchronised through skillHostSync. Do not add consumers.
  */
 
 import type { Skill, SkillMeta } from './types.ts'

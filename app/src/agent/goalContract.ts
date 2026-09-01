@@ -1,6 +1,8 @@
 import type { WorkingState } from './workingState.ts'
 
 export const GOAL_CONTRACT_CAPABILITY = 'goal-contract-v1' as const
+export const DEFAULT_SEMANTIC_VERIFIER_MAX_TOKENS = 12_000
+export const DEFAULT_SEMANTIC_VERIFIER_MAX_COST_USD = 2
 
 export type GoalCriterion =
   | Readonly<{ id: string; kind: 'assistant-answer-present' }>
@@ -208,7 +210,15 @@ export async function goalContractFromWorkingState(input: {
   maxIterations: number
   maxWallClockMs: number
   unattended: boolean
+  /** Present only after the Host negotiated and installed a fresh verifier. */
+  semanticRubricId?: string
 }): Promise<GoalContractSnapshot> {
+  const deterministicCriteria = input.state.goals.flatMap((goal) => goal.completionPredicate?.kind === 'file-content'
+    ? [{ id: goal.id, kind: 'file-content' as const, path: goal.completionPredicate.path, sha256: goal.completionPredicate.sha256 }]
+    : [])
+  const semanticCriteria: GoalCriterion[] = input.semanticRubricId && deterministicCriteria.length === 0
+    ? [{ id: `semantic-dod:${input.state.runId}`, kind: 'semantic-rubric', rubricId: input.semanticRubricId, verifierPolicy: 'mandatory' }]
+    : []
   const body: GoalContractBody = {
     schemaVersion: 1,
     id: `goal-contract:${input.state.runId}`,
@@ -219,12 +229,14 @@ export async function goalContractFromWorkingState(input: {
     outputs: [],
     criteria: input.mode === 'turn'
       ? [{ id: `turn-answer:${input.state.runId}`, kind: 'assistant-answer-present' }]
-      : input.state.goals.flatMap((goal) => goal.completionPredicate?.kind === 'file-content'
-        ? [{ id: goal.id, kind: 'file-content' as const, path: goal.completionPredicate.path, sha256: goal.completionPredicate.sha256 }]
-        : []),
+      : [...deterministicCriteria, ...semanticCriteria],
     budgets: {
       maxIterations: input.maxIterations,
       maxWallClockMs: input.maxWallClockMs,
+      ...(semanticCriteria.length ? {
+        maxTokens: DEFAULT_SEMANTIC_VERIFIER_MAX_TOKENS,
+        maxCostUsd: DEFAULT_SEMANTIC_VERIFIER_MAX_COST_USD,
+      } : {}),
     },
     escalation: {
       onBlocked: input.unattended ? 'fail' : 'hitl',

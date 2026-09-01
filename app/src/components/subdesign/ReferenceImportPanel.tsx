@@ -4,6 +4,56 @@ import { useProjectStore } from '../../store/projectStore'
 import { useSubDesignStore } from '../../store/subDesignStore'
 import { Icon } from '../Icon'
 
+function basename(value: string): string {
+  return value.replace(/\\/g, '/').split('/').filter(Boolean).pop() || value
+}
+
+export function ReferenceContextCards({ brief }: { brief: SubDesignBrief }) {
+  const cards = [
+    ...(brief.references || []).map((reference) => ({
+      id: `reference:${reference.id}`,
+      title: reference.title || basename(reference.storedPath),
+      summary: reference.kind === 'screenshot'
+        ? `已封存 screenshot；SHA-256 ${reference.sha256.slice(0, 12)}…`
+        : `已建立 sandbox URL snapshot；SHA-256 ${reference.sha256.slice(0, 12)}…`,
+      badge: reference.kind === 'screenshot' ? 'PNG' : 'URL',
+      source: reference.storedPath || reference.source,
+    })),
+    ...(brief.provenance || []).map((record) => ({
+      id: `provenance:${record.recordId || record.digest}`,
+      title: record.title || basename(record.sourcePath || record.sourceUrl),
+      summary: `OpenDesign provenance · commit ${record.upstreamCommit.slice(0, 12)} · digest ${record.digest.slice(0, 12)}…`,
+      badge: record.sourcePath?.split('.').pop()?.toUpperCase() || 'WEB',
+      source: record.sourcePath || record.sourceUrl,
+    })),
+  ]
+  if (!cards.length) return null
+  return (
+    <section className="space-y-2" aria-label="參考與脈絡" data-subdesign-context-cards>
+      <div className="flex items-center gap-2 px-0.5">
+        <h3 className="text-[11px] font-semibold text-on-surface">參考與脈絡</h3>
+        <span className="rounded-md bg-white/[0.05] px-1.5 py-0.5 text-[9px] tabular-nums text-outline">{cards.length}</span>
+      </div>
+      {cards.map((card, index) => (
+        <article key={card.id} className="overflow-hidden rounded-xl bg-white/[0.035] shadow-card" style={{ animation: `fade-up 300ms cubic-bezier(0.23,1,0.32,1) ${index * 45}ms both` }}>
+          <div className="flex items-center gap-2 border-b border-white/[0.07] px-3 py-2">
+            <Icon name="subject" size={12} className="shrink-0 text-outline" />
+            <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-on-surface">{card.title}</span>
+            <span className="shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 text-[8px] font-bold text-outline">{card.badge}</span>
+          </div>
+          <p className="px-3 pt-2 text-[10px] leading-relaxed text-on-surface-variant">{card.summary}</p>
+          <div className="px-3 pb-3 pt-2">
+            <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/[0.05] px-2 py-1 text-[9px] text-outline">
+              <Icon name="link" size={10} className="shrink-0" />
+              <span className="truncate" title={card.source}>{card.source}</span>
+            </span>
+          </div>
+        </article>
+      ))}
+    </section>
+  )
+}
+
 export function ReferenceImportPanel({ brief }: { brief: SubDesignBrief | null }) {
   const projectRoot = useProjectStore((state) => state.root)
   const updateBrief = useSubDesignStore((state) => state.updateBrief)
@@ -36,9 +86,10 @@ export function ReferenceImportPanel({ brief }: { brief: SubDesignBrief | null }
   return <section className="app-panel">
     <div className="flex items-center justify-between border-b border-white/[0.08] px-4 py-3">
       <div className="flex items-center gap-2 text-[12px] font-semibold text-on-surface"><Icon name="import_export" size={16} className="text-primary" /> 匯入參考</div>
-      <span className="text-[11px] text-outline">{brief?.references?.length || 0} refs</span>
+      <span className="text-[11px] text-outline">{(brief?.references?.length || 0) + (brief?.provenance?.length || 0)} sources</span>
     </div>
     {!brief ? <div className="px-4 py-5 text-[11px] text-outline">建立或選擇 brief 後匯入 Screenshot / URL。</div> : <div className="space-y-3 p-4">
+      <ReferenceContextCards brief={brief} />
       <div className="flex gap-2"><button type="button" onClick={() => setKind('screenshot')} className={`flex-1 rounded-lg border px-3 py-2 text-[11px] ${kind === 'screenshot' ? 'border-primary/40 bg-primary/10 text-primary' : 'border-white/10 text-outline'}`}>Screenshot</button><button type="button" onClick={() => setKind('url')} className={`flex-1 rounded-lg border px-3 py-2 text-[11px] ${kind === 'url' ? 'border-primary/40 bg-primary/10 text-primary' : 'border-white/10 text-outline'}`}>URL</button></div>
       <label className="block text-[11px] font-medium text-outline">{kind === 'url' ? '公開 http/https URL' : '專案內相對路徑或 image data URL'}<input value={source} onChange={(event) => setSource(event.target.value)} placeholder={kind === 'url' ? 'https://example.com' : 'references/landing.png'} className="mt-1 h-10 w-full rounded-xl border border-white/10 bg-black/10 px-3 text-[12px] text-on-surface outline-none placeholder:text-outline/60 focus:border-primary/45" /></label>
       <label className="block text-[11px] font-medium text-outline">名稱（可選）<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：Marketing landing reference" className="mt-1 h-10 w-full rounded-xl border border-white/10 bg-black/10 px-3 text-[12px] text-on-surface outline-none placeholder:text-outline/60 focus:border-primary/45" /></label>

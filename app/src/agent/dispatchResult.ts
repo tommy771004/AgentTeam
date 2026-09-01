@@ -18,6 +18,9 @@ export type DispatchResult = {
   goalVerdict?: GoalVerdict
   goalContractDigest?: string
   acceptanceDigest?: string
+  workflowRunId?: string
+  workflowVerdict?: 'passed' | 'failed' | 'blocked'
+  workflowAcceptanceDigest?: string
   stopReason?: string
   /** Final Host loop evidence; external CLI never supplies DoD truth. */
   orchestration?: {

@@ -73,6 +73,32 @@ function FileDiffChips({ files }: { files: readonly DisplayFileChange[] }) {
   )
 }
 
+function SubDesignThinkingSteps({ tasks }: { tasks: readonly RunTaskItem[] }) {
+  if (!tasks.length) return null
+  return (
+    <section className="agent-subdesign-thinking" aria-label="SubDesign 思考步驟" data-subdesign-thinking-steps>
+      <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium text-ink-2">
+        <Icon name="auto_awesome" size={14} className="text-ink-3" />
+        <span>{tasks.every((task) => task.status === 'done') ? '思考完成' : '正在整理執行步驟'}</span>
+      </div>
+      <ol className="relative ml-1 space-y-1 border-l border-line pl-4">
+        {tasks.map((task) => (
+          <li key={task.id} className="flex min-h-7 items-center gap-2 text-[11px]">
+            {task.status === 'done' ? (
+              <Icon name="check" size={13} className="shrink-0 text-ink-3" />
+            ) : task.status === 'active' ? (
+              <AgentThinking variant="spin" className="shrink-0 text-ink-2" />
+            ) : (
+              <span className="h-2 w-2 shrink-0 rounded-full border border-line-strong" />
+            )}
+            <span className={task.status === 'pending' ? 'text-ink-3' : 'text-ink'}>{task.text}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
+
 function kindIcon(kind: string): string {
   switch (kind) {
     case 'tool':
@@ -139,10 +165,12 @@ export function RunProcessFeed({
   runId,
   depthLabel,
   onOpenPanel,
+  context = 'default',
 }: {
   runId: string
   depthLabel: string
   onOpenPanel?: () => void
+  context?: 'default' | 'subdesign'
 }) {
   const agent = useAgentStore((s) => s.runStates[runId]) || EMPTY_AGENT
   const isRunning = useAgentStore((s) => s.activeRunIds.includes(runId))
@@ -537,6 +565,7 @@ export function RunProcessFeed({
 
       <Reveal open={processOpen}>
         <div className="space-y-3">
+          {context === 'subdesign' ? <SubDesignThinkingSteps tasks={tasks} /> : null}
           {recovery ? (
             <div className="agent-process-recovery space-y-2 text-[12px] text-ink-2" role="status">
               <div>

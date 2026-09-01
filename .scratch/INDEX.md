@@ -8,11 +8,11 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 | Effort | Spec | Frontier | Notes |
 |--------|------|----------|-------|
-| **codex-aligned-personalization-instructions** | [spec.md](codex-aligned-personalization-instructions/spec.md) | [11 External CLI native discovery](codex-aligned-personalization-instructions/issues/11-external-cli-instruction-delivery-modes.md) | 2026-08-31 fresh 真機重跑：Codex CLI 0.150.1 exit 0 且 checkpoint／record 通過，但 native marker 未出現；Claude Code 2.1.246 實際啟動後 auth unavailable。[qualification](codex-aligned-personalization-instructions/qualification.md) 維持 needs-info／unqualified。 |
-| **context-usage-panel** | [spec.md](context-usage-panel/spec.md) | [08 qualification](context-usage-panel/issues/08-qualification.md) | 實作已存在：`ContextUsagePanel`、`projectContextUsage` 與 context projection smoke 均在主鏈；2026-08-28 focused smoke 通過。票內 acceptance 尚未逐條對帳，手動 UI／舊記錄 replay 證據仍須補齊，故不宣稱 resolved。 |
-| **external-cli-durable-harness** | [spec.md](external-cli-durable-harness/spec.md) | [07 qualification](external-cli-durable-harness/issues/07-conversation-concurrency-release-qualification.md) | Durable harness 已落地；2026-08-31 [fresh real CLI report](external-cli-durable-harness/evidence/real-cli-qualification.md) 為 Codex `native_discovery_unproven`、Claude `auth_unavailable`。Grok／Gemini／Cursor 本輪未安裝或登入，故維持 open。 |
+| **codex-aligned-personalization-instructions** | [spec.md](codex-aligned-personalization-instructions/spec.md) | [11 External CLI native discovery](codex-aligned-personalization-instructions/issues/11-external-cli-instruction-delivery-modes.md) | 2026-09-01 fresh 真機重跑：Codex CLI 0.152.0 的 native marker、checkpoint／restart projection／record 通過，qualified（native mode，非 exact parity）；Claude Code 2.1.246 仍 auth unavailable。[qualification](codex-aligned-personalization-instructions/qualification.md) 維持 needs-info。 |
+| **context-usage-panel** | [spec.md](context-usage-panel/spec.md) | [qualification](context-usage-panel/qualification.md) | resolved；2026-09-01 已完成 typecheck、投影／lifecycle smoke、lint、production 元件 rendered UI、external 降級與 legacy replay qualification。 |
+| **external-cli-durable-harness** | [spec.md](external-cli-durable-harness/spec.md) | [07 qualification](external-cli-durable-harness/issues/07-conversation-concurrency-release-qualification.md) | Durable harness 已落地；2026-09-01 [fresh real CLI report](external-cli-durable-harness/evidence/real-cli-qualification.md) 為 Codex `qualified`（native mode）、Claude `auth_unavailable`。其餘 provider 本輪未重跑，故維持 open。 |
 | **pi-agent-runtime-contract** | spec（見目錄） | [#14 Linux bwrap 真機](pi-agent-runtime-contract/issues/14-linux-bubblewrap-builtin-shell-tracer.md) · [#22 rollup](pi-agent-runtime-contract/issues/22-remaining-work-rollup.md) | Automated test gate 已收口。#18 已採 Host enforcement：force push deny、不靜默改寫、gate 前套用，focused smoke 12/12（含真實 turn）通過；剩餘 frontier 是 #14 Linux CI 首綠與 #22 外部證據。 |
-| **subdesign-p0-harness-gaps** | [spec.md](subdesign-p0-harness-gaps/spec.md) | [01 Gate evidence contract](subdesign-p0-harness-gaps/issues/01-gate-evidence-contract-fail-closed.md) | #05–#07 已於 2026-08-28 收口，含 canonical pinned-comment audit 與 UI 回查。Pi Core gate 已移除模型 verdict，改由 Electron main 真實 runner 量測並簽章；尚需依 #01 原票語意對帳 store「拒絕」與目前 normalizer「降級 needs-revision」差異。 |
+| **subdesign-p0-harness-gaps** | [spec.md](subdesign-p0-harness-gaps/spec.md) | resolved | #01–#08 已收口。Gate 僅能在 Critique stage 執行、五項 Host measurement 與 score provenance 已完成；pinned-comment audit、immutable snapshot restore 與任意兩版 side-by-side diff 均有 shipped smoke 證據。 |
 
 ## Resolved this session chain
 
@@ -53,8 +53,8 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 - **trf#04** — `toolAudit` 未改為投影：它涵蓋回合之外的工具呼叫，純推導會遺失那些記錄（設計決策，票內有說明）。
 - **trf#11** — 外部 CLI record 的 seam-1 真 CLI 斷言：形狀以純 builder fixture 斷言（`smoke-external-cli-record`）；跑真 CLI 的端到端歸 external-cli-durable-harness effort。
-- **parity#18** — `hermes/skills.ts` 以 READ-ONLY 形式留一個版本作為遷移回滾（`check-pi-contract.mts` Guard 3 凍結其 4 個消費者）；收口追蹤於 runtime-contract #17。
-- **vendored Pi TODO/FIXME** — `vendor/pi/packages/ai/src/api/openai-codex-responses.ts:961` 與 vendored image/token tests 的 TODO 屬 upstream-owned code；本輪不改 vendor，待下一次 upstream sync 對帳。
+- **parity#18** — [`hermes/skills.ts` authoring compatibility](hermes-skills-authoring-compatibility.md) 仍供 Learning／Settings 編輯後單向同步 Host；它不是 READ-ONLY，也不是 runtime discovery authority。Guard 3 現完整凍結 12 個 consumer，期限明確延至 1.3.0 前。
+- **vendored Pi TODO/FIXME** — [upstream debt inventory](vendored-pi-upstream-debt.md) 由 Pi sync manifest 與 sync-evidence gate 對帳；本專案不直接修改 upstream workaround／skipped provider tests。
 
 ## 待維護者裁決 queue（顯式，不埋在雜訊裡）
 

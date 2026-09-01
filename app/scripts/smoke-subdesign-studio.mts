@@ -13,6 +13,7 @@ import { buildSubDesignPrompt } from '../src/agent/subdesign/prompt.ts'
 import { findLatestPassedSubDesignPreference, subDesignProjectMemoryKey } from '../src/agent/subdesign/preference.ts'
 import { SUBDESIGN_CAPABILITY, SUBDESIGN_CRITIQUE_CAPABILITY } from '../src/agent/capabilities/subDesign.ts'
 import { critiqueAllowsDeliver } from '../src/agent/subdesign/critique.ts'
+import { gateProvenanceFor } from '../src/agent/subdesign/critiqueProvenance.ts'
 import { parseOpenDesignInventory } from '../src/agent/openDesign/catalog.ts'
 import {
   getOpenDesignExploreTemplates,
@@ -155,6 +156,25 @@ await test('critiqueAllowsDeliver gates delivery', () => {
   )
 })
 
+await test('critique score provenance exposes measured and unverified component states', () => {
+  const measured = gateProvenanceFor({
+    evidence: [{
+      kind: 'gate',
+      gateId: 'contrast',
+      passed: true,
+      summary: 'hover ratio 7.2:1',
+      capturedAt: '2026-09-01T00:00:00.000Z',
+      path: '.subagents/subdesign/evidence/contrast.json',
+      sha256: 'a'.repeat(64),
+      evidenceId: 'evidence_contrast000001',
+    }],
+  } as never, 'accessibility')
+  assert.equal(measured.length, 1)
+  assert.equal(measured[0]?.summary, 'hover ratio 7.2:1')
+  assert.equal(measured[0]?.capturedAt, '2026-09-01T00:00:00.000Z')
+  assert.deepEqual(gateProvenanceFor({ evidence: [] } as never, 'accessibility'), [])
+})
+
 await test('route + Variant A studio wiring (static)', () => {
   const app = fs.readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf8')
   assert.match(app, /subdesign\/:briefId/)
@@ -258,6 +278,14 @@ await test('studio components: nav, inspector, delivery lock surface', () => {
     'utf8',
   )
   assert.match(nav, /export function SubDesignStudioNav/)
+  const critiquePanel = fs.readFileSync(
+    path.join(appRoot, 'src/components/subdesign/CritiquePanel.tsx'),
+    'utf8',
+  )
+  assert.match(critiquePanel, /<details/)
+  assert.match(critiquePanel, /gate\.summary/)
+  assert.match(critiquePanel, /gate\.capturedAt/)
+  assert.match(critiquePanel, /not verified/)
 })
 
 await test('conversation lifecycle keeps steer/queue, reply, and Stop available', () => {
@@ -275,6 +303,31 @@ await test('conversation lifecycle keeps steer/queue, reply, and Stop available'
   assert.match(conversation, /SubDesign sources/)
   const page = fs.readFileSync(path.join(appRoot, 'src/pages/SubDesignPage.tsx'), 'utf8')
   assert.doesNotMatch(page, /if \(runIsLive && !awaitingUser\) return/)
+})
+
+await test('docs/ui run, approval, and context grammar uses production facts', () => {
+  const conversation = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/SubDesignConversationPane.tsx'), 'utf8')
+  const feed = fs.readFileSync(path.join(appRoot, 'src/components/RunProcessFeed.tsx'), 'utf8')
+  const studio = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/SubDesignProjectStudio.tsx'), 'utf8')
+  const approval = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/SubDesignDirectionApprovalCard.tsx'), 'utf8')
+  const references = fs.readFileSync(path.join(appRoot, 'src/components/subdesign/ReferenceImportPanel.tsx'), 'utf8')
+  assert.match(conversation, /context="subdesign"/)
+  assert.match(feed, /SubDesignThinkingSteps/)
+  assert.match(feed, /FileDiffChips/)
+  assert.match(studio, /SubDesignDirectionApprovalCard/)
+  assert.match(approval, /role="radiogroup"/)
+  assert.match(approval, /自訂視覺方向/)
+  assert.match(approval, /先選擇，再明確送出/)
+  assert.match(references, /ReferenceContextCards/)
+  assert.match(references, /reference\.sha256/)
+  assert.match(references, /record\.digest/)
+})
+
+await test('workspace owns the only SubDesign live predicate', () => {
+  const workspace = fs.readFileSync(path.join(appRoot, 'src/agent/subdesign/workspace.ts'), 'utf8')
+  assert.match(workspace, /export function isSubDesignRunLive/)
+  assert.match(workspace, /makeProjection\(\)\.presentation\.runIsLive/)
+  assert.doesNotMatch(workspace, /deps\.readPresentation\?\.\([^)]*\)\?\.runIsLive/)
 })
 
 await test('visual QA fixture controls have real state transitions', () => {

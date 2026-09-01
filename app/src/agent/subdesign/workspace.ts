@@ -35,6 +35,30 @@ import { buildPinnedCommentContext, parsePinnedCommentPayload, type SubDesignPin
 import { deriveSubDesignWorkspace, type SubDesignWorkspaceViewModel } from './workspaceProjection.ts'
 import { orchestrationFromAgent } from '../runLifecycle.ts'
 import type { SubDesignWorkspaceHostEventListener } from './workspaceHostEvents.ts'
+import { v4 as uuid } from 'uuid'
+
+/**
+ * The single lifecycle predicate for every SubDesign projection and write guard.
+ * Adapter snapshots carry facts only; their legacy `runIsLive` field is never
+ * trusted as another authority.
+ */
+export function isSubDesignRunLive(
+  brief: SubDesignBrief,
+  run: SubDesignWorkspaceRunProjection,
+  presentation: Pick<
+    SubDesignWorkspacePresentation,
+    'runningThreadIds' | 'linkedThreadRunId' | 'activityActive' | 'linkedAgent'
+  >,
+): boolean {
+  const admitted = run.phase === 'starting' || presentation.runningThreadIds.includes(brief.threadId)
+  if (!admitted) return false
+  return run.phase === 'starting'
+    || Boolean(presentation.linkedThreadRunId)
+    || presentation.activityActive
+    || ['running', 'parsing', 'manual_intervention', 'awaiting_user'].includes(
+      presentation.linkedAgent?.status || 'idle',
+    )
+}
 
 /**
  * The renderer-side workflow seam for SubDesign.
@@ -335,6 +359,7 @@ export type SubDesignWorkspaceController = {
   refreshModels: () => Promise<SubDesignWorkspaceProjection>
   updateBrief: (id: string, patch: SubDesignBriefPatch, projectRoot?: string) => SubDesignBrief | null
   selectDirection: (id: string, directionId: string, projectRoot?: string) => { ok: boolean; error?: string; brief: SubDesignBrief }
+  createDirection: (id: string, title: string, projectRoot?: string) => { ok: boolean; error?: string; brief: SubDesignBrief | null }
   installOpenDesignPack: (record: OpenDesignCatalogRecord, projectRoot?: string) => Promise<OpenDesignContentPackManifest | null>
   setOpenDesignPackEnabled: (record: OpenDesignCatalogRecord, enabled: boolean) => Promise<boolean>
   setRunPanel: (visible: boolean) => void
@@ -427,14 +452,9 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       basePresentation.briefs.map((brief) => [brief.id, deriveBriefWorkspace(brief, brief.id === activeBrief?.id ? projectedArtifact : null)]),
     )
     const workspace = activeBrief ? workspacesByBriefId[activeBrief.id] || null : null
-    const runIsLive = Boolean(
-      activeBrief &&
-      (activeRun.phase === 'starting' || basePresentation.runningThreadIds.includes(activeBrief.threadId)) &&
-      (activeRun.phase === 'starting' ||
-        Boolean(basePresentation.linkedThreadRunId) ||
-        basePresentation.activityActive ||
-        ['running', 'parsing', 'manual_intervention', 'awaiting_user'].includes(basePresentation.linkedAgent?.status || 'idle')),
-    )
+    const runIsLive = activeBrief
+      ? isSubDesignRunLive(activeBrief, activeRun, basePresentation)
+      : false
     const presentation: SubDesignWorkspacePresentation = {
       ...basePresentation,
       projectRoot: state.projectRoot,
@@ -861,6 +881,31 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       return result
     },
 
+    createDirection: (id, title, projectRoot) => {
+      const brief = deps.findBrief(id)
+      const value = title.trim()
+      if (!brief || !value) {
+        return { ok: false, error: brief ? '自訂方向不可為空。' : '找不到 SubDesign brief。', brief }
+      }
+      const directionId = `direction_${uuid()}`
+      const updated = deps.updateBrief?.(id, {
+        directions: [...brief.directions, {
+          id: directionId,
+          title: value,
+          summary: '使用者在 direction approval gate 提供的自訂方向。',
+          rationale: 'User-authored direction',
+        }],
+      }, projectRoot)
+      if (!updated) return { ok: false, error: '無法儲存自訂方向。', brief }
+      const result = deps.selectDirection?.(id, directionId, projectRoot) || {
+        ok: false,
+        error: 'SubDesign direction adapter 尚未提供。',
+        brief: updated,
+      }
+      publish()
+      return result
+    },
+
     installOpenDesignPack: async (record, projectRoot) => {
       const installed = await deps.installOpenDesignPack?.(record, projectRoot)
       publish()
@@ -900,7 +945,7 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
       const briefId = state.routeBriefId
       const brief = briefId ? deps.findBrief(briefId) : null
       if (!brief) return commandFailure('missing-brief', '目前沒有可執行的 SubDesign brief。')
-      if (state.runsByBriefId[brief.id]?.phase === 'starting' || deps.readPresentation?.(brief.id)?.runIsLive === true) {
+      if (makeProjection().presentation.runIsLive) {
         return commandFailure('busy', 'SubDesign 已有一個 run 正在準備中。')
       }
       if (!deps.preparePinnedPatchScope) return commandFailure('failed', 'Pin 修正需要 Electron Host scoped patch 支援。')
@@ -918,11 +963,9 @@ export function createSubDesignWorkspace(deps: SubDesignWorkspaceDependencies): 
 
     restoreArtifactRevision: async (input) => {
       const briefId = state.routeBriefId
-      const runPhase = briefId ? state.runsByBriefId[briefId]?.phase : undefined
-      // Live guard：run 起始中，或 presentation 判定 live（running thread / activity）
-      // 時拒絕還原——live → terminal 只走一次，寫性操作不得插隊。
-      const presentationLive = briefId ? deps.readPresentation?.(briefId)?.runIsLive === true : false
-      if (runPhase === 'starting' || presentationLive) {
+      // The same projection predicate used by the UI owns this write guard.
+      // Live → terminal only happens once, so revision writes cannot interleave.
+      if (briefId && makeProjection().presentation.runIsLive) {
         return commandFailure('busy', 'Run 進行中，無法還原 artifact revision；請先停止或等待完成。')
       }
       if (!deps.restoreArtifact) return commandFailure('failed', '還原需要 Electron workspace API。')

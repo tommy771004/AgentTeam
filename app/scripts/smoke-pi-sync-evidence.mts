@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { buildPiSyncEvidence, type PiSyncEvidenceInput } from '../src/agent/piSyncEvidence.ts'
+import { inspectPiUpstreamDebt } from './piUpstreamDebt.mts'
 
 const artifactPath = 'dist-electron/pi-host.js'
 const artifactBytes = await readFile(resolve(import.meta.dirname, '../dist-electron/pi-host.js'))
@@ -34,4 +35,16 @@ assert.equal(go.decision, 'GO')
 assert.equal(go.failedCriteria.length, 0)
 assert.match(go.artifacts[0].sha256, /^[0-9a-f]{64}$/)
 
-console.log(`Pi sync evidence gate: ${go.decision} (${go.toCommit}, ${go.artifacts.length} reproducible artifact)`)
+const upstreamDebt = await inspectPiUpstreamDebt(resolve(import.meta.dirname, '../../vendor/pi'))
+assert.deepEqual(upstreamDebt, {
+  owner: 'upstream',
+  bunWebSocketProxyWorkaround: 'active',
+  xiaomiAbortUsageSkips: 4,
+  xiaomiMultimodalSkips: 4,
+})
+const tracker = await readFile(resolve(import.meta.dirname, '../../.scratch/vendored-pi-upstream-debt.md'), 'utf8')
+assert.match(tracker, /Bun WebSocket proxy/)
+assert.match(tracker, /Xiaomi abort usage/)
+assert.match(tracker, /Xiaomi multimodal fusion/)
+
+console.log(`Pi sync evidence gate: ${go.decision} (${go.toCommit}, ${go.artifacts.length} reproducible artifact); upstream debt inventoried`)

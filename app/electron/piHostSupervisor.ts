@@ -755,6 +755,36 @@ export class PiHostSupervisor {
     return response.result
   }
 
+  async runWorkflow(input: { definition: unknown; taskRunId: string; workflowRunId: string; cwd: string; profile?: Record<string, unknown>; threadId?: string }): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('workflow/run', input)
+    if (response.error || !response.result?.workflow) throw new Error(response.error?.message || 'Pi workflow failed')
+    return response.result
+  }
+
+  async repairWorkflow(input: { workflowRunId: string; repairPlan: unknown }): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('workflow/repair', input)
+    if (response.error || !response.result?.workflow) throw new Error(response.error?.message || 'Pi workflow repair failed')
+    return response.result
+  }
+
+  async workflowStatus(workflowRunId: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('workflow/status', { workflowRunId })
+    if (response.error || !response.result?.workflow) throw new Error(response.error?.message || 'Pi workflow status failed')
+    return response.result
+  }
+
+  async workflowRecord(workflowRunId: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('workflow/record', { workflowRunId })
+    if (response.error) throw new Error(response.error.message)
+    return response.result ?? {}
+  }
+
+  async workflowCheckpoint(workflowRunId: string): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('workflow/checkpoint', { workflowRunId })
+    if (response.error || !response.result?.workflowCheckpoint) throw new Error(response.error?.message || 'Pi workflow checkpoint failed')
+    return response.result
+  }
+
   async cancelTurn(runId: string): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/cancel', { runId })
     if (response.error || response.result?.settlement !== 'cancelled') throw new Error(response.error?.message || 'Pi turn cancellation failed')

@@ -1,5 +1,5 @@
 import type { SubDesignCritique } from '../../agent/subdesign/types'
-import { SUBDESIGN_SCORE_GATE_MAP } from '../../agent/subdesign/critique.ts'
+import { gateProvenanceFor } from '../../agent/subdesign/critiqueProvenance.ts'
 import { Icon } from '../Icon'
 
 const SCORE_FIELDS: Array<{ key: keyof Pick<SubDesignCritique, 'briefCoverage' | 'brandConformance' | 'accessibility' | 'implementationReadiness'>; label: string }> = [
@@ -8,14 +8,6 @@ const SCORE_FIELDS: Array<{ key: keyof Pick<SubDesignCritique, 'briefCoverage' |
   { key: 'accessibility', label: 'Accessibility' },
   { key: 'implementationReadiness', label: 'Readiness' },
 ]
-
-function gateProvenanceFor(critique: SubDesignCritique, scoreKey: keyof Pick<SubDesignCritique, 'briefCoverage' | 'brandConformance' | 'accessibility' | 'implementationReadiness'>): Array<{ gateId: string; capturedAt?: string }> {
-  const allowed = new Set(SUBDESIGN_SCORE_GATE_MAP[scoreKey])
-  const gates = critique.evidence
-    .filter((item) => item.kind === 'gate' && item.gateId && allowed.has(item.gateId))
-    .map((item) => ({ gateId: item.gateId as string, capturedAt: item.capturedAt }))
-  return gates
-}
 
 export function CritiquePanel({ critique }: { critique: SubDesignCritique | null }) {
   return (
@@ -36,9 +28,17 @@ export function CritiquePanel({ critique }: { critique: SubDesignCritique | null
                   <div className="mt-1.5 h-1.5 rounded-full bg-white/[0.08]"><div className={`h-1.5 rounded-full ${score >= 70 ? 'bg-primary' : score >= 45 ? 'bg-secondary' : 'bg-error'}`} style={{ width: `${score}%` }} /></div>
                   <div className="mt-1 flex flex-wrap items-center gap-1 text-[9px]">
                     {provenance.length ? provenance.map((gate) => (
-                      <span key={gate.gateId} className="inline-flex items-center gap-0.5 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 font-mono text-primary" title={`由 ${gate.gateId} gate 量測${gate.capturedAt ? ` · ${gate.capturedAt}` : ''}`}>
-                        <Icon name="verified" size={10} />{gate.gateId}
-                      </span>
+                      <details key={gate.gateId} className="rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-primary">
+                        <summary className="cursor-pointer list-none font-mono">
+                          <span className="inline-flex items-center gap-0.5"><Icon name="verified" size={10} />{gate.gateId}</span>
+                        </summary>
+                        <dl className="mt-1 grid gap-0.5 border-t border-primary/15 pt-1 font-sans text-[9px] leading-4 text-on-surface-variant">
+                          <div><dt className="inline text-outline">量測：</dt><dd className="inline">{gate.summary}</dd></div>
+                          <div><dt className="inline text-outline">時間：</dt><dd className="inline font-mono">{gate.capturedAt || '未提供'}</dd></div>
+                          {gate.path ? <div><dt className="inline text-outline">證據：</dt><dd className="inline break-all font-mono">{gate.path}</dd></div> : null}
+                          {gate.sha256 ? <div><dt className="inline text-outline">SHA-256：</dt><dd className="inline font-mono">{gate.sha256.slice(0, 12)}…</dd></div> : null}
+                        </dl>
+                      </details>
                     )) : (
                       <span className="text-outline">not verified — 尚無對應的 gate 量測</span>
                     )}

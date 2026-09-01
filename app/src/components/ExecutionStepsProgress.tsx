@@ -1,5 +1,5 @@
 import { useState, type FocusEvent } from 'react'
-import type { RunTaskItem } from '../store/runActivityStore'
+import type { FileChangeRecord, RunTaskItem } from '../store/runActivityStore'
 import { Icon } from './Icon'
 
 type ExecutionStep = Pick<RunTaskItem, 'id' | 'text' | 'status'>
@@ -11,13 +11,23 @@ function StepStatusIcon({ task }: { task: ExecutionStep }) {
   return <Icon name="radio_button_unchecked" size={16} className="text-ink-3" />
 }
 
-export function ExecutionStepsProgress({ tasks }: { tasks: readonly ExecutionStep[] }) {
+export function ExecutionStepsProgress({
+  tasks,
+  fileChanges = [],
+}: {
+  tasks: readonly ExecutionStep[]
+  fileChanges?: readonly Pick<FileChangeRecord, 'added' | 'removed'>[]
+}) {
   const [pinnedOpen, setPinnedOpen] = useState(false)
   const [hoverOpen, setHoverOpen] = useState(false)
   if (tasks.length === 0) return null
 
   const completed = tasks.filter((task) => task.status === 'done').length
+  const activeIndex = tasks.findIndex((task) => task.status === 'active')
+  const currentStep = activeIndex >= 0 ? activeIndex + 1 : Math.min(completed + 1, tasks.length)
   const failed = tasks.filter((task) => task.status === 'failed').length
+  const additions = fileChanges.reduce((total, file) => total + (file.added || 0), 0)
+  const removals = fileChanges.reduce((total, file) => total + (file.removed || 0), 0)
   const open = pinnedOpen || hoverOpen
   const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
     if (!event.currentTarget.contains(event.relatedTarget)) setHoverOpen(false)
@@ -40,11 +50,19 @@ export function ExecutionStepsProgress({ tasks }: { tasks: readonly ExecutionSte
         type="button"
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="agent-process-row inline-flex max-w-full items-center gap-2 whitespace-nowrap text-left text-[12px] text-ink-2"
+        className="agent-process-row inline-flex max-w-full items-center gap-2 rounded-full border border-line-strong/70 bg-surface-container-low px-3.5 py-2 whitespace-nowrap text-left text-[12px] text-ink-2"
         onClick={togglePinned}
       >
         <Icon name="checklist" size={16} className="shrink-0 text-ink-3" />
-        <span className="font-medium tabular-nums">執行步驟：{completed} / {tasks.length}</span>
+        <span className="font-medium tabular-nums">步驟 {currentStep} / {tasks.length}</span>
+        {fileChanges.length > 0 ? (
+          <>
+            <span aria-hidden="true" className="text-ink-3">·</span>
+            <span>已變更 {fileChanges.length} 個檔案</span>
+            {additions > 0 ? <span className="text-green tabular-nums">+{additions}</span> : null}
+            {removals > 0 ? <span className="text-red tabular-nums">-{removals}</span> : null}
+          </>
+        ) : null}
         {failed > 0 ? <span className="text-red">{failed} 項失敗</span> : null}
         <Icon name={open ? 'expand_less' : 'expand_more'} size={14} className="shrink-0 text-ink-3" />
       </button>

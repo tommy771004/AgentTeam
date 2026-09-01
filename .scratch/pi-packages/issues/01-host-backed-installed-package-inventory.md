@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** claimed
+**Status:** resolved
 
 - [x] Settings 可開啟 Pi Packages 區塊，並在 Host 不支援 package protocol 時如實顯示 unavailable，而不是報錯或假資料
 - [x] 已安裝清單由 Pi Core Host 讀取目前有效 user agent directory 的 persisted package settings 與 installed state
@@ -17,3 +17,4 @@
 
 - 2026-08-31：`npm run build` 通過；受控 agentDir fixture 證明 configured package、exact version 與 skill resource inventory；`smoke-pi-host-capabilities.mts`、`smoke-pi-host-extensions.mts` 與 focused oxlint 通過。Code review 修正 bounded package.json TOCTOU、project-settings 汙染與 configured/installed version mismatch。
 - 完整 `npm run smoke` 已執行但未全綠：既有 `smoke-instruction-run-snapshot.mts:335` 在 durable-memory revision 斷言期望 `1`、實得 `11`，單獨重跑實得 `12`。失敗發生於本次 package inventory 之外，且共享 worktree 已有未提交的 Host/memory 變更；未修改無關模組來掩蓋。Ticket 暫維持 `claimed`，不宣稱 resolved。
+- 2026-09-01：重新執行 shipped-bundle `npm run smoke:pi-packages`、原始失敗點 `smoke-instruction-run-snapshot.mts`、in-memory 與 SQLite durable-memory contract，全部通過。先前 revision mismatch 已不存在，故依既有 acceptance 收口為 `resolved`。

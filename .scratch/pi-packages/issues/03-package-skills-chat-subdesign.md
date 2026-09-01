@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Pinned npm 安裝、移除與安全 reload
 
-**Status:** claimed
+**Status:** resolved
 
 - [x] 安裝含 skill 的 pinned package 後，下一個 Agent Chat run 的 frozen Skill Resource View 包含該 skill
 - [x] 同一 package skill 在下一個 Pi-backed SubDesign run 可用，且來源與版本和 Agent Chat 一致
@@ -19,3 +19,4 @@
 
 - 2026-08-31：`npm run build`、既有 `smoke-pi-host-skills.mts` package fixture、`smoke-pi-host-resources.mts`、`smoke-pi-host-runner.mts`、`smoke-runner-contract.mts`、focused oxlint與`git diff --check`通過。Fixture證明configured pinned package skill進入同一frozen prompt view，且`resources/list`回傳package name、exact version、configured source、origin與frozen SHA-256 content digest。Standards／Spec defect review修正symlink root與半套bundle materialization邊界，未留待修finding。
 - 完整`npm run smoke`再次停在既有`smoke-instruction-run-snapshot.mts:335` durable-memory revision斷言：預期`1`、實得`14`。此blocker與package skill snapshot無直接關係，未修改instruction/memory行為掩蓋；ticket暫維持`claimed`，不宣稱resolved。
+- 2026-09-01：shipped Host lifecycle 再次證明 Chat／SubDesign 共用 frozen package skill provenance，remove 後新一輪消失；原 instruction snapshot 與 durable-memory store contracts 全部通過，收口為 `resolved`。

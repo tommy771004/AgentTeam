@@ -1,6 +1,6 @@
 # 上下文／用量面板（Context Usage Panel）
 
-> 狀態：`可交給代理`
+> 狀態：`resolved`
 
 ## Problem Statement
 

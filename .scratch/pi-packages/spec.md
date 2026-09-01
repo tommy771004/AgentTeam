@@ -1,6 +1,6 @@
 # Pi Packages 本機安裝與共享使用
 
-> 狀態：`可交給代理`
+> 狀態：`resolved`
 
 ## Problem Statement
 

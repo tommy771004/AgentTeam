@@ -182,6 +182,11 @@ export async function dispatchThreadTask(
     }
     await useAgentStore.getState().startExecution(piText, {
       ...snapshot.overrides,
+      // Canonical product runs always request the negotiated Host Goal
+      // Contract. Direct protocol clients may still omit the rollout flag for
+      // compatibility, but the product must not silently fall back to legacy
+      // model/DoD completion semantics.
+      goalContractV1: true,
       runId: snapshot.runId,
       threadId: tid,
       model: snapshot.overrides.model || thread?.model || undefined,
@@ -193,6 +198,14 @@ export async function dispatchThreadTask(
       path: 'builtin',
       executionKind: 'loop',
       status: state.status,
+      executionSettlement: state.executionSettlement,
+      goalVerdict: state.goalVerdict,
+      goalContractDigest: state.goalContractDigest,
+      acceptanceDigest: state.acceptanceDigest,
+      workflowRunId: state.workflowRunId,
+      workflowVerdict: state.workflowVerdict,
+      workflowAcceptanceDigest: state.workflowAcceptanceDigest,
+      stopReason: state.stopReason,
       result: state.result,
       error: state.haltReason,
       postState: state.postState,
@@ -438,6 +451,9 @@ export async function dispatchThreadTask(
     goalVerdict: a.goalVerdict,
     goalContractDigest: a.goalContractDigest,
     acceptanceDigest: a.acceptanceDigest,
+    workflowRunId: a.workflowRunId,
+    workflowVerdict: a.workflowVerdict,
+    workflowAcceptanceDigest: a.workflowAcceptanceDigest,
     stopReason: a.stopReason,
     result: a.result,
     error: a.haltReason,

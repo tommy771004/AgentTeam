@@ -190,7 +190,7 @@ export function SubDesignConversationPane({
 
         {runIsLive && runId ? (
           <div className="border-t border-white/[0.06] pt-2">
-            <RunProcessFeed runId={runId} depthLabel="SubDesign" onOpenPanel={onOpenTranscript} />
+            <RunProcessFeed runId={runId} depthLabel="SubDesign" context="subdesign" onOpenPanel={onOpenTranscript} />
           </div>
         ) : null}
 

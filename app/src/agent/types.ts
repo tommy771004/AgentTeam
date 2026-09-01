@@ -290,8 +290,10 @@ export interface RuntimeOverrides {
   hostSessionId?: string
   /** Explicit Host-verifiable goal contract; never inferred from model prose. */
   workingGoal?: import('./workingState.ts').WorkingGoalCompletionPredicate
-  /** Default-off rollout gate; Host also requires negotiated goal-contract-v1. */
+  /** Compatibility override for non-product callers; canonical product runs always request the negotiated Host contract. */
   goalContractV1?: boolean
+  /** Immutable Workflow Graph admitted and executed by the Pi Host Scheduler. */
+  workflowDefinition?: import('./workflowGraph.ts').WorkflowDefinition
   /** Host-owned durable checkpoint to resume; renderer supplies only its run id. */
   resumeFromRunId?: string
   /**
@@ -484,6 +486,10 @@ export interface AgentState {
   goalContractDigest?: string
   /** Digest of the Host Acceptance Snapshot that governed goalVerdict. */
   acceptanceDigest?: string
+  /** Host-owned Workflow projection; orthogonal to actor and app finalization state. */
+  workflowRunId?: string
+  workflowVerdict?: 'passed' | 'failed' | 'blocked'
+  workflowAcceptanceDigest?: string
   /** Host-authored terminal reason; app finalization may display but not rewrite it. */
   stopReason?: string
   appFinalization?: import('./goalOutcome.ts').AppFinalizationStatus

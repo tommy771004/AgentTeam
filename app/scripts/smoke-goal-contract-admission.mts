@@ -24,26 +24,43 @@ assert.equal(Object.isFrozen(frozen.criteria[0]), true)
 assert.match(frozen.digest, /^[a-f0-9]{64}$/)
 assert.equal(await verifyGoalContractSnapshot(frozen), true)
 assert.equal(await verifyGoalContractSnapshot({ ...frozen, objective: 'tampered' }), false)
-const [mainSource, preloadSource, runnerSource] = await Promise.all([
+const [mainSource, preloadSource, runnerSource, dispatchSource, storeSource] = await Promise.all([
   readFile(resolve(import.meta.dirname, '../electron/main.ts'), 'utf8'),
   readFile(resolve(import.meta.dirname, '../electron/preload.ts'), 'utf8'),
   readFile(resolve(import.meta.dirname, '../src/agent/piHostRun.ts'), 'utf8'),
+  readFile(resolve(import.meta.dirname, '../src/agent/runDispatch.ts'), 'utf8'),
+  readFile(resolve(import.meta.dirname, '../src/store/agentStore.ts'), 'utf8'),
 ])
 assert.match(mainSource, /workingGoal: input\.workingGoal, goalContractV1: input\.goalContractV1/)
 assert.match(preloadSource, /workingGoal\?: WorkingGoalCompletionPredicate; goalContractV1\?: boolean/)
 assert.match(runnerSource, /workingGoal: input\.workingGoal,[\s\S]*goalContractV1: input\.goalContractV1/)
+assert.match(dispatchSource, /startExecution\(piText, \{[\s\S]*goalContractV1: true,[\s\S]*runId: snapshot\.runId/,
+  'canonical product dispatch must request the negotiated Goal Contract')
+assert.match(dispatchSource, /executionSettlement: state\.executionSettlement,[\s\S]*goalVerdict: state\.goalVerdict,[\s\S]*acceptanceDigest: state\.acceptanceDigest/,
+  'canonical product dispatch must project Host-owned Goal outcome facts')
+assert.match(storeSource, /builtinTurnOutcome\(\{[\s\S]*goalVerdict: result\.goalVerdict,[\s\S]*\.\.\.hostGoalOutcomeFacts\(result\)/,
+  'AgentStore must derive the Goal projection from the Host verdict')
 
 const agentDir = await mkdtemp(join(tmpdir(), 'goal-contract-agent-'))
 const stateDir = await mkdtemp(join(tmpdir(), 'goal-contract-state-'))
 const workspace = await mkdtemp(join(tmpdir(), 'goal-contract-cwd-'))
 let providerCalls = 0
+const semanticRequestBodies: string[] = []
 const modelServer = createServer(async (request, response) => {
   if (request.url !== '/v1/chat/completions') return response.writeHead(404).end()
   providerCalls += 1
-  request.resume()
+  const chunks: Buffer[] = []
+  request.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
   await once(request, 'end')
+  const body = Buffer.concat(chunks).toString('utf8')
+  const semantic = body.includes('fresh acceptance verifier')
+  if (semantic) semanticRequestBodies.push(body)
+  const content = semantic
+    ? JSON.stringify({ verdict: 'passed', reason: 'sanitized answer satisfies this check' })
+    : 'answered'
   response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive' })
-  response.write(`data: ${JSON.stringify({ id: 'goal-contract-smoke', object: 'chat.completion.chunk', model: 'smoke-model', choices: [{ index: 0, delta: { role: 'assistant', content: 'answered' }, finish_reason: 'stop' }] })}\n\n`)
+  response.write(`data: ${JSON.stringify({ id: 'goal-contract-smoke', object: 'chat.completion.chunk', model: 'smoke-model', choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] })}\n\n`)
+  response.write(`data: ${JSON.stringify({ id: 'goal-contract-smoke', object: 'chat.completion.chunk', model: 'smoke-model', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 40, completion_tokens: 10, total_tokens: 50 } })}\n\n`)
   response.end('data: [DONE]\n\n')
 })
 await new Promise<void>((done) => modelServer.listen(0, '127.0.0.1', done))
@@ -158,6 +175,31 @@ try {
   const acceptedVerdict = accepted.result?.record?.entries.find((entry: Record<string, unknown>) => entry.kind === 'goal-verdict')
   assert.equal(acceptedVerdict?.acceptanceDigest, accepted.result?.acceptanceSnapshot?.digest)
 
+  assert.equal((await call('initialize', {
+    protocolVersion: 5,
+    capabilities: ['tool-contract-v1', 'goal-contract-v1', 'fresh-semantic-verifier-v1'],
+  })).error, undefined)
+  const semanticAccepted = await call('turn/submit', {
+    ...base,
+    runId: 'goal-semantic-pass',
+    prompt: 'WORKER_PROMPT_SENTINEL produce a semantically acceptable answer',
+    definitionOfDone: 'The final answer must be supported by the sanitized acceptance artifact.',
+    goalContractV1: true,
+  })
+  assert.equal(semanticAccepted.error, undefined)
+  assert.equal(semanticAccepted.result?.goalContract?.criteria?.[0]?.kind, 'semantic-rubric')
+  assert.equal(semanticRequestBodies.length, 3, `semantic provider request count; total provider calls=${providerCalls}`)
+  assert.equal(semanticAccepted.result?.goalVerdict, 'passed', JSON.stringify(semanticAccepted.result?.record?.entries))
+  assert.equal(semanticAccepted.result?.acceptanceSnapshot?.overall, 'passed')
+  const semanticEvidence = semanticAccepted.result?.record?.entries.find((entry: Record<string, any>) =>
+    entry.kind === 'criterion-evidence' && entry.evidence?.kind === 'semantic-verifier')?.evidence
+  assert.equal(semanticEvidence?.checks?.length, 3)
+  assert.ok(semanticRequestBodies.every((body) => !body.includes('WORKER_PROMPT_SENTINEL')), 'fresh verifier sessions exclude worker conversation')
+  assert.ok(semanticRequestBodies.every((body) => {
+    const tools = (JSON.parse(body) as { tools?: unknown[] }).tools
+    return !tools || tools.length === 0
+  }), JSON.stringify(semanticRequestBodies.map((body) => (JSON.parse(body) as { tools?: unknown[] }).tools)))
+
   const flagOff = await call('turn/submit', {
     ...base,
     runId: 'goal-flag-off',
@@ -165,7 +207,7 @@ try {
     definitionOfDone: 'legacy prose',
   })
   assert.equal(flagOff.error, undefined)
-  assert.equal(providerCalls, 5, 'feature flag is default-off')
+  assert.equal(providerCalls, 9, 'feature flag is default-off after one worker call plus three semantic verifier calls')
   assert.equal(flagOff.result?.goalContract, undefined)
 
   assert.equal((await call('initialize', { protocolVersion: 5, capabilities: ['tool-contract-v1'] })).error, undefined)
@@ -176,10 +218,10 @@ try {
     goalContractV1: true,
   })
   assert.equal(capabilityOff.error, undefined)
-  assert.equal(providerCalls, 6, 'feature flag alone cannot enable unnegotiated guarantees')
+  assert.equal(providerCalls, 10, 'feature flag alone cannot enable unnegotiated guarantees')
   assert.equal(capabilityOff.result?.goalContract, undefined)
 
-  console.log('Goal Contract admission passed: frozen admission, criterion-driven repair/no-progress, typed mapping, fail-closed rollout')
+  console.log('Goal Contract admission passed: product opt-in, fresh semantic acceptance, criterion repair, typed mapping, and fail-closed rollout')
 } finally {
   host.stdin.end()
   if (host.exitCode === null) await new Promise<void>((done) => {

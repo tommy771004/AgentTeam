@@ -4,9 +4,13 @@
 
 **Blocked by:** 07 — Register 快照 + restore 成新 revision + live guard
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] Diff 以快照為來源，回傳結構化逐檔差異（新增/刪除/變更）
-- [ ] 任兩個 revision 可選取比較，含跨多版（非僅相鄰）
-- [ ] UI 呈現遵循既有 artifact 檢視文法；無快照的 revision 顯示不可比較而非錯誤
-- [ ] Store-level smoke 斷言 diff 結構與已知輸入的預期差異
+- [x] Diff 以快照為來源，回傳結構化逐檔差異（新增/刪除/變更）
+- [x] 任兩個 revision 可選取比較，含跨多版（非僅相鄰）
+- [x] UI 呈現遵循既有 artifact 檢視文法；無快照的 revision 顯示不可比較而非錯誤
+- [x] Store-level smoke 斷言 diff 結構與已知輸入的預期差異
+
+## Comments
+
+**2026-09-01 qualification closure**：`ArtifactRevisionDiff` 可選任意兩個有快照的 revision，store 從 snapshot paths 讀內容後輸出 added／removed／changed／context rows；缺少快照回傳不可比較訊息。`smoke-subdesign-artifact-snapshots.mts` 已以 r1→r4 跨版、多檔案 fixture 驗證。

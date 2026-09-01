@@ -1,6 +1,6 @@
 # SubDesign P0 harness gaps：Critique gates、指向式回饋、Revision snapshots
 
-Status: 可交給代理
+Status: resolved
 日期：2026-08-22
 來源：`docs/research/claude-design-clones-harness-comparison.md`（2026-08-22 競品研究）的 P0 建議；哲學地基為 ADR-0048（model cannot manufacture execution evidence）與 AGENTS.md 的 `runTask` 單一入口規則。
 

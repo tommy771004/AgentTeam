@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { diffPiVendorTrees, hashPiVendorTree, listPiVendorFiles, PI_LEDGER_FILE, PI_PIN_FILE } from './piVendorTree.mts'
 import { parseBuildablePiUpstreamPin } from './piUpstreamPin.mts'
+import { inspectPiUpstreamDebt } from './piUpstreamDebt.mts'
 
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(name)
@@ -132,6 +133,7 @@ try {
     ledgerReconciled: true,
     upstreamTests: true,
     upstreamTestCommand: 'bash test.sh',
+    upstreamDebt: await inspectPiUpstreamDebt(vendorRoot),
     generatedAt: new Date().toISOString(),
   }
   const output = arg('--output')

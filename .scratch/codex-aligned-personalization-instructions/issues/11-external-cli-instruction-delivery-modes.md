@@ -13,6 +13,7 @@
 - [x] Turn Record 與 run UI 顯示 explicit/native/unverified、source summary、effective hash 可用性與限制原因。
 - [x] External CLI success 仍不等於 Definition of Done met，instruction delivery 不改變 runner capability matrix。
 - [x] Adapter contract tests 覆蓋 duplicate suppression、argv/prompt handoff、project cwd、queue/restart snapshot 與 unsupported provider。
-- [ ] 真機 Codex／Claude qualification 驗證 native discovery；未安裝或未授權 provider 保持 explicit blocked/unqualified evidence。
+- [x] 真機 Codex qualification 驗證 native discovery、active checkpoint、restart projection 與 metadata-only Turn Record。
+- [ ] 真機 Claude qualification 驗證 native discovery；目前安裝但未授權，維持 `auth_unavailable`／unqualified evidence。
 
-**Qualification note（2026-08-31 fresh rerun）：** [qualification](../qualification.md) 與 retained metadata report 已從 shipped path 重跑。Codex CLI 0.150.1 exit 0 且 checkpoint／record 通過，但 native marker 未出現，仍為 `native_discovery_unproven`；Claude Code 2.1.246 實際啟動後回報 `auth_unavailable`。兩者皆維持 `unqualified`，本項不勾選。
+**Qualification note（2026-09-01 fresh rerun）：** [qualification](../qualification.md) 與 retained metadata report 已從 shipped admission／adapter owner 重跑。先修正舊 qualification 的不可觀察設計（專案檔只有 token、未要求 provider 回傳），再由不含檔名與 native token 的 user prompt 驗證 discovery。Codex CLI 0.152.0 exit 0，native marker／checkpoint／restart projection／record 全部通過，provider-specific 項目已完成；Claude Code 2.1.246 實際啟動後仍回報 `auth_unavailable`，不得宣稱已驗證。

@@ -225,6 +225,24 @@ assert.equal(followUp.runs[0]?.objective, '請把 CTA 改成更清楚的版本')
 assert.equal(followUp.runs[0]?.reuseThreadId, 'thread_01')
 assert.deepEqual(followUp.runs[0]?.overrides, { marker: 'prepared', model: 'model-follow-up' })
 
+const customBrief = makeBrief({ id: 'brief_custom_direction', threadId: 'thread_custom', directions: [] })
+const customDirectionWorkspace = createSubDesignWorkspace(dependencies({
+  findBrief: (id) => id === customBrief.id ? customBrief : null,
+  updateBrief: (_id, patch) => {
+    Object.assign(customBrief, patch)
+    return customBrief
+  },
+  selectDirection: (_id, directionId) => {
+    customBrief.selectedDirectionId = directionId
+    return { ok: true, brief: customBrief }
+  },
+}).deps)
+const customDirection = customDirectionWorkspace.createDirection(customBrief.id, 'Quiet editorial')
+assert.equal(customDirection.ok, true)
+assert.equal(customBrief.directions.length, 1)
+assert.equal(customBrief.directions[0]?.title, 'Quiet editorial')
+assert.equal(customBrief.selectedDirectionId, customBrief.directions[0]?.id)
+
 const blockedA = dependencies({
   prepareRun: async ({ brief }) => brief.id === 'brief_a'
     ? {

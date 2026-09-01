@@ -2,26 +2,26 @@
   "schemaVersion": 2,
   "qualificationMode": "real",
   "evidenceRoot": "/Users/xieyuanyou/Documents/AgentTeam/.scratch/external-cli-durable-harness/evidence",
-  "qualifiedAt": "2026-08-31T04:00:12.495Z",
+  "qualifiedAt": "2026-09-01T09:13:55.086Z",
   "platform": "darwin",
   "architecture": "arm64",
   "providers": [
     {
       "provider": "codex",
-      "status": "failed",
-      "code": "native_discovery_unproven",
+      "status": "qualified",
+      "code": "qualified",
       "installed": true,
       "attempted": true,
       "stage": "complete",
       "authUsable": true,
-      "unqualified": true,
-      "qualification": "failed",
-      "version": "codex-cli 0.150.1",
+      "unqualified": false,
+      "qualification": "pass",
+      "version": "codex-cli 0.152.0",
       "ok": true,
       "exitCode": 0,
       "diagnostic": "unknown",
       "terminalClassification": "success",
-      "eventCount": 23,
+      "eventCount": 27,
       "eventKinds": [
         "status",
         "chunk",
@@ -30,19 +30,19 @@
         "text",
         "done"
       ],
-      "outputBytes": 15,
-      "outputSha256": "929cdd381610b65fce0fe34cb75acf9e5e77e889b29bd7c3a76cb6f419e372b0",
+      "outputBytes": 35,
+      "outputSha256": "edd87cef510901184273b374094912a060de7fe90871d1566d23c86328770818",
       "markerMatched": true,
-      "nativeDiscoveryMatched": false,
+      "nativeDiscoveryMatched": true,
       "markerCounts": {
-        "expected": 0,
+        "expected": 1,
         "forbidden": 0,
         "qualification": 1
       },
       "instructionDelivery": {
         "mode": "native",
         "exactSnapshot": false,
-        "effectiveHash": "f3a7b2c6a6c9343d40f2fb38772428838ab234ad567c1bf94f72da3a603b3efc",
+        "effectiveHash": "9e7f69950a93ce57cdc1f2ddc9e6f49db4758fba1f5921ae05e338bd166660e7",
         "hashAvailable": true,
         "sourceSummary": [
           {
@@ -58,8 +58,8 @@
             "id": "project-codex",
             "kind": "agents",
             "scope": "project",
-            "path": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-codex-XllDZ1/project-1B6g7F/AGENTS.md",
-            "bytes": 19,
+            "path": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-codex-z56bzj/project-N10D6w/AGENTS.md",
+            "bytes": 238,
             "hashAvailable": true,
             "status": "applied",
             "effectiveOrder": null
@@ -68,7 +68,7 @@
         "limitationReason": "provider-owned native discovery; exact effective text cannot be proven by Host",
         "declaredDeliveryMode": "native"
       },
-      "cwd": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-codex-XllDZ1/project-1B6g7F",
+      "cwd": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-codex-z56bzj/project-N10D6w",
       "argv": {
         "command": "/Users/xieyuanyou/.local/bin/codex",
         "args": [
@@ -95,11 +95,7 @@
         "assistant-text",
         "step-end",
         "turn-end"
-      ],
-      "reason": {
-        "code": "native_discovery_unproven",
-        "stage": "record"
-      }
+      ]
     },
     {
       "provider": "claude",
@@ -136,7 +132,7 @@
       "instructionDelivery": {
         "mode": "native",
         "exactSnapshot": false,
-        "effectiveHash": "833414dd15c50f0213bf649a04da193870b2e13146d88e6e16524c835ab41ff7",
+        "effectiveHash": "ca6f060f6ccb70e0d13e2008260b0ea63d5a9c37be3e1355d04a9b0a68ebf86f",
         "hashAvailable": true,
         "sourceSummary": [
           {
@@ -152,8 +148,8 @@
             "id": "project-claude",
             "kind": "claude",
             "scope": "project",
-            "path": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-claude-FSSTaC/project-BBUlHi/CLAUDE.md",
-            "bytes": 20,
+            "path": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-claude-FludYe/project-NXGhLc/CLAUDE.md",
+            "bytes": 239,
             "hashAvailable": true,
             "status": "applied",
             "effectiveOrder": null
@@ -162,7 +158,7 @@
         "limitationReason": "provider-owned native discovery; exact effective text cannot be proven by Host",
         "declaredDeliveryMode": "native"
       },
-      "cwd": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-claude-FSSTaC/project-BBUlHi",
+      "cwd": "/var/folders/88/v618v0vj3cjc6rqvm4yyr0p40000gn/T/agentteam-real-claude-FludYe/project-NXGhLc",
       "argv": {
         "command": "/Users/xieyuanyou/.local/bin/claude",
         "args": [

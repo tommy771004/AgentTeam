@@ -43,11 +43,17 @@ Chat.md 的 tab＋composer 結構由 01（composer）與 07（訊息流）共同
 ## 實作檢查表（後續工程）
 
 - [x] Composer：`SubDesignConversationPane` 已升級為 Prompt Bar 結構（真實 brief references／provenance chips、`@` sources、`/direction`／`/critique`／`/tweak`／`/deliver`，沿用 follow-up 的 `runTask` ingress）。
-- [ ] Run feed：`RunProcessFeed` 在 SubDesign context 改用 Thinking（Steps）+ Tool Chips 文法；plugin 執行列已有真實事件，只需換殼。
-- [ ] 方向選擇：direction grid fallback 換成 approve 卡（保留 `McpAppSurface` 優先路徑與 `onChoice` 回寫 brief 不變）。
-- [ ] Context Cards：`ReferenceImportPanel` 輸出改為 chunk 卡文法。
+- [x] Run feed：`RunProcessFeed` 在 SubDesign context 以真實 `RunTaskItem` 呈現 Thinking Steps，並沿用真實 tool/file events 的 Tool Chips 與 diff chips。
+- [x] 方向選擇：direction grid fallback 已換成 approve 卡；瀏覽 radio 只改 candidate，明確送出才透過 `McpAppSurface` choice 回寫，另支援可持久化的自訂方向。
+- [x] Context Cards：`ReferenceImportPanel` 以真實 reference/provenance 輸出 chunk 卡，包含 source、digest／SHA-256 摘要與類型 badge。
 - [x] Deliver：`ArtifactDeliveryPanel` 已加入由 critique 分數與 artifact exports 推導的 Recommendation Card（信號 meter + alternatives），並直接重用 `ArtifactRevisionDiff` 的真實 snapshot Diff Table。
-- [ ] 全部遵守：一個 run 一個狀態來源（`runId`）、live → terminal 只走一次、等待不是運算、動畫可中斷但內容不可消失。
+- [x] 全部遵守：workspace 的 `isSubDesignRunLive` 是 UI 與寫入 guard 共用的單一 predicate；raw adapter 的舊 `runIsLive` hint 不再成為第二 authority，live run 期間 pin/restore 均 fail closed。
+
+## Production closure（2026-09-01）
+
+- `npx tsc -b`、`smoke-subdesign-workspace.mts`、`smoke-subdesign-studio.mts`、`smoke-subdesign-artifact-snapshots.mts`、`smoke-open-design-providers.mts` 與 effort-scoped oxlint 全部通過。
+- 瀏覽器實際掛載 `SubDesignUnifiedFixture` 所使用的 production component tree：確認方向需明確送出、Context Cards 讀真實 reference/provenance、follow-up live run 顯示 Thinking steps、tool event、file diff 與 Stop。
+- fixture 只提供 deterministic stores/props；workflow owner、projection、MCP fallback 與元件皆是 production modules，沒有把 `SubDesignDocsUi.prototype.tsx` 當作完成證據。
 
 ## 視覺證據
 
@@ -67,4 +73,4 @@ Chat.md 的 tab＋composer 結構由 01（composer）與 07（訊息流）共同
 
 ## 驗證限制
 
-Prototype 仍是 DEV-only visual QA fixture，使用 deterministic 假資料呈現 settled 狀態；production 的 Composer／Deliver 已接真實 brief、thread、critique、snapshot、export 與 `runTask` 路徑。其餘 Run feed、方向卡與 Context Cards 仍依上方未勾選項追蹤，不得由本次兩個 surface 推導整份 docs/ui 已完成。
+`SubDesignDocsUi.prototype.tsx` 仍只是 DEV-only 視覺參考，不是 workflow owner。production closure 改由正式元件樹與 workspace smoke 提供證據；deterministic fixture 只注入資料及操作，不複製 lifecycle 或另建 store。

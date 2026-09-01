@@ -875,6 +875,7 @@ export const TOOL_DEFINITIONS = {
     parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
     owningCapability: 'subdesign-workflow',
     presentCall: labelledCard('artifactId', 'Gate：console error', 'read'),
+    alsoListedIn: ["design-critique"],
   },
   design_gate_build_success: {
     description: "Verify the artifact entry builds/loads with complete structure and produce attested gate evidence.",
@@ -882,6 +883,7 @@ export const TOOL_DEFINITIONS = {
     parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
     owningCapability: 'subdesign-workflow',
     presentCall: labelledCard('artifactId', 'Gate：build', 'read'),
+    alsoListedIn: ["design-critique"],
   },
   design_gate_responsive_overflow: {
     description: "Render at narrow viewports and detect horizontal overflow, producing attested gate evidence.",
@@ -889,6 +891,7 @@ export const TOOL_DEFINITIONS = {
     parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
     owningCapability: 'subdesign-workflow',
     presentCall: labelledCard('artifactId', 'Gate：responsive', 'read'),
+    alsoListedIn: ["design-critique"],
   },
   design_gate_token_consistency: {
     description: "Compare colors used in the artifact against the project DTCG palette when present.",
@@ -896,6 +899,7 @@ export const TOOL_DEFINITIONS = {
     parameters: { "type": "object", "properties": { "artifactId": { "type": "string" } }, "required": ["artifactId"] },
     owningCapability: 'subdesign-workflow',
     presentCall: labelledCard('artifactId', 'Gate：tokens', 'read'),
+    alsoListedIn: ["design-critique"],
   },
   design_artifact_register: {
     description: "Register a validated project-relative SubDesign artifact manifest for preview and revision tracking.",

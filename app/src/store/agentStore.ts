@@ -215,9 +215,11 @@ function builtinTurnOutcome(input: {
   settlement: import('../agent/piHostRun.ts').PiTurnSettlement
   status: AgentState['status']
   orchestration?: AgentState['orchestration']
+  goalVerdict?: AgentState['goalVerdict']
 }) {
   return deriveRunOutcome({
     turnSettlement: input.settlement,
+    goalVerdict: input.goalVerdict,
     executionKind: 'loop',
     legacyStatus: input.status,
     legacyDodMet: input.orchestration?.dodMet,
@@ -444,6 +446,67 @@ async function executePiHostTurn(
       }
     : undefined
   try {
+    if (overrides.workflowDefinition) {
+      if (!piHost.workflow?.run) throw new Error('Pi Host Workflow bridge is unavailable')
+      const workflowRunId = `workflow:${runId}`
+      const projection = await piHost.workflow.run({
+        definition: overrides.workflowDefinition,
+        taskRunId: runId,
+        workflowRunId,
+        cwd: overrides.projectRoot || '.',
+        profile,
+        threadId: overrides.threadId,
+      })
+      const workflow = projection.workflow.result
+      const passed = workflow.verdict === 'passed'
+      const status: AgentState['status'] = passed ? 'success' : workflow.verdict === 'blocked' ? 'halted' : 'failed'
+      const goalVerdict: AgentState['goalVerdict'] = passed ? 'passed' : workflow.verdict
+      const summary = passed
+        ? `Workflow ${workflow.workflowRunId} passed ${Object.keys(workflow.nodeStatuses).length} nodes`
+        : `Workflow ${workflow.workflowRunId} ${workflow.verdict}: ${workflow.errors.join('；') || 'node contract was not satisfied'}`
+      const final = emptyAgentLike({
+        id: runId,
+        objective: text,
+        status,
+        progress: 100,
+        result: summary,
+        ...(passed ? {} : { haltReason: summary }),
+        confidence: passed ? 1 : 0,
+        loopConfig,
+        executionKind: 'loop',
+        executionSettlement: 'completed',
+        goalVerdict,
+        acceptanceDigest: workflow.acceptanceDigest,
+        workflowRunId: workflow.workflowRunId,
+        workflowVerdict: workflow.verdict,
+        workflowAcceptanceDigest: workflow.acceptanceDigest,
+        runnerCapabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        logs: [{ id: 'pi-workflow-end', timestamp: new Date().toISOString(), level: passed ? 'SUCCESS' : 'ERROR', message: summary }],
+        steps: Object.entries(workflow.nodeStatuses).map(([nodeId, nodeStatus], index) => ({
+          step: index + 1,
+          action: `workflow:${nodeId}`,
+          description: nodeId,
+          status: nodeStatus === 'passed' ? 'COMPLETED' as const : 'FAILED' as const,
+          result: nodeStatus,
+          durationMs: Date.now() - t0,
+          modelSource: 'primary' as const,
+        })),
+      })
+      publishRun(set, get, runId, final)
+      const postState = await consumeNextState(loopConfig.nextState, {
+        runId,
+        objective: text,
+        status: final.status,
+        loopType,
+        result: final.result,
+        finishedAt: final.finishedAt,
+        webhookTarget: overrides.webhookTarget,
+      })
+      get().applyPostState(runId, postState)
+      return
+    }
     const result = await submitPiHostRun(piHost, {
       threadId: overrides.threadId!,
       title: text.slice(0, 48),
@@ -496,7 +559,12 @@ async function executePiHostTurn(
           dodMet: result.orchestration.dodMet,
         }
       : undefined
-    const runOutcome = builtinTurnOutcome({ settlement: result.settlement, status: settled.status, orchestration })
+    const runOutcome = builtinTurnOutcome({
+      settlement: result.settlement,
+      status: settled.status,
+      orchestration,
+      goalVerdict: result.goalVerdict,
+    })
     const final = emptyAgentLike({
       id: runId,
       objective: text,
