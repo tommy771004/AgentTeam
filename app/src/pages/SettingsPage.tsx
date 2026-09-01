@@ -1395,8 +1395,9 @@ export function SettingsPage() {
                 title="本地指標"
                 description={(() => {
                   const s = metricsSummary()
+                  const goalPass = s.goalWorkflow.goalPassRate
                   return s.runs
-                    ? `${s.runs} runs · ask ${s.toolAsks} / deny ${s.toolDenials}（denial ratio ${(s.denialRatio * 100).toFixed(1)}%）· 壓縮 ${s.compactions} 次 · LLM 重試 ${s.llmRetries} 次`
+                    ? `${s.runs} runs · ask ${s.toolAsks} / deny ${s.toolDenials}（denial ratio ${(s.denialRatio * 100).toFixed(1)}%）${goalPass ? ` · Goal 通過 ${goalPass.numerator}/${goalPass.denominator}（${(goalPass.value * 100).toFixed(1)}%）` : ' · Goal 通過率尚無 measured denominator'} · 壓縮 ${s.compactions} 次 · LLM 重試 ${s.llmRetries} 次`
                     : '尚無紀錄；每個 run 結束時自動記一筆（只記數字，不含 prompt 內容）'
                 })()}
                 control={

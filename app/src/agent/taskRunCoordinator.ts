@@ -942,6 +942,11 @@ export async function finalizeTaskRun(
         path: result.path,
         status: result.status,
         ok: !result.error && !result.skipped,
+        facts: {
+          executionSettlement: result.executionSettlement,
+          goalVerdict: result.goalVerdict,
+          iterations: result.orchestration?.iterations,
+        },
       })
     } catch {
       /* metrics must never block finalization */
@@ -1809,6 +1814,10 @@ async function pushRunProcessSummary(args: {
     iterations: settlement?.iterations,
     maxIterations: settlement?.maxIterations,
     executionKind: settlement?.executionKind,
+    turnSettlement: finalAgent.turnSettlement,
+    executionSettlement: finalAgent.executionSettlement,
+    goalVerdict: finalAgent.goalVerdict,
+    appFinalization: finalAgent.appFinalization,
     interruptReason: finalAgent.interruptReason,
     reviewSnapshotRef: args.reviewSnapshotRef,
     // Written only when something was actually measured; a runner that

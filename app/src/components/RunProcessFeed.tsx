@@ -301,6 +301,13 @@ export function RunProcessFeed({
     terminal: Boolean(activity?.terminal),
     objective: agent.objective,
     orchestration: orchestrationFromAgent(agent),
+    outcome: {
+      turnSettlement: agent.turnSettlement,
+      executionSettlement: agent.executionSettlement,
+      goalVerdict: agent.goalVerdict,
+      appFinalization: agent.appFinalization,
+      executionKind: agent.executionKind,
+    },
     interruptReason: agent.interruptReason,
     stopping: activity?.stopping,
   })

@@ -76,6 +76,10 @@ export type ThreadRunSummary = {
   iterations?: number
   maxIterations?: number
   executionKind?: 'loop' | 'external'
+  turnSettlement?: import('../agent/piHostRun.ts').PiTurnSettlement
+  executionSettlement?: import('../agent/goalOutcome.ts').RunExecutionSettlement
+  goalVerdict?: import('../agent/goalOutcome.ts').GoalVerdict
+  appFinalization?: import('../agent/goalOutcome.ts').AppFinalizationStatus
   /**
    * What this run spent, so past runs can be compared without reopening each.
    *
@@ -1018,6 +1022,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       content: '執行過程',
       at: new Date().toISOString(),
       runSummary: {
+        runId: summary.runId?.slice(0, 512),
         ...(summary.agentWork ? {
           agentWork: {
             sessionId: summary.agentWork.sessionId.slice(0, 512),
@@ -1026,7 +1031,19 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
           },
         } : {}),
         status: summary.status,
+        turnSettlement: summary.turnSettlement,
+        executionSettlement: summary.executionSettlement,
+        goalVerdict: summary.goalVerdict,
+        appFinalization: summary.appFinalization,
         durationMs: summary.durationMs,
+        dodMet: summary.dodMet,
+        iterations: summary.iterations,
+        maxIterations: summary.maxIterations,
+        executionKind: summary.executionKind,
+        tokens: summary.tokens,
+        costUsd: summary.costUsd,
+        interruptReason: summary.interruptReason,
+        reviewSnapshotRef: summary.reviewSnapshotRef ? structuredClone(summary.reviewSnapshotRef) : undefined,
         subDesign: summary.subDesign
           ? {
               briefId: summary.subDesign.briefId.slice(0, 120),

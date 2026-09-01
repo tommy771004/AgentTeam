@@ -146,6 +146,7 @@ function terminalSurface(input: RunStatusSurfaceInput): RunSecondarySurface | un
   }
   const changedFiles = input.activity.fileChanges.length
   if (changedFiles > 0) items.push(`變更 ${changedFiles} 個檔案。`)
+  if (input.lifecycle.finalizationRecovery) items.push('App finalization 待恢復；Goal verdict 維持不變。')
   return { kind: 'summary', title: '執行摘要', items, outcome }
 }
 

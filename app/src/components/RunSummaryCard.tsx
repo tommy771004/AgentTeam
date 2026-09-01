@@ -155,6 +155,15 @@ export function RunSummaryCard({ summary }: { summary: ThreadRunSummary }) {
   const lifecycle = deriveRunLifecycle({
     status: summary.status || 'idle',
     terminal: Boolean(summary.status),
+    outcome: {
+      turnSettlement: summary.turnSettlement,
+      executionSettlement: summary.executionSettlement,
+      goalVerdict: summary.goalVerdict,
+      appFinalization: summary.appFinalization,
+      executionKind: summary.executionKind,
+      legacyStatus: summary.status,
+      legacyDodMet: summary.dodMet,
+    },
     orchestration: {
       iterations: summary.iterations,
       maxIterations: summary.maxIterations,

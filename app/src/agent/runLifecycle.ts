@@ -117,6 +117,12 @@ export type RunLifecycleView = {
   stopping: boolean
   /** Orthogonal execution, Goal, turn, and finalization facts. */
   outcome: RunOutcomeProjection
+  /** The model settled an answer; this is not itself Goal success. */
+  modelAnswered: boolean
+  /** Execution completed and the Host Acceptance Gate has not settled yet. */
+  goalChecking: boolean
+  /** Terminal Goal truth exists, but app effects still need recovery. */
+  finalizationRecovery: boolean
 }
 
 const LIVE_PHASES = new Set<RunLifecyclePhase>([
@@ -267,6 +273,7 @@ const GOAL_ATTENTION = new Set<GoalOutcomeProjection>([
 
 function goalOutcomeLabel(goal: GoalOutcomeProjection | undefined): string | undefined {
   switch (goal) {
+    case 'passed': return '執行已完成，Goal 已通過'
     case 'failed': return '執行已完成，Goal 未通過'
     case 'blocked': return '執行已完成，Goal 被阻擋'
     case 'unverifiable': return '執行已完成，Goal 無法驗證'
@@ -285,6 +292,20 @@ function outcomeFromLifecycle(input: RunLifecycleInput): RunOutcomeProjection {
     iterations: input.outcome?.iterations ?? input.orchestration?.iterations,
     maxIterations: input.outcome?.maxIterations ?? input.orchestration?.maxIterations,
   })
+}
+
+function lifecycleOutcomeFlags(
+  outcome: RunOutcomeProjection,
+  phase: RunLifecyclePhase | 'idle',
+  terminal: boolean,
+  explicitlyTerminal: boolean,
+) {
+  return {
+    modelAnswered: outcome.turnSettlement === 'answered',
+    goalChecking: outcome.executionSettlement === 'completed'
+      && outcome.goalProjection === undefined && !explicitlyTerminal && phase === 'finalizing',
+    finalizationRecovery: terminal && outcome.appFinalization === 'pending',
+  }
 }
 
 function lifecycleTone(input: {
@@ -331,7 +352,13 @@ function lifecycleLabel(input: {
   statusLine?: string
   objective?: string
   interruptReason?: RunInterruptReason
+  modelAnswered: boolean
+  goalChecking: boolean
+  finalizationRecovery: boolean
 }): string {
+  if (input.finalizationRecovery) return `${input.terminalGoalLabel || '執行已完成'}；App finalization 待恢復`
+  if (input.goalChecking) return '執行已完成，Goal 驗收中…'
+  if (input.modelAnswered && input.phase === 'responding') return '模型已回答，整理回覆中…'
   if (input.iterationExhausted) return iterationExhaustedLabel(input.iterations)
   if (input.terminalGoalLabel) return input.terminalGoalLabel
   if (input.stopping) return '正在安全停車…'
@@ -388,6 +415,9 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
   const goalNeedsAttention = phase === 'completed'
     && Boolean(outcome.goalProjection && GOAL_ATTENTION.has(outcome.goalProjection))
   const terminalGoalLabel = phase === 'completed' ? goalOutcomeLabel(outcome.goalProjection) : undefined
+  const { modelAnswered, goalChecking, finalizationRecovery } = lifecycleOutcomeFlags(
+    outcome, phase, terminal, Boolean(input.terminal),
+  )
   const needsAttention = interactionNeedsAttention || goalNeedsAttention
   // Only a parked run carries a reason; a plain stop keeps the neutral wording.
   const interruptReason = phase === 'cancelled' ? input.interruptReason : undefined
@@ -419,6 +449,9 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
       statusLine: input.statusLine,
       objective: input.objective,
       interruptReason,
+      modelAnswered,
+      goalChecking,
+      finalizationRecovery,
     }),
     tone,
     icon,
@@ -429,6 +462,9 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
     interruptReason,
     stopping,
     outcome,
+    modelAnswered,
+    goalChecking,
+    finalizationRecovery,
     // Once the runner has returned, finalization is an atomic hand-off; the
     // stop affordance must not suggest that archive/queue settlement is abortable.
     canStop: live && phase !== 'finalizing' && phase !== 'cancel_requested' && !stopping,

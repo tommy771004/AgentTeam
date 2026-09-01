@@ -13,7 +13,7 @@
 | 契約 | 現況 |
 |------|------|
 | Canonical ingress | `taskRunCoordinator.runTask` |
-| Canonical finalization | Coordinator 單次 finalize／release／drain |
+| Canonical finalization | Coordinator 單次 finalize／release／drain；不改寫 execution／Goal／Workflow terminal truth |
 | Builtin tool loop owner | Pi Core Host（Electron utility process） |
 | External CLI | 無 parse／DoD／iterate；CLI exit 0 不等於 DoD met |
 | Conversation loop type | 未釘選時可自動選 Turn／Goal；thread pin 或 automation trigger 才 force |
@@ -83,6 +83,8 @@ Pi Core Host 在受監督的 Electron utility process 中擁有：
 
 Renderer 只透過 feature-detected bridge 取得 projection，不擁有第二套 loop。
 
+Goal-based run 在第一個 provider call 前 admission immutable `GoalContractSnapshot`。每個 settled iteration 由 Host Acceptance Gate 產生 evidence、criterion verdict 與 `AcceptanceSnapshot`；模型回答與 execution completed 都不等於 Goal passed。需要拆分工作時，Host scheduler 執行 digested Workflow DAG：ready nodes bounded fan-out、verified artifacts 才開 fan-in、repair 只重跑 impacted downstream closure。Fresh semantic verifier 只讀 sanitized artifact projection，仍受 Outbound Data Gate 與 Goal budget 約束。
+
 ### 2.5 External CLI execution
 
 External adapters 共用 coordinator admission、queue、outbound policy、Turn Record 與 finalization，但不冒充 builtin loop 能力：
@@ -111,6 +113,7 @@ sequenceDiagram
   end
   H-->>D: terminal result + Turn Record
   D-->>C: DispatchResult
+  C->>C: preserve execution + Goal + Workflow facts
   C->>C: finalize once / archive / settlement / release
   C->>T: assistant and run projections
 ```
@@ -127,9 +130,30 @@ sequenceDiagram
 | Run／thread projections | `app/src/store/agentStore.ts`、`app/src/store/threadStore.ts` |
 | Context packet／prompt layers | `app/src/agent/hermes/` 與 Host resource projection |
 | Outbound gate／evidence | `app/src/agent/outbound/` + main-process bridge |
+| Goal Contract／Acceptance | `app/src/agent/goalContract.ts`、`acceptanceContract.ts`、`acceptanceGate.ts` |
+| Workflow DAG／Record／recovery | `app/src/agent/workflowGraph.ts`、`app/electron/workflowScheduler.ts`、`app/src/agent/goalRuntimeCheckpoint.ts` |
 | Headless development seam | `app/src/agent/headlessRun.ts`（非產品 distribution surface） |
 
-## 5. 已完成的歷史 slices
+## 5. Goal／Graph lifecycle qualification
+
+`cd app && npm run qualify:goal-loop-graph-lifecycle` 是 30 項 lifecycle matrix 的單一入口：
+
+| Matrix | Qualification owner |
+|---|---|
+| 1–3、6、9 Goal admission／answer／iteration | `smoke:goal-contract`、`smoke:acceptance-gate` |
+| 4–5、30 deterministic evidence／review revision | `smoke:deterministic-criteria`、`smoke:review-contract`、`smoke:review-workspace-binding` |
+| 7–8 budget／no-progress／repair | `smoke:criterion-repair-loop`、`smoke-run-lifecycle.mts` |
+| 10–13 DAG overlap／fan-in／validation warnings | `smoke:workflow-graph`、`smoke:workflow-scheduler` |
+| 14–16 impacted retry／workspace lease／schema | `smoke:workflow-repair`、`smoke:workflow-scheduler` |
+| 17–20 fresh verifier／quorum／outbound gate | `smoke:fresh-semantic-verifier` |
+| 21–25 child／attachment／finalization CAS | `smoke:goal-finalization` |
+| 26–27 exact resume／drift refusal | `smoke:workflow-recovery`、`smoke:resilience` |
+| 28 legacy conservative reads | `smoke:journal`、`smoke-pi-host-protocol.mts`、`smoke-pi-turn-record.mts`、`smoke-pi-working-state-completion.mts`、`smoke:goal-ui-metrics` |
+| 29 external CLI Goal separation | `smoke:goal-ui-metrics`、`smoke:goal-finalization` |
+
+UI 與 metrics 額外由 `smoke:goal-ui-metrics` 驗證：模型已回答、Goal 驗收中、各 terminal verdict 與 app finalization 待恢復分開呈現；所有 rate 都帶 measured numerator／denominator，沒有 denominator 時維持 absent。
+
+## 6. 已完成的歷史 slices
 
 舊版文件曾把 auto loop、replan、session recall、continueGoal、queue UX 與長對話摘要列為缺口；這些 slices 已落地，不再是 active gap：
 
@@ -142,7 +166,7 @@ sequenceDiagram
 | Per-thread bounded concurrency | ✅ |
 | Pi Core Host 成為唯一 builtin tool-loop owner | ✅ |
 
-## 6. 驗證與架構守衛
+## 7. 驗證與架構守衛
 
 - `npm run build`：TypeScript + renderer/Electron build。
 - `npm run smoke`：包含 coordinator ingress、runner contract、same-thread queue、concurrency、Pi Host、outbound 與 tracker guards。
@@ -150,7 +174,7 @@ sequenceDiagram
 - ADR-0045 禁止新增 `agent/loop/` imports 或 references。
 - Qualification success 必須區分 automated smoke、真 CLI discovery、平台 sandbox 與 signed release evidence。
 
-## 7. 非目標
+## 8. 非目標
 
 - 不建立第二個 renderer-owned agent loop。
 - 不把 headless seam 變成產品 distribution surface（ADR-0046）。

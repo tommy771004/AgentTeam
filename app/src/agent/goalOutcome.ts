@@ -103,7 +103,10 @@ function legacyGoalProjection(
   executionSettlement: RunExecutionSettlement | undefined,
 ): GoalOutcomeProjection | undefined {
   if (input.executionKind === 'external' && executionSettlement) return 'not-applicable'
-  if (!input.legacyStatus || !executionSettlement) return undefined
+  // A live renderer status (for example `running`) is not a legacy terminal
+  // record and must not manufacture `legacy-unverified` over canonical
+  // execution facts while the Acceptance Gate is still checking.
+  if (!input.legacyStatus || !executionSettlement || !executionSettlementFromLegacyStatus(input.legacyStatus)) return undefined
   if (executionSettlement === 'cancelled') return 'cancelled'
   if (executionSettlement === 'interrupted') return 'interrupted'
   if (executionSettlement === 'failed') return 'failed'

@@ -17,6 +17,16 @@ _Avoid_: calling `dispatchThreadTask` or `startExecution` from UI pages.
 **Acceptance Snapshot（驗收快照）** — an immutable, digested Host Checker result over one Goal Contract revision and one settled iteration. Criterion verdicts cite Host-issued evidence; a terminal `passed` Goal verdict must cite the governing Acceptance Snapshot digest. `assistant-answer-present` applies only to Turn mode, while `file-content` is decided from the workspace file's actual SHA-256 and becomes `invalidated` if later content drifts.
 _Avoid_: model-authored success claims, arbitrary shell commands as criteria, or treating prose acceptance criteria as executable evidence.
 
+**Workflow Definition／Workflow Record（工作流定義／記錄）** — the Definition is an immutable, digested DAG of typed node inputs/outputs, runner requirements, retry policy, workspace policy and budgets. The Host-owned append-only Record stores correlation, artifact digests, criterion verdicts, attempts and terminal facts—not worker transcripts. Ready nodes may fan out within capacity; fan-in opens only after every required upstream artifact is verified. Repair invalidates only the impacted downstream closure.
+_Avoid_: treating `dependsOn` as a decorative ordering hint, child completion as parent Goal success, or replaying a passed node after recovery.
+
+**Run outcome axes（執行結果軸）** — execution settlement, Goal verdict, Workflow verdict and app finalization are independent facts. “模型已回答” means only that the turn produced an answer; `passed` requires Acceptance evidence. A pending app finalization may be recovered without rewriting the immutable execution/Goal/Workflow terminal facts.
+_Avoid_: one success boolean, CLI exit 0 as Goal success, or showing unknown metric denominators as zero.
+
+**Fresh semantic verifier（獨立語意驗證器）** — a fresh-context checker receives only sanitized artifacts, criterion, evidence refs and a frozen rubric/profile. Correctness, freshness and source-validity checks may overlap, but mandatory correctness cannot be outvoted. Verifier traffic still crosses the Outbound Data Gate and its tokens/cost consume Goal budget.
+
+**Replay-safe Goal checkpoint（可安全重播的目標 checkpoint）** — an exact digest-bound snapshot of Goal Contract, Acceptance Snapshot, governing package, Workflow node attempts/artifacts and remaining budgets. Resume re-admits every identity and refuses newer completed effects, artifact drift or invalidated evidence before the once-only claim.
+
 **Pi Core tool loop（Pi Core 工具迴圈）** — the production execution core is Pi Core in the supervised Electron utility process: tool loop, tool approval, step settlement, host-side execution evidence. `agentEngine` / `runDispatch` adapt the coordinator snapshot to it; external CLI is a separate runner contract. Renderer `agent/loop/` exists only for plain-browser compatibility until the ADR-0045 deletion gate is met.
 _Avoid_: describing `agent/loop/` as the production owner or adding imports to it — new lifecycle behavior belongs behind `taskRunCoordinator`.
 
