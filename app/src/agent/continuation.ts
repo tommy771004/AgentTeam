@@ -73,3 +73,24 @@ export function selectContinuationItem(items: readonly ContinuationItem[]): {
 export function continuationSignature(item: ContinuationItem): string {
   return JSON.stringify([item.id, item.title, item.description, item.acceptanceCriteria])
 }
+
+/** Model-authored continuation items are proposals; this only selects bounded hints for failed Host criteria. */
+export function selectReadyContinuationItems(
+  items: readonly ContinuationItem[],
+  failedCriterionIds: readonly string[],
+): { accepted: readonly ContinuationItem[]; rejectedIds: readonly string[] } {
+  const completed = new Set(items.filter((item) => item.status === 'completed').map((item) => item.id))
+  const failed = new Set(failedCriterionIds)
+  const candidates = items.filter((item) => item.status === 'candidate' || item.status === 'running')
+  const accepted = candidates.filter((item) => item.scope === 'original-objective'
+    && !item.requiresAdditionalAuthority
+    && item.dependencies.every((dependency) => completed.has(dependency))
+    && item.acceptanceCriteria.some((criterion) => [...failed].some((id) => criterion.includes(id))))
+    .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
+    .slice(0, 3)
+  const acceptedIds = new Set(accepted.map((item) => item.id))
+  return Object.freeze({
+    accepted: Object.freeze(accepted),
+    rejectedIds: Object.freeze(candidates.filter((item) => !acceptedIds.has(item.id)).map((item) => item.id).sort()),
+  })
+}

@@ -7,6 +7,7 @@ import { GOAL_CONTRACT_CAPABILITY, goalContractFromWorkingState, hasExecutableGo
 import type { AcceptanceSnapshot } from '../src/agent/acceptanceContract.ts'
 import { evaluateAcceptanceGate, goalVerdictFromAcceptance } from './acceptanceGate.ts'
 import type { GoalVerdict } from '../src/agent/goalOutcome.ts'
+import { createRepairPlan, isRepairNoProgress, repairPlanPrompt, type RepairPlan } from '../src/agent/repairPlan.ts'
 import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatalog.ts'
 import { isSubscriptionProviderPreset } from '../src/agent/apiProviders.ts'
 import { assertPiModelConfigured } from './piModelSelection.ts'
@@ -2279,14 +2280,126 @@ function settleIterationControl(input: {
   pattern: PiLoopPattern
   done?: boolean
   state: IterationControlState
+  preemptiveOutcome?: PiOrchestrationTurn
   plan: Parameters<typeof settlePlanIteration>[0]
   continuation: Omit<Parameters<typeof settleContinuationIteration>[0], 'effectiveAgentMode' | 'priorContinuationSignature' | 'repeatedContinuationCount'>
 }): IterationControlState {
+  if (input.preemptiveOutcome) return { ...input.state, outcome: input.preemptiveOutcome }
   if (input.state.effectiveAgentMode === 'plan') return settlePlanIteration(input.plan)
   if (input.pattern === 'Goal-based' && input.done === false) {
     return settleContinuationIteration({ ...input.continuation, ...input.state })
   }
   return input.state
+}
+
+async function settleCriterionRepairIteration(input: {
+  sessionId: string
+  runId: string
+  iteration: number
+  settlement: PiOrchestrationTurn['settlement']
+  answer: string
+  goalAwarePrompt: string
+  acceptance: HostAcceptanceResult
+  priorProgressIdentity: string
+  publish: (phase: 'dod' | 'replan', iteration: number, detail: string) => void
+}): Promise<{
+  done: boolean
+  progressIdentity: string
+  plan?: RepairPlan
+  goalVerdictOverride?: GoalVerdict
+  outcome?: PiOrchestrationTurn
+}> {
+  const overall = input.acceptance.snapshot.overall
+  if (overall === 'passed') {
+    input.publish('dod', input.iteration, `passed:${input.acceptance.snapshot.digest}`)
+    return { done: true, progressIdentity: input.priorProgressIdentity }
+  }
+  if (overall === 'blocked' || overall === 'unverifiable' || overall === 'failed') {
+    const verdict: GoalVerdict = overall === 'blocked' ? 'blocked' : overall === 'unverifiable' ? 'unverifiable' : 'failed'
+    const reason = `Acceptance Gate stopped repair with ${overall}`
+    recordTurnEntry(input.sessionId, { kind: 'notice', source: 'host', topic: 'repair-stopped', text: reason })
+    return {
+      done: false,
+      progressIdentity: input.priorProgressIdentity,
+      goalVerdictOverride: verdict,
+      outcome: { settlement: 'failed', result: `${input.answer}\n\n${reason}`.trim(), continue: false, done: false },
+    }
+  }
+  const plan = await createRepairPlan({
+    snapshot: input.acceptance.snapshot,
+    evidence: input.acceptance.evidence,
+    modelProposals: getPiContinuationItems(input.sessionId, input.runId),
+  })
+  recordTurnEntry(input.sessionId, { kind: 'repair-plan', source: 'host', plan })
+  if (!plan.targets.some((target) => target.retryable)) {
+    const reason = 'Acceptance failed with no retryable criterion'
+    recordTurnEntry(input.sessionId, { kind: 'notice', source: 'host', topic: 'repair-non-retryable', text: reason })
+    return {
+      done: false, plan, progressIdentity: plan.progressIdentity, goalVerdictOverride: 'failed',
+      outcome: { settlement: 'failed', result: `${input.answer}\n\n${reason}`.trim(), continue: false, done: false },
+    }
+  }
+  if (isRepairNoProgress(input.priorProgressIdentity, plan)) {
+    const reason = 'Acceptance、artifact 與 evidence identity 連續兩輪不變，已停止 no-progress repair。'
+    recordTurnEntry(input.sessionId, { kind: 'notice', source: 'host', topic: 'repair-no-progress', text: reason })
+    return {
+      done: false, plan, progressIdentity: plan.progressIdentity, goalVerdictOverride: 'failed',
+      outcome: { settlement: 'failed', result: `${input.answer}\n\n${reason}`.trim(), continue: false, done: false },
+    }
+  }
+  input.publish('dod', input.iteration, `unmet:${input.acceptance.snapshot.digest}`)
+  input.publish('replan', input.iteration, `Repair criterion: ${plan.targets[0]?.criterionId || 'unknown'}`)
+  return {
+    done: false,
+    plan,
+    progressIdentity: plan.progressIdentity,
+    outcome: { settlement: input.settlement, result: input.answer, done: false, nextPrompt: repairPlanPrompt(input.goalAwarePrompt, plan) },
+  }
+}
+
+async function evaluateCriterionRepairForTurn(input: {
+  state: HostState
+  sessionId: string
+  runId: string
+  iteration: number
+  settlement: PiOrchestrationTurn['settlement']
+  answer: string
+  goalAwarePrompt: string
+  workspaceRoot: string
+  goalContract?: GoalContractSnapshot
+  previousAcceptance?: HostAcceptanceResult
+  priorProgressIdentity: string
+  legacyDone?: boolean
+  publish: (phase: 'dod' | 'replan', iteration: number, detail: string) => void
+}): Promise<{
+  done?: boolean
+  acceptance?: HostAcceptanceResult
+  progressIdentity: string
+  goalVerdictOverride?: GoalVerdict
+  outcome?: PiOrchestrationTurn
+}> {
+  if (!input.goalContract) return { done: input.legacyDone, progressIdentity: input.priorProgressIdentity }
+  const acceptance = await evaluateHostAcceptance({
+    state: input.state, runId: input.runId, iteration: input.iteration, goalContract: input.goalContract,
+    workspaceRoot: input.workspaceRoot, settlement: input.settlement, answer: input.answer,
+    previous: input.previousAcceptance,
+  })
+  recordAcceptanceEvaluation(input.sessionId, acceptance)
+  if (input.goalContract.mode === 'turn') {
+    return { done: input.legacyDone, acceptance, progressIdentity: input.priorProgressIdentity }
+  }
+  const repair = await settleCriterionRepairIteration({
+    sessionId: input.sessionId, runId: input.runId, iteration: input.iteration,
+    settlement: input.settlement, answer: input.answer, goalAwarePrompt: input.goalAwarePrompt,
+    acceptance, priorProgressIdentity: input.priorProgressIdentity, publish: input.publish,
+  })
+  return {
+    done: repair.done,
+    acceptance,
+    progressIdentity: repair.progressIdentity,
+    ...(repair.goalVerdictOverride ? { goalVerdictOverride: repair.goalVerdictOverride } : {}),
+    ...(repair.outcome ? { outcome: repair.outcome } : {}),
+  }
 }
 
 function publishDefinitionOfDone(input: {
@@ -2310,8 +2423,8 @@ function goalContinuationPrompt(prompt: string): string {
   return [
     prompt,
     '## Goal continuation contract',
-    '若此 iteration 結束時原始目標仍有可實作或可改善的工作，先呼叫 record_continuation_items，提交完整 backlog。',
-    '每個項目必須留在 original-objective、帶 acceptance criteria，並明確標示是否需要額外權限。Host 會在 settlement 後選擇下一項，直接啟動內部 iteration，不會建立使用者訊息。',
+    'record_continuation_items 只能提交 model proposal，不是 canonical backlog，也不能宣告 Goal 完成。',
+    '每個 proposal 必須留在 original-objective、帶可對應 Goal criterion id 的 acceptance criteria，並明確標示是否需要額外權限。Host 會依 failed criteria、artifact impact 與 evidence 產生或拒絕 RepairPlan。',
   ].join('\n\n')
 }
 
@@ -5173,6 +5286,51 @@ function shellSandboxVerificationForTurn(
 const goalContractResult = (goalContract: GoalContractSnapshot | undefined) =>
   goalContract ? { goalContract } : {}
 
+type HostAcceptanceResult = Awaited<ReturnType<typeof evaluateAcceptanceGate>>
+
+async function reviewBindingsForGoalContract(state: HostState, contract: GoalContractSnapshot) {
+  const snapshotIds = [...new Set(contract.criteria.flatMap((criterion) =>
+    criterion.kind === 'review-verification' ? [criterion.snapshotId] : []))]
+  return Object.fromEntries(await Promise.all(snapshotIds.map(async (snapshotId) => {
+    try {
+      const [artifact, verifications] = await Promise.all([
+        state.reviewArtifactStore.read(snapshotId),
+        state.reviewVerificationStore.list(snapshotId),
+      ])
+      return [snapshotId, { artifact, verifications }] as const
+    } catch { return [snapshotId, { verifications: [] }] as const }
+  })))
+}
+
+async function evaluateHostAcceptance(input: {
+  state: HostState
+  runId: string
+  iteration: number
+  goalContract: GoalContractSnapshot
+  workspaceRoot: string
+  settlement: PiTurnSettlement
+  answer: string
+  previous?: HostAcceptanceResult
+}): Promise<HostAcceptanceResult> {
+  return evaluateAcceptanceGate({
+    runId: input.runId,
+    iteration: input.iteration,
+    goalContract: input.goalContract,
+    workspaceRoot: input.workspaceRoot,
+    settlement: input.settlement,
+    answer: input.answer,
+    previousEvidence: input.previous?.evidence,
+    reviewBindings: await reviewBindingsForGoalContract(input.state, input.goalContract),
+  })
+}
+
+function recordAcceptanceEvaluation(sessionId: string, acceptance: HostAcceptanceResult): void {
+  for (const evidence of acceptance.evidence) {
+    recordTurnEntry(sessionId, { kind: 'criterion-evidence', source: 'host', evidence })
+  }
+  recordTurnEntry(sessionId, { kind: 'acceptance-snapshot', source: 'host', snapshot: acceptance.snapshot })
+}
+
 async function recordAcceptanceForTerminal(input: {
   state: HostState
   sessionId: string
@@ -5182,35 +5340,16 @@ async function recordAcceptanceForTerminal(input: {
   settlement: PiTurnSettlement
   answer: string
   goalContract?: GoalContractSnapshot
+  acceptance?: HostAcceptanceResult
+  goalVerdictOverride?: GoalVerdict
 }): Promise<Partial<{ acceptanceSnapshot: AcceptanceSnapshot; goalVerdict: GoalVerdict }>> {
   if (!input.goalContract) return {}
-  const reviewSnapshotIds = [...new Set(input.goalContract.criteria.flatMap((criterion) =>
-    criterion.kind === 'review-verification' ? [criterion.snapshotId] : []))]
-  const reviewBindings = Object.fromEntries(await Promise.all(reviewSnapshotIds.map(async (snapshotId) => {
-    try {
-      const [artifact, verifications] = await Promise.all([
-        input.state.reviewArtifactStore.read(snapshotId),
-        input.state.reviewVerificationStore.list(snapshotId),
-      ])
-      return [snapshotId, { artifact, verifications }] as const
-    } catch { return [snapshotId, { verifications: [] }] as const }
-  })))
-  const acceptance = await evaluateAcceptanceGate({
-    runId: input.runId,
-    iteration: input.iteration,
-    goalContract: input.goalContract,
-    workspaceRoot: input.workspaceRoot,
-    settlement: input.settlement,
-    answer: input.answer,
-    reviewBindings,
-  })
-  for (const evidence of acceptance.evidence) {
-    recordTurnEntry(input.sessionId, { kind: 'criterion-evidence', source: 'host', evidence })
-  }
-  recordTurnEntry(input.sessionId, { kind: 'acceptance-snapshot', source: 'host', snapshot: acceptance.snapshot })
-  const goalVerdict: GoalVerdict = input.goalContract.mode === 'goal' && input.settlement === 'cancelled' ? 'cancelled'
+  const acceptance = input.acceptance || await evaluateHostAcceptance(input as Parameters<typeof evaluateHostAcceptance>[0])
+  if (!input.acceptance) recordAcceptanceEvaluation(input.sessionId, acceptance)
+  const goalVerdict: GoalVerdict = input.goalVerdictOverride
+    || (input.goalContract.mode === 'goal' && input.settlement === 'cancelled' ? 'cancelled'
     : input.goalContract.mode === 'goal' && input.settlement === 'interrupted' ? 'interrupted'
-      : goalVerdictFromAcceptance({ mode: input.goalContract.mode, snapshot: acceptance.snapshot })
+      : goalVerdictFromAcceptance({ mode: input.goalContract.mode, snapshot: acceptance.snapshot }))
   recordTurnEntry(input.sessionId, {
     kind: 'goal-verdict',
     source: 'host',
@@ -5582,6 +5721,9 @@ async function submitPiHostTurn(
       : goalAwarePrompt
     let priorContinuationSignature = ''
     let repeatedContinuationCount = 0
+    let priorRepairProgressIdentity = ''
+    let lastAcceptance: HostAcceptanceResult | undefined
+    let goalVerdictOverride: GoalVerdict | undefined
     const recalledResult = memoryAccess.memoryReadEnabled && !memoryAccess.temporary
       ? await state.memoryStore.recall({ access: memoryAccess, query: prompt, limit: 5 })
       : undefined
@@ -5942,15 +6084,26 @@ async function submitPiHostTurn(
         // Learning is only a frozen candidate here. The renderer's unique
         // app-finalization claim supplies the final status/DoD evidence and
         // the Host commits it atomically with finalization completion.
-        const done = isPiHostDefinitionOfDoneMet(
+        const legacyDone = isPiHostDefinitionOfDoneMet(
           definitionOfDone,
           turn.settlement,
           workingState,
         )
+        const repair = await evaluateCriterionRepairForTurn({
+          state, sessionId, runId, iteration, settlement: turn.settlement, answer,
+          goalAwarePrompt, workspaceRoot: cwd, goalContract,
+          previousAcceptance: lastAcceptance, priorProgressIdentity: priorRepairProgressIdentity,
+          legacyDone, publish: publishOrchestration,
+        })
+        const done = repair.done
+        lastAcceptance = repair.acceptance
+        priorRepairProgressIdentity = repair.progressIdentity
+        goalVerdictOverride = repair.goalVerdictOverride
         const control = settleIterationControl({
           pattern,
           done,
           state: { effectiveAgentMode, priorContinuationSignature, repeatedContinuationCount },
+          preemptiveOutcome: repair.outcome,
           plan: {
             sessionId, runId, settlement: turn.settlement, answer,
             action: planCompletionAction, orchestrationPrompt, goalAwarePrompt,
@@ -6002,6 +6155,8 @@ async function submitPiHostTurn(
       settlement: orchestration.settlement,
       answer: orchestration.result,
       goalContract,
+      acceptance: lastAcceptance,
+      goalVerdictOverride,
     })
     recordTerminalAgentLifecycle(state, sessionId, runId, orchestration.settlement, recorder.entries)
     recordTurnEntry(sessionId, {

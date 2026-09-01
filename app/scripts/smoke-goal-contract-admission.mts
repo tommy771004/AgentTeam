@@ -127,6 +127,22 @@ try {
   const providerSeq = verifiedShape.result?.record?.entries.find((entry: Record<string, unknown>) => entry.kind === 'provider-prompt')?.seq
   assert.ok(Number(contractSeq) < Number(providerSeq), 'canonical contract is recorded before provider dispatch')
 
+  const noProgress = await call('turn/submit', {
+    ...base,
+    maxIterations: 2,
+    runId: 'goal-repair-no-progress',
+    prompt: 'claim completion without changing the missing artifact',
+    workingGoal: predicate,
+    goalContractV1: true,
+  })
+  assert.equal(noProgress.error, undefined)
+  assert.equal(providerCalls, 3, 'Host RepairPlan drives the second internal iteration')
+  assert.equal(noProgress.result?.goalVerdict, 'failed')
+  const repairEntries = noProgress.result?.record?.entries.filter((entry: Record<string, unknown>) => entry.kind === 'repair-plan') || []
+  assert.equal(repairEntries.length, 2)
+  assert.equal(repairEntries[0]?.plan?.targets?.[0]?.criterionId, 'goal-repair-no-progress:goal:1')
+  assert.ok(noProgress.result?.record?.entries.some((entry: Record<string, unknown>) => entry.kind === 'notice' && entry.topic === 'repair-no-progress'))
+
   await writeFile(join(workspace, predicate.path), 'verified\n')
   const accepted = await call('turn/submit', {
     ...base,
@@ -136,7 +152,7 @@ try {
     goalContractV1: true,
   })
   assert.equal(accepted.error, undefined)
-  assert.equal(providerCalls, 2)
+  assert.equal(providerCalls, 4)
   assert.equal(accepted.result?.goalVerdict, 'passed')
   assert.equal(accepted.result?.acceptanceSnapshot?.overall, 'passed')
   const acceptedVerdict = accepted.result?.record?.entries.find((entry: Record<string, unknown>) => entry.kind === 'goal-verdict')
@@ -149,7 +165,7 @@ try {
     definitionOfDone: 'legacy prose',
   })
   assert.equal(flagOff.error, undefined)
-  assert.equal(providerCalls, 3, 'feature flag is default-off')
+  assert.equal(providerCalls, 5, 'feature flag is default-off')
   assert.equal(flagOff.result?.goalContract, undefined)
 
   assert.equal((await call('initialize', { protocolVersion: 5, capabilities: ['tool-contract-v1'] })).error, undefined)
@@ -160,10 +176,10 @@ try {
     goalContractV1: true,
   })
   assert.equal(capabilityOff.error, undefined)
-  assert.equal(providerCalls, 4, 'feature flag alone cannot enable unnegotiated guarantees')
+  assert.equal(providerCalls, 6, 'feature flag alone cannot enable unnegotiated guarantees')
   assert.equal(capabilityOff.result?.goalContract, undefined)
 
-  console.log('Goal Contract admission passed: frozen/digested/recorded before provider, typed mapping lossless, fail-closed rollout gated')
+  console.log('Goal Contract admission passed: frozen admission, criterion-driven repair/no-progress, typed mapping, fail-closed rollout')
 } finally {
   host.stdin.end()
   if (host.exitCode === null) await new Promise<void>((done) => {

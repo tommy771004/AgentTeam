@@ -43,6 +43,7 @@ import { isAgentCollaborationEvent, type AgentCollaborationEvent } from './agent
 import { isGoalContractSnapshot, type GoalContractSnapshot } from './goalContract.ts'
 import { isAcceptanceEvidence, isAcceptanceSnapshot, type AcceptanceEvidence, type AcceptanceSnapshot } from './acceptanceContract.ts'
 import type { GoalVerdict } from './goalOutcome.ts'
+import { isRepairPlan, type RepairPlan } from './repairPlan.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
@@ -62,9 +63,10 @@ import type { GoalVerdict } from './goalOutcome.ts'
  * Version 14 records Host-owned collaboration, mailbox, lease and result events.
  * Version 15 records the immutable Host-admitted Goal Contract.
  * Version 16 records Host-owned criterion evidence, Acceptance Snapshot, and Goal verdict linkage.
+ * Version 17 records the Host-authored canonical RepairPlan.
  */
-export const TURN_RECORD_FORMAT_VERSION = 16
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+export const TURN_RECORD_FORMAT_VERSION = 17
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -400,6 +402,7 @@ export type TurnRecordEntry = TurnRecordCoordinates &
       }
     | { kind: 'criterion-evidence'; source: 'host'; evidence: AcceptanceEvidence }
     | { kind: 'acceptance-snapshot'; source: 'host'; snapshot: AcceptanceSnapshot }
+    | { kind: 'repair-plan'; source: 'host'; plan: RepairPlan }
     | { kind: 'goal-verdict'; source: 'host'; verdict: GoalVerdict; acceptanceDigest: string }
     | { kind: 'delegation-assignment'; source: 'host'; assignment: DelegatedGoalAssignment }
     | { kind: 'delegation-observation'; source: 'host'; observation: DelegatedGoalObservation }
@@ -483,6 +486,7 @@ const KINDS = new Set([
   'goal-contract',
   'criterion-evidence',
   'acceptance-snapshot',
+  'repair-plan',
   'goal-verdict',
   'delegation-assignment',
   'delegation-observation',
@@ -622,6 +626,7 @@ function isHostContextEntry(entry: Record<string, unknown>): boolean {
 function isAcceptanceContextEntry(entry: Record<string, unknown>): boolean | undefined {
   if (entry.kind === 'criterion-evidence') return entry.source === 'host' && isAcceptanceEvidence(entry.evidence)
   if (entry.kind === 'acceptance-snapshot') return entry.source === 'host' && isAcceptanceSnapshot(entry.snapshot)
+  if (entry.kind === 'repair-plan') return entry.source === 'host' && isRepairPlan(entry.plan)
   if (entry.kind !== 'goal-verdict') return undefined
   return entry.source === 'host'
     && ['passed', 'failed', 'blocked', 'unverifiable', 'exhausted', 'not-applicable'].includes(String(entry.verdict))
@@ -819,6 +824,7 @@ function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
   if (version <= 2 && kind === 'working-state') return true
   if (version < 15 && kind === 'goal-contract') return true
   if (version < 16 && ['criterion-evidence', 'acceptance-snapshot', 'goal-verdict'].includes(kind)) return true
+  if (version < 17 && kind === 'repair-plan') return true
   if (isLegacyLifecycleEntry(version, kind, entry)) return true
   if (isLegacySkillEntry(version, kind, entry)) return true
   return version < 5 && ['delegation-assignment', 'delegation-observation', 'delegation-check'].includes(kind)

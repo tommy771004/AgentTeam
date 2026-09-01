@@ -142,6 +142,7 @@
     "smoke:goal-contract": "node --experimental-strip-types scripts/smoke-goal-contract-admission.mts",
     "smoke:acceptance-gate": "node --experimental-strip-types scripts/smoke-acceptance-gate.mts",
     "smoke:deterministic-criteria": "node --experimental-strip-types scripts/smoke-deterministic-criteria.mts",
+    "smoke:criterion-repair-loop": "node --experimental-strip-types scripts/smoke-criterion-repair-loop.mts",
     "smoke:permission-ask-panel": "node scripts/smoke-permission-ask-panel.mjs",
     "smoke:artifact-index": "node --experimental-strip-types scripts/smoke-artifact-index-handoff.mts",
     "smoke:paid-workflow": "node --experimental-strip-types scripts/smoke-paid-workflow.mts",
@@ -183,7 +184,7 @@
     "check:agent-collaboration-boundary": "node --experimental-strip-types scripts/check-agent-collaboration-boundary.mts",
     "smoke:learning-export": "node --experimental-strip-types scripts/smoke-learning-export.mts",
     "smoke:capability-inspection": "node --experimental-strip-types scripts/smoke-capability-inspection.mts",
-    "qualify:pi-runtime-contract": "npm run build:pi-host && node --experimental-strip-types scripts/qualify-pi-agent-runtime-contract.mts && npm run smoke:pi-host-catalog && npm run smoke:pi-real-tool-contract && npm run smoke:pi-host-capability-contract && npm run smoke:pi-all-origin-policy && npm run smoke:pi-direct-code-policy && npm run smoke:pi-mcp-native && npm run smoke:pi-mcp-reload && npm run smoke:pi-builtin-shell-sandbox && npm run smoke:pi-packages:built && npm run smoke:goal-contract && npm run smoke:acceptance-gate && npm run smoke:deterministic-criteria",
+    "qualify:pi-runtime-contract": "npm run build:pi-host && node --experimental-strip-types scripts/qualify-pi-agent-runtime-contract.mts && npm run smoke:pi-host-catalog && npm run smoke:pi-real-tool-contract && npm run smoke:pi-host-capability-contract && npm run smoke:pi-all-origin-policy && npm run smoke:pi-direct-code-policy && npm run smoke:pi-mcp-native && npm run smoke:pi-mcp-reload && npm run smoke:pi-builtin-shell-sandbox && npm run smoke:pi-packages:built && npm run smoke:goal-contract && npm run smoke:acceptance-gate && npm run smoke:deterministic-criteria && npm run smoke:criterion-repair-loop",
     "qualify:macos-runtime-contract": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-platform.mts && node --experimental-strip-types scripts/smoke-pi-seatbelt-builtin-shell.mts && node --experimental-strip-types scripts/smoke-pi-adr0047-real-turn-denial.mts && node --experimental-strip-types scripts/smoke-outbound-shell-evidence.mts",
     "verify:mac-signature": "node --experimental-strip-types scripts/verify-mac-release-signature.mts"
   },
