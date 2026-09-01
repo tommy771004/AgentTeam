@@ -1,4 +1,5 @@
 import type { TurnRecordRangeRef } from '../src/agent/workflowRecord.ts'
+import { isRepairPlan, type RepairPlan } from '../src/agent/repairPlan.ts'
 import {
   validateAndFreezeWorkflowDefinition,
   type WorkflowDefinition,
@@ -129,10 +130,12 @@ export class WorkflowScheduler {
   private readonly startedAt: number
   private readonly statuses = new Map<string, WorkflowNodeStatus>()
   private readonly artifacts = new Map<string, WorkflowArtifact>()
+  private readonly attemptsByNode = new Map<string, number>()
+  private readonly failureReasons = new Map<string, WorkflowNode['retry']['retryOn'][number]>()
   private readonly errors: string[] = []
   private attempts = 0
   private active = 0
-  private hasRun = false
+  private initialRunComplete = false
 
   private constructor(input: {
     definition: WorkflowDefinition
@@ -257,14 +260,39 @@ export class WorkflowScheduler {
     })
   }
 
+  private async releaseWorkspace(node: WorkflowNode, grant: WorkflowWorkspaceGrant | undefined): Promise<void> {
+    if (!grant || grant.mode === 'shared-readonly') return
+    try {
+      await this.options.workspaceAuthority?.release?.(grant)
+    } catch (error) {
+      this.statuses.set(node.id, 'failed')
+      this.failureReasons.set(node.id, 'execution-failed')
+      this.errors.push(error instanceof Error
+        ? `${node.id}: workspace release failed: ${error.message}`
+        : `${node.id}: workspace release failed`)
+    }
+  }
+
   private async executeOne(node: WorkflowNode): Promise<void> {
     const nodeRunId = `${this.workflowRunId}:${node.id}`
-    const attemptId = `${nodeRunId}:attempt:1`
+    const attemptNumber = (this.attemptsByNode.get(node.id) || 0) + 1
+    const attemptId = `${nodeRunId}:attempt:${attemptNumber}`
     let grant: WorkflowWorkspaceGrant | undefined
+    let failureStatus: WorkflowNodeStatus = 'blocked'
+    let failureReason: WorkflowNode['retry']['retryOn'][number] = 'execution-failed'
     try {
-      if (this.attempts >= this.definition.budgets.maxTotalAttempts) throw new Error(`${node.id}: workflow attempt budget exhausted`)
+      if (attemptNumber > node.retry.maxAttempts) {
+        failureStatus = 'failed'
+        throw new Error(`${node.id}: node retry budget exhausted`)
+      }
+      if (this.attempts >= this.definition.budgets.maxTotalAttempts) {
+        failureStatus = 'failed'
+        throw new Error(`${node.id}: workflow attempt budget exhausted`)
+      }
       grant = await this.admitWorkspace(node, nodeRunId, attemptId)
+      failureStatus = 'failed'
       this.attempts += 1
+      this.attemptsByNode.set(node.id, attemptNumber)
       this.active += 1
       this.statuses.set(node.id, 'running')
       this.append({ kind: 'node-dispatched', nodeRunId, attemptId }, { nodeRunId, attemptId })
@@ -276,7 +304,9 @@ export class WorkflowScheduler {
       if (!ID.test(execution.resultRef)) throw new Error(`${node.id}: execution resultRef is invalid`)
       this.recordObservation(nodeRunId, attemptId, execution)
       if (execution.settlement !== 'completed') throw new Error(`${node.id}: execution ${execution.settlement}`)
+      failureReason = 'schema-failed'
       const outputs = await this.normalizeOutputs(node, nodeRunId, execution)
+      failureReason = 'criterion-failed'
       const verification = await this.options.verifyNode({ node, nodeRunId, attemptId, inputs, outputs, execution })
       if (!ID.test(verification.criterionId) || !SHA256.test(verification.acceptanceDigest)) throw new Error(`${node.id}: verifier returned invalid evidence refs`)
       for (const artifact of outputs) this.append({
@@ -291,19 +321,14 @@ export class WorkflowScheduler {
       if (!verification.passed) throw new Error(`${node.id}: node verification failed`)
       for (const artifact of outputs) this.artifacts.set(artifact.artifactId, artifact)
       this.statuses.set(node.id, 'passed')
+      this.failureReasons.delete(node.id)
     } catch (error) {
-      this.statuses.set(node.id, grant ? 'failed' : 'blocked')
+      this.statuses.set(node.id, failureStatus)
+      if (failureStatus === 'failed') this.failureReasons.set(node.id, failureReason)
       this.errors.push(error instanceof Error ? error.message : `${node.id}: unknown workflow failure`)
     } finally {
       if (this.active > 0 && this.statuses.get(node.id) !== 'blocked') this.active -= 1
-      if (grant && grant.mode !== 'shared-readonly') {
-        try {
-          await this.options.workspaceAuthority?.release?.(grant)
-        } catch (error) {
-          this.statuses.set(node.id, 'failed')
-          this.errors.push(error instanceof Error ? `${node.id}: workspace release failed: ${error.message}` : `${node.id}: workspace release failed`)
-        }
-      }
+      await this.releaseWorkspace(node, grant)
       this.recordBudget()
     }
   }
@@ -318,9 +343,7 @@ export class WorkflowScheduler {
     this.append({ kind: 'node-ready', nodeRunId }, { nodeRunId })
   }
 
-  async run(): Promise<WorkflowSchedulerResult> {
-    if (this.hasRun) throw new Error('WorkflowScheduler instances are single-use')
-    this.hasRun = true
+  private async runPending(): Promise<void> {
     while ([...this.statuses.values()].some((status) => status === 'pending')) {
       if (this.clock() - this.startedAt > this.definition.budgets.maxWallClockMs) {
         this.errors.push('Workflow wall-clock budget exhausted')
@@ -335,6 +358,61 @@ export class WorkflowScheduler {
     for (const node of this.definition.nodes) {
       if (this.statuses.get(node.id) === 'pending') this.statuses.set(node.id, 'blocked')
     }
+  }
+
+  private impactedClosure(seedNodeIds: readonly string[]): Set<string> {
+    const impacted = new Set(seedNodeIds)
+    const queue = [...impacted]
+    for (let index = 0; index < queue.length; index += 1) {
+      for (const node of this.definition.nodes) {
+        if (!node.dependsOn.includes(queue[index]) || impacted.has(node.id)) continue
+        impacted.add(node.id)
+        queue.push(node.id)
+      }
+    }
+    return impacted
+  }
+
+  private repairSeeds(plan: RepairPlan): string[] {
+    if (plan.runId !== this.taskRunId) throw new Error('RepairPlan runId does not match the Workflow task run')
+    if (plan.targets.some((target) => !target.retryable)) throw new Error('RepairPlan contains a non-retryable target')
+    const seeds = [...new Set(plan.targets.flatMap((target) => target.impactedNodeIds))].sort()
+    if (seeds.length === 0) throw new Error('RepairPlan contains no impacted workflow nodes')
+    const byId = new Map(this.definition.nodes.map((node) => [node.id, node]))
+    for (const seed of seeds) {
+      const node = byId.get(seed)
+      if (!node) throw new Error(`RepairPlan references unknown workflow node: ${seed}`)
+      const reason = this.failureReasons.get(seed) || 'criterion-failed'
+      if (!node.retry.retryOn.includes(reason)) throw new Error(`${seed}: retry policy rejects ${reason}`)
+    }
+    return seeds
+  }
+
+  private assertRepairBudget(impacted: ReadonlySet<string>): void {
+    if (this.clock() - this.startedAt > this.definition.budgets.maxWallClockMs) throw new Error('Workflow wall-clock budget exhausted')
+    if (this.attempts + impacted.size > this.definition.budgets.maxTotalAttempts) throw new Error('Workflow total attempt budget exhausted')
+    for (const node of this.definition.nodes) {
+      if (!impacted.has(node.id)) continue
+      if ((this.attemptsByNode.get(node.id) || 0) >= node.retry.maxAttempts) throw new Error(`${node.id}: node retry budget exhausted`)
+    }
+  }
+
+  private invalidateSubgraph(impacted: ReadonlySet<string>, repairPlanDigest: string): void {
+    for (const node of this.definition.nodes) {
+      if (!impacted.has(node.id)) continue
+      this.statuses.set(node.id, 'pending')
+      this.failureReasons.delete(node.id)
+      for (const output of node.outputs) this.artifacts.delete(output.id)
+    }
+    this.append({
+      kind: 'subgraph-invalidated',
+      nodeRunIds: [...impacted].sort().map((nodeId) => `${this.workflowRunId}:${nodeId}`),
+      repairPlanDigest,
+    })
+    this.recordBudget()
+  }
+
+  private async finish(): Promise<WorkflowSchedulerResult> {
     const values = [...this.statuses.values()]
     const verdict = values.every((status) => status === 'passed')
       ? 'passed' as const
@@ -354,5 +432,22 @@ export class WorkflowScheduler {
       artifacts: Object.freeze([...this.artifacts.values()]),
       errors: Object.freeze([...this.errors]),
     })
+  }
+
+  async run(): Promise<WorkflowSchedulerResult> {
+    if (this.initialRunComplete) throw new Error('Initial workflow run is already complete')
+    this.initialRunComplete = true
+    await this.runPending()
+    return this.finish()
+  }
+
+  async repair(plan: RepairPlan): Promise<WorkflowSchedulerResult> {
+    if (!this.initialRunComplete) throw new Error('Workflow repair requires an initial terminal run')
+    if (!isRepairPlan(plan)) throw new Error('Workflow repair requires a valid immutable RepairPlan')
+    const impacted = this.impactedClosure(this.repairSeeds(plan))
+    this.assertRepairBudget(impacted)
+    this.invalidateSubgraph(impacted, plan.digest)
+    await this.runPending()
+    return this.finish()
   }
 }

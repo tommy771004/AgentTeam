@@ -28,6 +28,7 @@ export type WorkflowRecordEvent =
   | Readonly<{ kind: 'criterion-evaluated'; nodeRunId: string; attemptId: string; acceptanceDigest: string; criterionId: string; passed: boolean }>
   | Readonly<{ kind: 'node-verified'; nodeRunId: string; attemptId: string; passed: boolean; acceptanceDigest: string }>
   | Readonly<{ kind: 'barrier-opened'; nodeRunId: string; upstreamArtifactIds: readonly string[] }>
+  | Readonly<{ kind: 'subgraph-invalidated'; nodeRunIds: readonly string[]; repairPlanDigest: string }>
   | Readonly<{ kind: 'goal-verdict'; verdict: GoalVerdict; acceptanceDigest: string }>
   | Readonly<{ kind: 'budget-updated'; remaining: Readonly<{ attempts: number; concurrentNodes: number; wallClockMs: number }> }>
   | Readonly<{ kind: 'workflow-terminal'; verdict: GoalVerdict; acceptanceDigest: string }>
@@ -66,6 +67,8 @@ const EVENT_VALIDATORS: Readonly<Record<string, EntryValidator>> = {
     && validDigest(entry.acceptanceDigest) && typeof entry.passed === 'boolean',
   'barrier-opened': (entry) => validId(entry.nodeRunId) && Array.isArray(entry.upstreamArtifactIds)
     && entry.upstreamArtifactIds.every(validId),
+  'subgraph-invalidated': (entry) => Array.isArray(entry.nodeRunIds) && entry.nodeRunIds.length > 0
+    && entry.nodeRunIds.every(validId) && validDigest(entry.repairPlanDigest),
   'goal-verdict': (entry) => isGoalVerdict(entry.verdict) && validDigest(entry.acceptanceDigest),
   'workflow-terminal': (entry) => isGoalVerdict(entry.verdict) && validDigest(entry.acceptanceDigest),
   'budget-updated': (entry) => Boolean(entry.remaining) && typeof entry.remaining === 'object'

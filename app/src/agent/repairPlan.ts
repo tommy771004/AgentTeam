@@ -107,7 +107,7 @@ export async function createRepairPlan(input: {
       reason: verdict.reason,
       evidenceRefs: [...verdict.evidenceRefs],
       impactedArtifactIds: artifactIds(supporting),
-      impactedNodeIds: input.snapshot.impactedNodeIds.includes(verdict.criterionId) ? [verdict.criterionId] : [],
+      impactedNodeIds: [...input.snapshot.impactedNodeIds],
       retryable: verdict.retryable,
       instruction: verdict.repairHint || (verdict.retryable
         ? `Repair criterion ${verdict.criterionId} using only its Host evidence`

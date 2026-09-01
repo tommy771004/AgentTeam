@@ -207,6 +207,8 @@ export async function createAcceptanceSnapshot(input: {
   goalContract: GoalContractSnapshot
   verdicts: readonly CriterionVerdict[]
   workflowRevision?: number
+  /** Host-resolved graph nodes; non-graph callers retain criterion-id fallback. */
+  impactedNodeIds?: readonly string[]
 }): Promise<AcceptanceSnapshot> {
   const failed = input.verdicts.find((verdict) => verdict.status === 'failed' || verdict.status === 'invalidated')
   const blocked = input.verdicts.find((verdict) => verdict.status === 'blocked')
@@ -224,7 +226,9 @@ export async function createAcceptanceSnapshot(input: {
     verdicts: [...input.verdicts],
     overall,
     ...((failed || blocked) ? { weakestCriterionId: (failed || blocked)?.criterionId } : {}),
-    impactedNodeIds: (failed || blocked) ? [(failed || blocked)!.criterionId] : [],
+    impactedNodeIds: (failed || blocked)
+      ? [...new Set(input.impactedNodeIds || [(failed || blocked)!.criterionId])].sort()
+      : [],
     evaluatedAt,
   }
   const snapshot = { ...body, digest: await sha256(canonicalJson(body)) }
