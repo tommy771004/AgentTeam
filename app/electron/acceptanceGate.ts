@@ -11,6 +11,26 @@ import {
 import type { GoalContractSnapshot, GoalCriterion } from '../src/agent/goalContract.ts'
 import type { GoalVerdict } from '../src/agent/goalOutcome.ts'
 import type { PiTurnSettlement } from '../src/agent/piHostRun.ts'
+import { checkArtifactContract } from './criterionCheckers/artifactSchema.ts'
+import {
+  executeRegisteredVerificationCommand,
+  TEST_SUITE_COMMAND_IDS,
+  type RegisteredCommandExecution,
+} from './criterionCheckers/registeredCommand.ts'
+import {
+  checkRevisionBoundReviewVerification,
+  type ReviewVerificationBinding,
+} from './criterionCheckers/reviewVerification.ts'
+
+type RegisteredCommandState = 'matched' | 'exit-code-mismatch' | 'unknown-command' | 'unavailable' | 'revision-drift'
+
+function registeredCommandState(execution: RegisteredCommandExecution, expectedExitCode: number): RegisteredCommandState {
+  if (execution.unavailableReason?.includes('not present in the Host registry')) return 'unknown-command'
+  if (execution.exitCode === undefined) return 'unavailable'
+  if (execution.workspaceRevision && execution.finalWorkspaceRevision
+    && execution.workspaceRevision !== execution.finalWorkspaceRevision) return 'revision-drift'
+  return execution.exitCode === expectedExitCode ? 'matched' : 'exit-code-mismatch'
+}
 
 const digestText = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex')
 const within = (root: string, candidate: string): boolean => {
@@ -108,6 +128,167 @@ async function checkFileContent(input: {
   }
 }
 
+async function checkRegisteredCommand(input: {
+  criterion: Extract<GoalCriterion, { kind: 'registered-command' | 'test-suite' }>
+  workspaceRoot: string
+  observedAt: number
+  run?: (input: { registryId: string; workspaceRoot: string }) => Promise<RegisteredCommandExecution>
+}): Promise<{ evidence: AcceptanceEvidence; verdict: CriterionVerdict }> {
+  const registryId = input.criterion.kind === 'test-suite'
+    ? TEST_SUITE_COMMAND_IDS[input.criterion.suite]
+    : input.criterion.commandId
+  const expectedExitCode = input.criterion.kind === 'test-suite' ? 0 : input.criterion.expectedExitCode
+  const execution = await (input.run || executeRegisteredVerificationCommand)({ registryId, workspaceRoot: input.workspaceRoot })
+  const state = registeredCommandState(execution, expectedExitCode)
+  const evidence = await createAcceptanceEvidence({
+    schemaVersion: 1,
+    id: `acceptance-evidence:${input.criterion.id}:${input.observedAt}`,
+    criterionId: input.criterion.id,
+    issuedBy: 'host-checker',
+    observedAt: input.observedAt,
+    kind: input.criterion.kind,
+    state,
+    registryId,
+    command: execution.command,
+    args: [...execution.args],
+    cwd: execution.cwd,
+    expectedExitCode,
+    ...(execution.workspaceRevision ? { workspaceRevision: execution.workspaceRevision } : {}),
+    ...(execution.finalWorkspaceRevision ? { finalWorkspaceRevision: execution.finalWorkspaceRevision } : {}),
+    ...(execution.exitCode === undefined ? {} : { exitCode: execution.exitCode }),
+    ...(execution.outputSha256 ? { outputSha256: execution.outputSha256 } : {}),
+  })
+  const passed = state === 'matched'
+  return {
+    evidence,
+    verdict: {
+      criterionId: input.criterion.id,
+      status: passed ? 'passed' : 'failed',
+      evidenceRefs: [evidence.id],
+      reason: passed
+        ? `Host registry command ${registryId} exited with ${expectedExitCode} at the bound workspace revision`
+        : execution.unavailableReason || `Host registry command ${registryId} returned ${state}`,
+      repairHint: passed ? undefined : state === 'exit-code-mismatch'
+        ? `Repair the failures reported by ${registryId}` : undefined,
+      retryable: state === 'exit-code-mismatch' || state === 'unavailable',
+    },
+  }
+}
+
+async function checkArtifact(input: {
+  criterion: Extract<GoalCriterion, { kind: 'artifact-exists' | 'json-schema' }>
+  workspaceRoot: string
+  observedAt: number
+}): Promise<{ evidence: AcceptanceEvidence; verdict: CriterionVerdict }> {
+  const check = await checkArtifactContract({ criterion: input.criterion, workspaceRoot: input.workspaceRoot })
+  const evidence = await createAcceptanceEvidence({
+    schemaVersion: 1,
+    id: `acceptance-evidence:${input.criterion.id}:${input.observedAt}`,
+    criterionId: input.criterion.id,
+    issuedBy: 'host-checker',
+    observedAt: input.observedAt,
+    kind: input.criterion.kind,
+    state: check.state,
+    artifactId: input.criterion.artifactId,
+    path: check.path,
+    ...(input.criterion.kind === 'json-schema' ? { schemaId: input.criterion.schemaId } : {}),
+    ...(input.criterion.kind === 'artifact-exists' && input.criterion.sha256 ? { expectedSha256: input.criterion.sha256 } : {}),
+    ...(check.actualSha256 ? { actualSha256: check.actualSha256 } : {}),
+    ...(check.validationErrorSha256 ? { validationErrorSha256: check.validationErrorSha256 } : {}),
+  })
+  const passed = check.state === 'matched'
+  return {
+    evidence,
+    verdict: {
+      criterionId: input.criterion.id,
+      status: passed ? 'passed' : 'failed',
+      evidenceRefs: [evidence.id],
+      reason: passed ? `Host validated artifact ${input.criterion.artifactId}`
+        : `Host artifact check returned ${check.state}`,
+      repairHint: passed ? undefined : check.state === 'schema-mismatch' || check.state === 'invalid-json'
+        ? `Publish ${input.criterion.artifactId} as valid ${input.criterion.kind === 'json-schema' ? input.criterion.schemaId : 'JSON'}`
+        : check.state === 'missing' ? `Publish required artifact ${input.criterion.artifactId}` : undefined,
+      retryable: !['invalid-path', 'unknown-schema'].includes(check.state),
+    },
+  }
+}
+
+async function checkReviewVerification(input: {
+  criterion: Extract<GoalCriterion, { kind: 'review-verification' }>
+  observedAt: number
+  binding?: ReviewVerificationBinding
+}): Promise<{ evidence: AcceptanceEvidence; verdict: CriterionVerdict }> {
+  const check = checkRevisionBoundReviewVerification({ criterion: input.criterion, binding: input.binding })
+  const evidence = await createAcceptanceEvidence({
+    schemaVersion: 1,
+    id: `acceptance-evidence:${input.criterion.id}:${input.observedAt}`,
+    criterionId: input.criterion.id,
+    issuedBy: 'host-checker',
+    observedAt: input.observedAt,
+    kind: 'review-verification',
+    state: check.state,
+    snapshotId: input.criterion.snapshotId,
+    verification: input.criterion.verification,
+    expectedRevision: input.criterion.verifiedRevision,
+    ...(check.snapshotRevision ? { snapshotRevision: check.snapshotRevision } : {}),
+    ...(check.verification ? {
+      verificationId: check.verification.id,
+      verifiedRevision: check.verification.verifiedRevision,
+      ...(check.verification.exitCode === undefined ? {} : { exitCode: check.verification.exitCode }),
+    } : {}),
+  })
+  const passed = check.state === 'matched'
+  return {
+    evidence,
+    verdict: {
+      criterionId: input.criterion.id,
+      status: passed ? 'passed' : 'failed',
+      evidenceRefs: [evidence.id],
+      reason: passed
+        ? `Historical review verification ${input.criterion.verification} passed for immutable revision ${input.criterion.verifiedRevision}`
+        : `Historical review verification returned ${check.state}`,
+      repairHint: passed ? undefined : check.state === 'verification-failed'
+        ? `Repair the ${input.criterion.verification} failures and create a new review snapshot revision` : undefined,
+      retryable: check.state === 'verification-failed' || check.state === 'verification-missing' || check.state === 'snapshot-not-ready',
+    },
+  }
+}
+
+type AcceptanceCheck = { evidence: AcceptanceEvidence; verdict: CriterionVerdict }
+
+async function checkCriterion(input: {
+  criterion: GoalCriterion
+  goalContract: GoalContractSnapshot
+  workspaceRoot: string
+  settlement: PiTurnSettlement
+  answer: string
+  observedAt: number
+  previousEvidence?: AcceptanceEvidence
+  runRegisteredCommand?: (input: { registryId: string; workspaceRoot: string }) => Promise<RegisteredCommandExecution>
+  reviewBindings?: Readonly<Record<string, ReviewVerificationBinding>>
+}): Promise<AcceptanceCheck> {
+  if (input.criterion.kind === 'assistant-answer-present') return checkAssistantAnswer({
+    criterion: input.criterion, contract: input.goalContract, settlement: input.settlement,
+    answer: input.answer, observedAt: input.observedAt,
+  })
+  if (input.criterion.kind === 'file-content') return checkFileContent({
+    criterion: input.criterion, workspaceRoot: input.workspaceRoot, observedAt: input.observedAt,
+    previousEvidence: input.previousEvidence,
+  })
+  if (input.criterion.kind === 'registered-command' || input.criterion.kind === 'test-suite') return checkRegisteredCommand({
+    criterion: input.criterion, workspaceRoot: input.workspaceRoot, observedAt: input.observedAt,
+    run: input.runRegisteredCommand,
+  })
+  if (input.criterion.kind === 'artifact-exists' || input.criterion.kind === 'json-schema') return checkArtifact({
+    criterion: input.criterion, workspaceRoot: input.workspaceRoot, observedAt: input.observedAt,
+  })
+  return checkReviewVerification({
+    criterion: input.criterion,
+    observedAt: input.observedAt,
+    binding: input.reviewBindings?.[input.criterion.snapshotId],
+  })
+}
+
 export async function evaluateAcceptanceGate(input: {
   runId: string
   iteration: number
@@ -116,16 +297,21 @@ export async function evaluateAcceptanceGate(input: {
   settlement: PiTurnSettlement
   answer: string
   previousEvidence?: readonly AcceptanceEvidence[]
+  runRegisteredCommand?: (input: { registryId: string; workspaceRoot: string }) => Promise<RegisteredCommandExecution>
+  reviewBindings?: Readonly<Record<string, ReviewVerificationBinding>>
 }): Promise<{ snapshot: AcceptanceSnapshot; evidence: readonly AcceptanceEvidence[] }> {
   const observedAt = Date.now()
-  const checks = await Promise.all(input.goalContract.criteria.map((criterion) => criterion.kind === 'assistant-answer-present'
-    ? checkAssistantAnswer({ criterion, contract: input.goalContract, settlement: input.settlement, answer: input.answer, observedAt })
-    : checkFileContent({
-        criterion,
-        workspaceRoot: input.workspaceRoot,
-        observedAt,
-        previousEvidence: input.previousEvidence?.find((evidence) => evidence.criterionId === criterion.id),
-      })))
+  const checks = await Promise.all(input.goalContract.criteria.map((criterion) => checkCriterion({
+    criterion,
+    goalContract: input.goalContract,
+    workspaceRoot: input.workspaceRoot,
+    settlement: input.settlement,
+    answer: input.answer,
+    observedAt,
+    previousEvidence: input.previousEvidence?.find((evidence) => evidence.criterionId === criterion.id),
+    runRegisteredCommand: input.runRegisteredCommand,
+    reviewBindings: input.reviewBindings,
+  })))
   const evidence = checks.map((check) => check.evidence)
   const snapshot = await createAcceptanceSnapshot({
     runId: input.runId,

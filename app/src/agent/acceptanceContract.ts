@@ -33,6 +33,40 @@ export type AcceptanceEvidence =
       expectedSha256: string
       actualSha256?: string
     }>)
+  | (AcceptanceEvidenceBase & Readonly<{
+      kind: 'registered-command' | 'test-suite'
+      state: 'matched' | 'exit-code-mismatch' | 'unknown-command' | 'unavailable' | 'revision-drift'
+      registryId: string
+      command: string
+      args: readonly string[]
+      cwd: string
+      workspaceRevision?: string
+      finalWorkspaceRevision?: string
+      exitCode?: number
+      expectedExitCode: number
+      outputSha256?: string
+    }>)
+  | (AcceptanceEvidenceBase & Readonly<{
+      kind: 'artifact-exists' | 'json-schema'
+      state: 'matched' | 'missing' | 'invalid-path' | 'digest-mismatch' | 'invalid-json' | 'unknown-schema' | 'schema-mismatch'
+      artifactId: string
+      path: string
+      schemaId?: string
+      expectedSha256?: string
+      actualSha256?: string
+      validationErrorSha256?: string
+    }>)
+  | (AcceptanceEvidenceBase & Readonly<{
+      kind: 'review-verification'
+      state: 'matched' | 'snapshot-missing' | 'snapshot-not-ready' | 'revision-mismatch' | 'verification-missing' | 'verification-failed'
+      snapshotId: string
+      verification: 'build' | 'smoke' | 'test'
+      expectedRevision: string
+      snapshotRevision?: string
+      verificationId?: string
+      verifiedRevision?: string
+      exitCode?: number
+    }>)
 
 export type AcceptanceSnapshot = Readonly<{
   schemaVersion: 1
@@ -99,21 +133,50 @@ function isCriterionVerdict(value: unknown): value is CriterionVerdict {
     && typeof verdict.retryable === 'boolean'
 }
 
+const validEvidenceBase = (evidence: Record<string, unknown>): boolean => evidence.schemaVersion === 1
+  && evidence.issuedBy === 'host-checker' && typeof evidence.id === 'string' && typeof evidence.criterionId === 'string'
+  && typeof evidence.observedAt === 'number' && SHA256.test(String(evidence.digest))
+
+const validAnswerEvidence = (evidence: Record<string, unknown>): boolean => ['present', 'absent', 'not-applicable'].includes(String(evidence.state))
+  && (evidence.answerSha256 === undefined || SHA256.test(String(evidence.answerSha256)))
+
+const validFileEvidence = (evidence: Record<string, unknown>): boolean => ['matched', 'mismatched', 'missing', 'invalid-path'].includes(String(evidence.state))
+  && typeof evidence.path === 'string' && SHA256.test(String(evidence.expectedSha256))
+  && (evidence.actualSha256 === undefined || SHA256.test(String(evidence.actualSha256)))
+
+const validCommandEvidence = (evidence: Record<string, unknown>): boolean => ['matched', 'exit-code-mismatch', 'unknown-command', 'unavailable', 'revision-drift'].includes(String(evidence.state))
+  && typeof evidence.registryId === 'string' && typeof evidence.command === 'string'
+  && Array.isArray(evidence.args) && evidence.args.every((arg) => typeof arg === 'string')
+  && typeof evidence.cwd === 'string' && Number.isInteger(evidence.expectedExitCode)
+  && (evidence.workspaceRevision === undefined || typeof evidence.workspaceRevision === 'string')
+  && (evidence.finalWorkspaceRevision === undefined || typeof evidence.finalWorkspaceRevision === 'string')
+  && (evidence.exitCode === undefined || Number.isInteger(evidence.exitCode))
+  && (evidence.outputSha256 === undefined || SHA256.test(String(evidence.outputSha256)))
+
+const validArtifactEvidence = (evidence: Record<string, unknown>): boolean => ['matched', 'missing', 'invalid-path', 'digest-mismatch', 'invalid-json', 'unknown-schema', 'schema-mismatch'].includes(String(evidence.state))
+  && typeof evidence.artifactId === 'string' && typeof evidence.path === 'string'
+  && (evidence.schemaId === undefined || typeof evidence.schemaId === 'string')
+  && (evidence.expectedSha256 === undefined || SHA256.test(String(evidence.expectedSha256)))
+  && (evidence.actualSha256 === undefined || SHA256.test(String(evidence.actualSha256)))
+  && (evidence.validationErrorSha256 === undefined || SHA256.test(String(evidence.validationErrorSha256)))
+
+const validReviewEvidence = (evidence: Record<string, unknown>): boolean => ['matched', 'snapshot-missing', 'snapshot-not-ready', 'revision-mismatch', 'verification-missing', 'verification-failed'].includes(String(evidence.state))
+  && typeof evidence.snapshotId === 'string' && ['build', 'smoke', 'test'].includes(String(evidence.verification))
+  && typeof evidence.expectedRevision === 'string'
+  && (evidence.snapshotRevision === undefined || typeof evidence.snapshotRevision === 'string')
+  && (evidence.verificationId === undefined || typeof evidence.verificationId === 'string')
+  && (evidence.verifiedRevision === undefined || typeof evidence.verifiedRevision === 'string')
+  && (evidence.exitCode === undefined || Number.isInteger(evidence.exitCode))
+
 export function isAcceptanceEvidence(value: unknown): value is AcceptanceEvidence {
   if (!value || typeof value !== 'object') return false
   const evidence = value as Record<string, unknown>
-  if (evidence.schemaVersion !== 1 || evidence.issuedBy !== 'host-checker'
-    || typeof evidence.id !== 'string' || typeof evidence.criterionId !== 'string'
-    || typeof evidence.observedAt !== 'number' || !SHA256.test(String(evidence.digest))) return false
-  if (evidence.kind === 'assistant-answer-present') {
-    return ['present', 'absent', 'not-applicable'].includes(String(evidence.state))
-      && (evidence.answerSha256 === undefined || SHA256.test(String(evidence.answerSha256)))
-  }
-  return evidence.kind === 'file-content'
-    && ['matched', 'mismatched', 'missing', 'invalid-path'].includes(String(evidence.state))
-    && typeof evidence.path === 'string'
-    && SHA256.test(String(evidence.expectedSha256))
-    && (evidence.actualSha256 === undefined || SHA256.test(String(evidence.actualSha256)))
+  if (!validEvidenceBase(evidence)) return false
+  if (evidence.kind === 'assistant-answer-present') return validAnswerEvidence(evidence)
+  if (evidence.kind === 'file-content') return validFileEvidence(evidence)
+  if (evidence.kind === 'registered-command' || evidence.kind === 'test-suite') return validCommandEvidence(evidence)
+  if (evidence.kind === 'artifact-exists' || evidence.kind === 'json-schema') return validArtifactEvidence(evidence)
+  return evidence.kind === 'review-verification' && validReviewEvidence(evidence)
 }
 
 export function isAcceptanceSnapshot(value: unknown): value is AcceptanceSnapshot {

@@ -5,6 +5,17 @@ export const GOAL_CONTRACT_CAPABILITY = 'goal-contract-v1' as const
 export type GoalCriterion =
   | Readonly<{ id: string; kind: 'assistant-answer-present' }>
   | Readonly<{ id: string; kind: 'file-content'; path: string; sha256: string }>
+  | Readonly<{ id: string; kind: 'registered-command'; commandId: string; expectedExitCode: number }>
+  | Readonly<{ id: string; kind: 'test-suite'; suite: 'build' | 'lint' | 'smoke' | 'test' }>
+  | Readonly<{ id: string; kind: 'artifact-exists'; artifactId: string; path: string; sha256?: string }>
+  | Readonly<{ id: string; kind: 'json-schema'; artifactId: string; path: string; schemaId: string }>
+  | Readonly<{
+      id: string
+      kind: 'review-verification'
+      snapshotId: string
+      verifiedRevision: string
+      verification: 'build' | 'smoke' | 'test'
+    }>
 
 export type GoalContractSnapshot = Readonly<{
   schemaVersion: 1
@@ -32,6 +43,7 @@ export type GoalContractSnapshot = Readonly<{
 }>
 
 type GoalContractBody = Omit<GoalContractSnapshot, 'digest'>
+export type GoalContractInput = GoalContractBody
 
 const SHA256 = /^[a-f0-9]{64}$/
 const boundedString = (value: unknown, max: number): value is string =>
@@ -60,22 +72,40 @@ function freezeDeep<T>(value: T): Readonly<T> {
   return Object.freeze(value)
 }
 
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).every((key) => keys.includes(key))
+}
+
+const validFileCriterion = (criterion: Record<string, unknown>): boolean => hasOnlyKeys(criterion, ['id', 'kind', 'path', 'sha256'])
+  && boundedString(criterion.path, 1_024) && typeof criterion.sha256 === 'string' && SHA256.test(criterion.sha256)
+
+const validCommandCriterion = (criterion: Record<string, unknown>): boolean => hasOnlyKeys(criterion, ['id', 'kind', 'commandId', 'expectedExitCode'])
+  && boundedString(criterion.commandId, 160) && Number.isSafeInteger(criterion.expectedExitCode)
+  && Number(criterion.expectedExitCode) >= 0 && Number(criterion.expectedExitCode) <= 255
+
+const validArtifactCriterion = (criterion: Record<string, unknown>): boolean => hasOnlyKeys(criterion, ['id', 'kind', 'artifactId', 'path', 'sha256'])
+  && boundedString(criterion.artifactId, 1_024) && boundedString(criterion.path, 1_024)
+  && (criterion.sha256 === undefined || typeof criterion.sha256 === 'string' && SHA256.test(criterion.sha256))
+
+const validJsonSchemaCriterion = (criterion: Record<string, unknown>): boolean => hasOnlyKeys(criterion, ['id', 'kind', 'artifactId', 'path', 'schemaId'])
+  && boundedString(criterion.artifactId, 1_024) && boundedString(criterion.path, 1_024) && boundedString(criterion.schemaId, 1_024)
+
+const validReviewCriterion = (criterion: Record<string, unknown>): boolean => hasOnlyKeys(criterion, ['id', 'kind', 'snapshotId', 'verifiedRevision', 'verification'])
+  && boundedString(criterion.snapshotId, 512) && boundedString(criterion.verifiedRevision, 512)
+  && ['build', 'smoke', 'test'].includes(String(criterion.verification))
+
 export function isGoalCriterion(value: unknown): value is GoalCriterion {
   if (!value || typeof value !== 'object') return false
   const criterion = value as Record<string, unknown>
   if (!boundedString(criterion.id, 1_024)) return false
-  if (criterion.kind === 'assistant-answer-present') {
-    return Object.keys(criterion).every((key) => key === 'id' || key === 'kind')
-  }
-  return criterion.kind === 'file-content'
-    && Object.keys(criterion).every((key) => ['id', 'kind', 'path', 'sha256'].includes(key))
-    && boundedString(criterion.path, 1_024)
-    && typeof criterion.sha256 === 'string'
-    && SHA256.test(criterion.sha256)
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  return Object.keys(value).every((key) => keys.includes(key))
+  if (criterion.kind === 'assistant-answer-present') return hasOnlyKeys(criterion, ['id', 'kind'])
+  if (criterion.kind === 'file-content') return validFileCriterion(criterion)
+  if (criterion.kind === 'registered-command') return validCommandCriterion(criterion)
+  if (criterion.kind === 'test-suite') return hasOnlyKeys(criterion, ['id', 'kind', 'suite'])
+    && ['build', 'lint', 'smoke', 'test'].includes(String(criterion.suite))
+  if (criterion.kind === 'artifact-exists') return validArtifactCriterion(criterion)
+  if (criterion.kind === 'json-schema') return validJsonSchemaCriterion(criterion)
+  return criterion.kind === 'review-verification' && validReviewCriterion(criterion)
 }
 
 function isGoalOutputs(value: unknown): boolean {
@@ -128,6 +158,11 @@ function isGoalContractBody(value: unknown): value is GoalContractBody {
     && contract.constraints.every((item) => boundedString(item, 400))
     && isGoalOutputs(contract.outputs)
     && isGoalCriteria(contract.criteria)
+    && (contract.criteria as GoalCriterion[]).every((criterion) => {
+      if (criterion.kind !== 'json-schema' && criterion.kind !== 'artifact-exists') return true
+      return (contract.outputs as GoalContractSnapshot['outputs']).some((output) => output.id === criterion.artifactId
+        && (criterion.kind !== 'json-schema' || output.schemaId === criterion.schemaId))
+    })
     && isGoalBudgets(contract.budgets)
     && isGoalEscalation(contract.escalation)
 }
@@ -145,8 +180,15 @@ export async function verifyGoalContractSnapshot(value: unknown): Promise<boolea
   return digest === await sha256(canonicalJson(body))
 }
 
+export async function createGoalContractSnapshot(body: GoalContractInput): Promise<GoalContractSnapshot> {
+  if (!isGoalContractBody(body)) throw new Error('Goal Contract validation failed')
+  const snapshot: GoalContractSnapshot = { ...body, digest: await sha256(canonicalJson(body)) }
+  if (!isGoalContractSnapshot(snapshot)) throw new Error('Goal Contract snapshot validation failed')
+  return freezeDeep(snapshot) as GoalContractSnapshot
+}
+
 export function hasExecutableGoalCriterion(contract: GoalContractSnapshot): boolean {
-  return contract.criteria.some((criterion) => criterion.kind === 'file-content'
+  return contract.criteria.some((criterion) => criterion.kind !== 'assistant-answer-present'
     || (criterion.kind === 'assistant-answer-present' && contract.mode === 'turn'))
 }
 
@@ -181,8 +223,5 @@ export async function goalContractFromWorkingState(input: {
       onNoProgress: input.unattended ? 'fail' : 'hitl',
     },
   }
-  if (!isGoalContractBody(body)) throw new Error('Goal Contract validation failed')
-  const snapshot: GoalContractSnapshot = { ...body, digest: await sha256(canonicalJson(body)) }
-  if (!isGoalContractSnapshot(snapshot)) throw new Error('Goal Contract snapshot validation failed')
-  return freezeDeep(snapshot) as GoalContractSnapshot
+  return createGoalContractSnapshot(body)
 }

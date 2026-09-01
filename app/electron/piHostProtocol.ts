@@ -5174,6 +5174,7 @@ const goalContractResult = (goalContract: GoalContractSnapshot | undefined) =>
   goalContract ? { goalContract } : {}
 
 async function recordAcceptanceForTerminal(input: {
+  state: HostState
   sessionId: string
   runId: string
   workspaceRoot: string
@@ -5183,6 +5184,17 @@ async function recordAcceptanceForTerminal(input: {
   goalContract?: GoalContractSnapshot
 }): Promise<Partial<{ acceptanceSnapshot: AcceptanceSnapshot; goalVerdict: GoalVerdict }>> {
   if (!input.goalContract) return {}
+  const reviewSnapshotIds = [...new Set(input.goalContract.criteria.flatMap((criterion) =>
+    criterion.kind === 'review-verification' ? [criterion.snapshotId] : []))]
+  const reviewBindings = Object.fromEntries(await Promise.all(reviewSnapshotIds.map(async (snapshotId) => {
+    try {
+      const [artifact, verifications] = await Promise.all([
+        input.state.reviewArtifactStore.read(snapshotId),
+        input.state.reviewVerificationStore.list(snapshotId),
+      ])
+      return [snapshotId, { artifact, verifications }] as const
+    } catch { return [snapshotId, { verifications: [] }] as const }
+  })))
   const acceptance = await evaluateAcceptanceGate({
     runId: input.runId,
     iteration: input.iteration,
@@ -5190,6 +5202,7 @@ async function recordAcceptanceForTerminal(input: {
     workspaceRoot: input.workspaceRoot,
     settlement: input.settlement,
     answer: input.answer,
+    reviewBindings,
   })
   for (const evidence of acceptance.evidence) {
     recordTurnEntry(input.sessionId, { kind: 'criterion-evidence', source: 'host', evidence })
@@ -5228,6 +5241,7 @@ async function recordGoalContractAdmission(input: {
   const reason = 'Goal Contract has no executable criterion'
   recordTurnEntry(input.sessionId, { kind: 'notice', source: 'host', topic: 'goal-unverifiable', text: reason })
   const acceptance = await recordAcceptanceForTerminal({
+    state: input.state,
     sessionId: input.sessionId,
     runId: input.runId,
     workspaceRoot: input.recorder.cwd,
@@ -5522,6 +5536,7 @@ async function submitPiHostTurn(
       const settlement = pluginExecution.state === 'cancelled' ? 'cancelled' as const : 'failed' as const
       publishOrchestration(settlement === 'cancelled' ? 'cancelled' : 'settlement', 0, pluginExecution.state)
       const acceptance = await recordAcceptanceForTerminal({
+        state,
         sessionId, runId, workspaceRoot: cwd, iteration: 0, settlement,
         answer: pluginExecution.summary, goalContract,
       })
@@ -5979,6 +5994,7 @@ async function submitPiHostTurn(
     )
     recorder.step = orchestration.iterations || recorder.step
     const acceptance = await recordAcceptanceForTerminal({
+      state,
       sessionId,
       runId,
       workspaceRoot: cwd,
