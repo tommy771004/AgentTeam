@@ -79,7 +79,6 @@ export function mergeSettings(...parts: Array<Partial<LlmSettings> | null | unde
     mcpServers: [...(DEFAULT_LLM_SETTINGS.mcpServers || [])],
     mcpAgentServers: { ...(DEFAULT_LLM_SETTINGS.mcpAgentServers || {}) },
     customTools: [...(DEFAULT_LLM_SETTINGS.customTools || [])],
-    customToolSecrets: { ...(DEFAULT_LLM_SETTINGS.customToolSecrets || {}) },
     pluginOAuthClients: { ...(DEFAULT_LLM_SETTINGS.pluginOAuthClients || {}) },
     cliProviders: mergeCliProviders(DEFAULT_LLM_SETTINGS.cliProviders),
     alwaysOnCapabilities: [...(DEFAULT_LLM_SETTINGS.alwaysOnCapabilities || [])],
@@ -88,8 +87,9 @@ export function mergeSettings(...parts: Array<Partial<LlmSettings> | null | unde
     trustedHookProjects: [...(DEFAULT_LLM_SETTINGS.trustedHookProjects || [])],
     delegatePersonas: { ...(DEFAULT_LLM_SETTINGS.delegatePersonas || {}) },
   }
-  for (const p of parts) {
-    if (!p) continue
+  for (const part of parts) {
+    if (!part) continue
+    const p = withoutIntegrationCredentials(part)
     out = {
       ...out,
       ...p,
@@ -112,8 +112,6 @@ export function mergeSettings(...parts: Array<Partial<LlmSettings> | null | unde
       fallbackModels:
         p.fallbackModels != null ? [...new Set(p.fallbackModels.filter(Boolean))] : out.fallbackModels,
       customTools: p.customTools != null ? p.customTools : out.customTools,
-      customToolSecrets:
-        p.customToolSecrets != null ? { ...out.customToolSecrets, ...p.customToolSecrets } : out.customToolSecrets,
       pluginOAuthClients:
         p.pluginOAuthClients != null
           ? { ...out.pluginOAuthClients, ...p.pluginOAuthClients }
@@ -169,11 +167,8 @@ function saveLocal(s: LlmSettings) {
     const previous = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
     if (Object.keys(legacyIntegrationCredentials(previous)).length) return
   } catch { return /* preserve unreadable storage until explicit recovery */ }
-  // Electron persists custom-tool secrets through safeStorage in the main process;
-  // don't duplicate those values in renderer localStorage.
   const source = isElectronPiProduction() ? stripPiOwnedSettings(stripLegacyPersonalization(s)) : stripLegacyPersonalization(s)
-  const local = window.subagents?.settings ? { ...source, customToolSecrets: {} } : source
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(withoutIntegrationCredentials(local)))
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(withoutIntegrationCredentials(source)))
 }
 
 interface SettingsStore {
@@ -232,10 +227,13 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       base = loadLocal()
     }
     if (!credentialMigrationError) {
-      try { await migrateLocalIntegrationSettings(localStorage, window.subagents?.credentials?.migrateLegacy) }
+      try {
+        await migrateLocalIntegrationSettings(localStorage, window.subagents?.credentials?.migrateLegacy)
+        const { hydratePluginSecrets } = await import('../agent/hermes/pluginSecrets.ts')
+        await hydratePluginSecrets()
+      }
       catch (error) { credentialMigrationError = error instanceof Error ? error.message : '憑證遷移失敗，請重試。' }
     }
-    if (!credentialMigrationError && window.subagents?.settings) base = { ...base, customToolSecrets: {} }
 
     // Electron Pi Host owns the overlapping runtime profile. The legacy
     // settings bridge remains only for provider credentials, CLI, and UI-only
@@ -508,19 +506,16 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       if (data.settings) {
         // Skip redacted secrets so we do not wipe live keys
         const legacy = legacyIntegrationCredentials(data.settings)
-        const customToolSecrets = Object.fromEntries(Object.entries(data.settings.customToolSecrets || {})
-          .filter(([, value]) => typeof value === 'string' && value !== '***REDACTED***' && value.length > 0))
-        if (Object.keys(legacy).length || Object.keys(customToolSecrets).length) {
+        if (Object.keys(legacy).length) {
           const migrate = window.subagents?.credentials?.migrateLegacy
           if (!migrate) throw new Error('匯入憑證需要桌面版安全儲存')
-          const migrated = await migrate({ ...legacy, ...(Object.keys(customToolSecrets).length ? { customToolSecrets } : {}) })
+          const migrated = await migrate(legacy)
           if (!migrated.ok) throw new Error(migrated.error || '憑證匯入失敗')
+          const { hydratePluginSecrets } = await import('../agent/hermes/pluginSecrets.ts')
+          await hydratePluginSecrets()
         }
         const patch = withoutIntegrationCredentials({ ...data.settings }) as Partial<LlmSettings>
         if (patch.apiKey === '***REDACTED***') delete patch.apiKey
-        if (patch.telegramBotToken === '***REDACTED***') delete patch.telegramBotToken
-        if (patch.webhookToken === '***REDACTED***') delete patch.webhookToken
-        delete patch.customToolSecrets
         if (patch.pluginOAuthClients) {
           const live = get().settings.pluginOAuthClients || {}
           patch.pluginOAuthClients = Object.fromEntries(

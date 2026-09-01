@@ -19,6 +19,7 @@ import {
   accountHintFromToken,
   clearPluginSecret,
   hasPluginSecret,
+  hasToolCredential,
   setPluginSecret,
 } from '../agent/hermes/pluginSecrets.ts'
 import { oauthProviderForPlugin } from '../agent/hermes/pluginOAuth.ts'
@@ -1210,16 +1211,9 @@ export const useLearningStore = create<LearningStore>((set, get) => {
             installed.mcpServers?.[0]?.secretPluginId ||
             item?.npm?.secretPluginId ||
             item?.dependsOnPluginId
-          const credentialList = secretOwner
-            ? await window.subagents?.credentials?.intent({ action: 'list' })
-            : undefined
-          const hasCustomToolCredential = Boolean(
-            credentialList?.ok && credentialList.metadata.some((entry) => entry.ref === `credential:custom-tool:${secretOwner}`),
-          )
           if (
             secretOwner &&
-            !hasPluginSecret(secretOwner) &&
-            !hasCustomToolCredential
+            !hasToolCredential(secretOwner)
           ) {
             health = {
               ok: false,
@@ -1487,14 +1481,11 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     },
 
     clearPluginAuth: async (id) => {
-      clearPluginSecret(id)
-      const credentialResult = await window.subagents?.credentials?.intent({
-        action: 'clear',
-        ref: `credential:custom-tool:${id}`,
-      })
-      if (credentialResult && !credentialResult.ok && credentialResult.code !== 'NOT_CONFIGURED') {
-        throw new Error(credentialResult.error)
-      }
+      await clearPluginSecret(id)
+      const result = await window.subagents?.credentials?.intent({ action: 'clear', ref: `credential:custom-tool:${id}` })
+      if (result && !result.ok) throw new Error(result.error)
+      const { hydratePluginSecrets } = await import('../agent/hermes/pluginSecrets.ts')
+      await hydratePluginSecrets()
       const existing = pluginRegistry.list().find((plugin) => plugin.id === id)
       if (existing) {
         const next = {

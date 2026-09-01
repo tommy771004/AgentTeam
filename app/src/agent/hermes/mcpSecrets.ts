@@ -8,6 +8,7 @@
  */
 
 import type { LlmSettings, McpServerConfig } from '../types.ts'
+import { hasToolCredential } from './pluginSecrets.ts'
 
 /** secret owner id → env vars to fill when secret is present */
 export const MCP_SECRET_ENV_KEYS: Record<string, string[]> = {
@@ -31,8 +32,9 @@ export const MCP_SECRET_ENV_KEYS: Record<string, string[]> = {
 }
 
 function secretForPlugin(pluginId: string): string {
-  // Config contains references only. Main resolves or rejects at process spawn.
-  return `{{secret:${pluginId}}}`
+  // Renderer projects availability only and always passes a reference. Electron
+  // main resolves it at process spawn; browser preview cannot execute MCP.
+  return hasToolCredential(pluginId) ? `{{secret:${pluginId}}}` : ''
 }
 
 /** Resolve which id to use for secret lookup */

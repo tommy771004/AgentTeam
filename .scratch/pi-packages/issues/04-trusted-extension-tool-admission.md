@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Pinned npm 安裝、移除與安全 reload
 
-**Status:** claimed
+**Status:** resolved
 
 - [x] 新安裝 package 的 extension tools 預設 inactive，且不出現在 model-visible active-tool set
 - [x] 使用者必須再次明確接受 Trusted Extension 完整本機權限語意後，Host 才能啟用相容 package tools
@@ -17,5 +17,4 @@
 
 ## Comments
 
-- 2026-08-31：`npm run build`、`smoke-pi-host-extensions.mts` trusted package fixture、Pi Host tool-contract／pack-tools／direct-contract、Outbound Gate、Turn Record與Skill preflight focused smokes、focused oxlint與`git diff --check`通過。Fixture證明generic extension API不能偽造package admission、未trust時拒絕、builtin `read` collision被排除，且active contract含package name／exact version／source／origin與schema digest。Standards／Spec review未留待修finding。
-- 完整`npm run smoke`在共享main-process memory-path工作尚未提交完成時，於Electron instruction E2E因新`user-data/durable-memory.sqlite`尚不存在而ENOENT；獨立DB的instruction snapshot與全部本票focused gates通過。未修改Pi Packages範圍外memory/bootstrap行為掩蓋；ticket暫維持`claimed`，不宣稱resolved。
+2026-08-31：Host 持久化 exact-source trust；Pi runtime 僅載入可信任且啟用的 package extension。工具經既有 policy/evidence path，碰撞 fail-closed。Contract、Turn Record 與 Skill preflight 保留 package provenance，並拒絕缺漏／不一致來源；確切 extension origin 優先於舊 MCP 同名快取。`smoke-pi-package-tools.mts`、`smoke-pi-package-lifecycle.mts` 通過。詳見 [release evidence](../release-evidence.md)。

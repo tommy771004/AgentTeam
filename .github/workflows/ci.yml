@@ -38,6 +38,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -51,6 +53,14 @@ jobs:
 
       - name: Lint (oxlint)
         run: npx oxlint src electron
+
+      - name: Resolve PR complexity base
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: echo "COMPLEXITY_PR_BASE_SHA=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_ENV"
+
+      - name: Deterministic qualification (no App launch)
+        run: npm run qualify:deterministic
 
       - name: Typecheck + Vite build
         run: npm run build

@@ -201,6 +201,9 @@ const api = {
           packages: PiPackageInventoryItem[]
           diagnostics: PiPackageDiagnostic[]
         }>,
+        searchCatalog: (query: string) => ipcRenderer.invoke('pi-host:packages:catalog-search', query) as Promise<{
+          items: import('./piPackageCatalog').PiPackageCatalogItem[]
+        }>,
         install: (input: { source: string; trusted: boolean }) => ipcRenderer.invoke('pi-host:packages:install', input) as Promise<{
           packages: PiPackageInventoryItem[]
           diagnostics: PiPackageDiagnostic[]
@@ -211,7 +214,7 @@ const api = {
           diagnostics: PiPackageDiagnostic[]
           mutation?: { action: 'remove'; source: string }
         }>,
-        setExtensionsEnabled: (input: { source: string; enabled: boolean; trusted: boolean }) => ipcRenderer.invoke('pi-host:packages:extensions:set-enabled', input) as Promise<{
+        setToolsEnabled: (input: { source: string; enabled: boolean; trusted: boolean }) => ipcRenderer.invoke('pi-host:packages:set-tools-enabled', input) as Promise<{
           packages: PiPackageInventoryItem[]
           diagnostics: PiPackageDiagnostic[]
         }>,
@@ -505,6 +508,11 @@ const api = {
     get: () => ipcRenderer.invoke('settings:get') as Promise<unknown | null>,
     set: (settings: unknown) =>
       ipcRenderer.invoke('settings:set', settings) as Promise<{ ok: boolean }>,
+    diagnostics: () => ipcRenderer.invoke('settings:diagnostics') as Promise<{
+      state: 'no-settings' | 'primary' | 'recovered-last-good' | 'corrupt-primary' | 'write-failed' | 'migration-failed'
+      stage?: 'before-temp-write' | 'during-temp-write' | 'before-rename' | 'after-rename' | 'read' | 'backup' | 'flush'
+      at: string
+    }>,
   },
   llm: {
     models: (req: { baseUrl: string; apiKey: string }) =>

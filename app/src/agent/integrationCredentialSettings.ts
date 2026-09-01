@@ -13,20 +13,10 @@ export async function migrateLocalIntegrationSettings(
   try { original = JSON.parse(raw) }
   catch { throw new Error('舊設定格式無法讀取，原始資料已保留。') }
   const legacy = legacyIntegrationCredentials(original)
-  const customToolSecrets = original && typeof original === 'object' && !Array.isArray(original)
-    ? (original as { customToolSecrets?: unknown }).customToolSecrets
-    : undefined
-  const hasCustomToolSecrets = Boolean(customToolSecrets && typeof customToolSecrets === 'object' && Object.keys(customToolSecrets).length)
-  if (Object.keys(legacy).length || hasCustomToolSecrets) {
+  if (Object.keys(legacy).length) {
     if (!migrate) throw new Error('憑證遷移需要桌面版安全儲存；原始資料已保留。')
-    const result = await migrate({ ...legacy, ...(hasCustomToolSecrets ? { customToolSecrets } : {}) })
+    const result = await migrate(legacy)
     if (!result.ok) throw new Error(result.error || '憑證遷移失敗，原始資料已保留。')
   }
-  const integrationSafe = withoutIntegrationCredentials(original)
-  if (integrationSafe && typeof integrationSafe === 'object' && !Array.isArray(integrationSafe)) {
-    const { customToolSecrets: _legacyCustomToolSecrets, encryptedCustomToolSecrets: _legacyEncrypted, ...safe } = integrationSafe as Record<string, unknown>
-    storage.setItem(INTEGRATION_SETTINGS_KEY, JSON.stringify(safe))
-  } else {
-    storage.setItem(INTEGRATION_SETTINGS_KEY, JSON.stringify(integrationSafe))
-  }
+  storage.setItem(INTEGRATION_SETTINGS_KEY, JSON.stringify(withoutIntegrationCredentials(original)))
 }

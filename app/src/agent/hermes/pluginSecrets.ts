@@ -180,6 +180,11 @@ export function hasPluginSecret(id: string): boolean {
   return Boolean(getPluginSecretMeta(id))
 }
 
+/** Availability only: custom-tool credentials override connector credentials main-side. */
+export function hasToolCredential(id: string): boolean {
+  return hasPluginSecret(`credential:custom-tool:${id}`) || hasPluginSecret(id) || hasPluginSecret(`${id}-connector`)
+}
+
 export function pluginSecretsHydrated(): boolean {
   return !vaultApi() || hydratedFromVault
 }

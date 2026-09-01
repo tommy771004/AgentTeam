@@ -17,7 +17,6 @@ import { ensureCodegraphPackRegistered } from './codegraph.ts'
 import { ensureMcpBridgePackRegistered } from './mcpBridgePack.ts'
 import { ensureSubDesignPackRegistered } from './subdesignPack.ts'
 import { ensureFrameworkPackRegistered } from './framework.ts'
-import { ensureCustomToolsPackRegistered } from './customToolsPack.ts'
 
 export function ensurePiPacksRegistered(): void {
   ensureIntegrationsPackRegistered()
@@ -31,5 +30,4 @@ export function ensurePiPacksRegistered(): void {
   ensureMcpBridgePackRegistered()
   ensureSubDesignPackRegistered()
   ensureFrameworkPackRegistered()
-  ensureCustomToolsPackRegistered()
 }

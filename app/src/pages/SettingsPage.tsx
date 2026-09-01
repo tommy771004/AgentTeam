@@ -485,7 +485,6 @@ export function SettingsPage() {
   const refreshPluginTokens = useLearningStore((s) => s.refreshPluginTokens)
   // Recompute secret key list when plugins change
   const pluginsTick = useLearningStore((s) => s.plugins)
-  const [customToolVaultKeys, setCustomToolVaultKeys] = useState<string[]>([])
   const approveToolPackage = useLearningStore((s) => s.approveToolPackage)
 
   /** Instant apply — no save button */
@@ -713,22 +712,15 @@ export function SettingsPage() {
         if (server.secretPluginId) found.add(server.secretPluginId)
       }
     }
-    // Browser plugin metadata contains hints only; desktop credentials are listed by each Vault field.
-    for (const { id } of listPluginSecretMeta()) found.add(id)
-    for (const key of customToolVaultKeys) found.add(key)
+    // Already stored secrets
+    for (const meta of listPluginSecretMeta()) {
+      if (meta.id.startsWith('credential:custom-tool:')) found.add(meta.id.slice('credential:custom-tool:'.length))
+    }
+    for (const { id } of listPluginSecretMeta()) {
+      if (!id.startsWith('credential:')) found.add(id)
+    }
     return [...found].sort()
-  }, [settings, pluginsTick, customToolVaultKeys])
-
-  useEffect(() => {
-    let cancelled = false
-    void window.subagents?.credentials?.intent({ action: 'list' }).then((result) => {
-      if (cancelled || !result.ok) return
-      setCustomToolVaultKeys(result.metadata
-        .filter((item) => item.kind === 'custom-tool')
-        .map((item) => item.ownerId))
-    })
-    return () => { cancelled = true }
-  }, [pluginsTick])
+  }, [settings, pluginsTick])
   const toolTuning = useMemo(
     () => recommendToolTuning(settings.model || settings.roleModels?.orchestrator || ''),
     [settings.model, settings.roleModels?.orchestrator],
@@ -3333,12 +3325,9 @@ export function SettingsPage() {
               </SettingsStack>
               {customToolSecretKeys.map((key) => (
                 <SettingsStack key={key} title={`Secret · ${key}`}>
-                  <IntegrationCredentialField
-                    kind="custom-tool"
-                    ownerId={key}
-                    disabled={!loaded || Boolean(credentialMigrationError)}
-                    onChanged={async () => undefined}
-                  />
+                  <IntegrationCredentialField kind="custom-tool" ownerId={key} disabled={!loaded || Boolean(credentialMigrationError)} onChanged={async () => {
+                    await window.subagents?.mcp?.stdioStopAll?.()
+                  }} />
                 </SettingsStack>
               ))}
             </SettingsGroup>

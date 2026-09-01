@@ -256,36 +256,19 @@ const SECRET_TOKEN = /{{\s*secret:([A-Za-z0-9_.-]+)\s*}}/g
 
 /**
  * Resolve {{secret:key}} placeholders main-side.
- * Stable custom-tool credential first; legacy connector ids remain read-only fallbacks.
+ * Order: custom-tool stable reference → connector vault ids. No settings fallback.
  */
-export function resolveSecretPlaceholders(text: string, usedSecrets?: string[]): { text: string; missing: string[] } {
+export function resolveSecretPlaceholders(
+  text: string,
+): { text: string; missing: string[] } {
   const missing: string[] = []
   const out = (text || '').replace(SECRET_TOKEN, (_all, key: string) => {
     const rec = getVaultSecret(`credential:custom-tool:${key}`) || getVaultSecret(key) || getVaultSecret(`${key}-connector`)
-    if (rec?.token) {
-      usedSecrets?.push(rec.token)
-      return rec.token
-    }
+    if (rec?.token) return rec.token
     missing.push(key)
     return ''
   })
   return { text: out, missing }
-}
-
-/** Remove main-only credential material from any value before an IPC response. */
-export function redactSecretValues<T>(value: T, secrets: string[]): T {
-  const redact = (input: unknown): unknown => {
-    if (typeof input === 'string') {
-      return [...new Set(secrets)].filter(Boolean).sort((left, right) => right.length - left.length)
-        .reduce((text, secret) => text.replaceAll(secret, '[REDACTED]'), input)
-    }
-    if (Array.isArray(input)) return input.map(redact)
-    if (input && typeof input === 'object') {
-      return Object.fromEntries(Object.entries(input as Record<string, unknown>).map(([key, item]) => [key, redact(item)]))
-    }
-    return input
-  }
-  return redact(value) as T
 }
 
 export function hasSecretPlaceholder(text: string | undefined | null): boolean {

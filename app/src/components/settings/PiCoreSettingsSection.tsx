@@ -51,13 +51,24 @@ type PiPackageView = {
   name?: string
   version?: string
   resourceTypesKnown: boolean
-  extensionToolsEnabled?: boolean
-  extensionToolsTrusted?: boolean
   resources: Array<{ kind: 'extensions' | 'skills' | 'prompts' | 'themes'; total: number; enabled: number }>
+  toolTrust: 'unsupported' | 'inactive' | 'trusted-disabled' | 'active'
+  toolNames: string[]
   diagnostics: Array<{ code: string; message: string }>
 }
 
 type PiPackageLoadStatus = 'loading' | 'ready' | 'unavailable' | 'error'
+type PiPackageCatalogItem = {
+  name: string
+  version: string
+  source: string
+  description: string
+  repositoryUrl?: string
+  npmUrl: string
+  piDevUrl: string
+  compatibility: Array<{ kind: 'extensions' | 'skills' | 'prompts' | 'themes' | 'resources'; status: 'supported' | 'unsupported' | 'unknown' }>
+}
+type PiPackageCatalogStatus = 'idle' | 'loading' | 'ready' | 'error' | 'unavailable'
 
 const PACKAGE_RESOURCE_LABELS: Record<PiPackageView['resources'][number]['kind'], string> = {
   extensions: 'Extensions',
@@ -70,6 +81,24 @@ function piPackageResourcesLabel(item: PiPackageView): string {
   if (!item.resourceTypesKnown) return '資源未知'
   if (item.resources.length === 0) return '未發現 Pi resources'
   return item.resources.map((resource) => `${PACKAGE_RESOURCE_LABELS[resource.kind]} ${resource.enabled}/${resource.total}`).join(' · ')
+}
+
+function piPackageToolTrustLabel(item: PiPackageView): string {
+  if (item.toolTrust === 'active') return `Trusted tools 已啟用${item.toolNames.length ? `（${item.toolNames.join('、')}）` : ''}`
+  if (item.toolTrust === 'trusted-disabled') return 'Trusted tools 已停用'
+  if (item.toolTrust === 'inactive') return 'Extension tools 未信任、未啟用'
+  return '沒有 AgentStudio v1 相容 extension tools'
+}
+
+function packageCompatibilityLabel(item: PiPackageCatalogItem): string {
+  const labels = { extensions: 'Extension tools', skills: 'Skills', prompts: 'Prompts', themes: 'Themes', resources: 'Resources' }
+  const statuses = { supported: '支援', unsupported: 'v1 不支援', unknown: '未知' }
+  return item.compatibility.map((entry) => `${labels[entry.kind]}：${statuses[entry.status]}`).join(' · ')
+}
+
+async function openPackageLink(url: string) {
+  if (window.subagents?.shell?.openExternal) await window.subagents.shell.openExternal(url)
+  else window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 const TOOLS = [
@@ -113,6 +142,10 @@ export function PiCoreSettingsSection() {
   const [packageSource, setPackageSource] = useState('')
   const [packageMutating, setPackageMutating] = useState(false)
   const [packageOperationMessage, setPackageOperationMessage] = useState('')
+  const [catalogQuery, setCatalogQuery] = useState('')
+  const [catalogItems, setCatalogItems] = useState<PiPackageCatalogItem[]>([])
+  const [catalogStatus, setCatalogStatus] = useState<PiPackageCatalogStatus>('idle')
+  const [catalogMessage, setCatalogMessage] = useState('')
   const [configStatus, setConfigStatus] = useState<PiConfigStatus | undefined>()
 
   const refreshPackages = useCallback(async (showLoading = true) => {
@@ -178,8 +211,8 @@ export function PiCoreSettingsSection() {
     }
   }
 
-  const installPackage = async () => {
-    const source = packageSource.trim()
+  const installPackage = async (requestedSource?: string) => {
+    const source = (requestedSource || packageSource).trim()
     const install = window.subagents?.piHost?.packages?.install
     if (!source || !install) return
     const confirmed = window.confirm(
@@ -193,13 +226,31 @@ export function PiCoreSettingsSection() {
       setPackages(result.packages || [])
       setPackageMessage(result.diagnostics?.[0]?.message || '')
       setPackageStatus('ready')
-      setPackageSource('')
+      if (!requestedSource) setPackageSource('')
       setPackageOperationMessage(`已安裝 ${result.mutation?.source || source}；下一輪 Pi run 會載入新 state`)
     } catch (error) {
       setPackageOperationMessage(error instanceof Error ? `安裝失敗：${error.message}` : '安裝失敗')
       await refreshPackages(false)
     } finally {
       setPackageMutating(false)
+    }
+  }
+
+  const searchCatalog = async () => {
+    const search = window.subagents?.piHost?.packages?.searchCatalog
+    if (!search) {
+      setCatalogStatus('unavailable')
+      return
+    }
+    setCatalogStatus('loading')
+    setCatalogMessage('')
+    try {
+      const result = await search(catalogQuery.trim())
+      setCatalogItems(result.items || [])
+      setCatalogStatus('ready')
+    } catch (error) {
+      setCatalogMessage(error instanceof Error ? error.message : '無法搜尋 npm catalog')
+      setCatalogStatus('error')
     }
   }
 
@@ -224,24 +275,22 @@ export function PiCoreSettingsSection() {
     }
   }
 
-  const setPackageExtensionsEnabled = async (item: PiPackageView) => {
-    const setEnabled = window.subagents?.piHost?.packages?.setExtensionsEnabled
-    if (!setEnabled) return
-    const enabled = !item.extensionToolsEnabled
+  const togglePackageTools = async (item: PiPackageView) => {
+    const setToolsEnabled = window.subagents?.piHost?.packages?.setToolsEnabled
+    if (!setToolsEnabled || item.toolTrust === 'unsupported') return
+    const enabled = item.toolTrust !== 'active'
     if (enabled && !window.confirm(
-      `確定啟用 ${item.source} 的 Extension Tools？\n\n這些工具與 package initialization code 不是 sandbox，可能取得完整 filesystem、process、network、environment 與 credentials 權限；每次工具呼叫仍需通過 Host contract 與核准政策。`,
+      `確定信任並啟用 ${item.source} 的 extension tools？\n\n這是安裝之外的第二次 Trusted Extension 授權。Package code 不是 sandbox，可能取得完整 filesystem、process、network、environment 與 credentials 權限；每次工具呼叫仍受 Host tool contract、核准與出站政策約束。`,
     )) return
-    if (!enabled && !window.confirm(`確定停用 ${item.source} 的 Extension Tools？下一輪 Pi run 將不再發布這些工具。`)) return
     setPackageMutating(true)
-    setPackageOperationMessage(enabled ? '正在驗證並啟用 Extension Tools…' : '正在停用 Extension Tools…')
+    setPackageOperationMessage(enabled ? '正在啟用 Trusted Extension tools…' : '正在停用 package tools…')
     try {
-      const result = await setEnabled({ source: item.source, enabled, trusted: enabled })
+      const result = await setToolsEnabled({ source: item.source, enabled, trusted: enabled })
       setPackages(result.packages || [])
       setPackageMessage(result.diagnostics?.[0]?.message || '')
-      setPackageStatus('ready')
-      setPackageOperationMessage(`${enabled ? '已啟用' : '已停用'} ${item.source} Extension Tools；下一輪 Pi run 套用`)
+      setPackageOperationMessage(enabled ? '已啟用；下一輪 Pi run 會發布新的 active-tool contract' : '已停用；下一輪 Pi run 不再包含這些 tools')
     } catch (error) {
-      setPackageOperationMessage(error instanceof Error ? `Extension Tools 變更失敗：${error.message}` : 'Extension Tools 變更失敗')
+      setPackageOperationMessage(error instanceof Error ? `變更失敗：${error.message}` : '變更失敗')
       await refreshPackages(false)
     } finally {
       setPackageMutating(false)
@@ -330,6 +379,52 @@ export function PiCoreSettingsSection() {
       </SettingsGroup>
       <SettingsGroup title="Pi Packages" action={<span className="text-[11px] text-outline">Pi Host 真實狀態</span>}>
         <SettingsStack
+          title="搜尋 Pi package catalog"
+          description="只把搜尋關鍵字送到 npm registry；pi.dev、npm 與 repository 僅作外部詳情入口，不代表已安裝或已信任。"
+        >
+          <div className="flex items-center gap-2">
+            <input
+              className={settingsInputCls}
+              value={catalogQuery}
+              disabled={catalogStatus === 'loading'}
+              placeholder="搜尋 package 名稱或用途"
+              onChange={(event) => setCatalogQuery(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') void searchCatalog() }}
+            />
+            <button type="button" className={`${settingsBtnCls} shrink-0 whitespace-nowrap`} disabled={catalogStatus === 'loading'} onClick={() => void searchCatalog()}>
+              {catalogStatus === 'loading' ? '搜尋中…' : '搜尋 npm'}
+            </button>
+          </div>
+          {catalogStatus === 'unavailable' && <span className="text-[11px] text-outline">目前 Pi Host 不支援 catalog discovery</span>}
+          {catalogStatus === 'error' && <span role="status" className="text-[11px] text-danger">搜尋失敗 · {catalogMessage}</span>}
+          {catalogStatus === 'ready' && catalogItems.length === 0 && <span className="text-[11px] text-outline">找不到帶有 pi-package metadata 的結果</span>}
+        </SettingsStack>
+        {catalogStatus === 'ready' && catalogItems.map((item) => {
+          const installed = packages.some((candidate) => candidate.source === item.source && candidate.installed)
+          return (
+            <SettingsRow
+              key={item.source}
+              title={`${item.name} · ${item.version}`}
+              description={`${item.description} · ${item.source} · ${packageCompatibilityLabel(item)}`}
+              control={(
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                  <button type="button" className={settingsBtnCls} onClick={() => void openPackageLink(item.piDevUrl)}>pi.dev</button>
+                  <button type="button" className={settingsBtnCls} onClick={() => void openPackageLink(item.npmUrl)}>npm</button>
+                  {item.repositoryUrl && <button type="button" className={settingsBtnCls} onClick={() => void openPackageLink(item.repositoryUrl!)}>原始碼</button>}
+                  <button
+                    type="button"
+                    className={settingsBtnPrimaryCls}
+                    disabled={installed || packageMutating || !packageMutationAvailable}
+                    onClick={() => void installPackage(item.source)}
+                  >
+                    {installed ? '已安裝' : '安裝此版本'}
+                  </button>
+                </div>
+              )}
+            />
+          )
+        })}
+        <SettingsStack
           title="安裝 pinned npm package"
           description="只接受 npm:<name>@<exact-version>，安裝於 user scope；不提供 update、git、URL 或 local path。"
         >
@@ -346,7 +441,7 @@ export function PiCoreSettingsSection() {
             />
             <button
               type="button"
-              className={settingsBtnPrimaryCls}
+              className={`${settingsBtnPrimaryCls} shrink-0 whitespace-nowrap`}
               disabled={packageMutating || !packageMutationAvailable || !packageSource.trim()}
               onClick={() => void installPackage()}
             >
@@ -364,19 +459,15 @@ export function PiCoreSettingsSection() {
           <SettingsRow
             key={`${item.scope}:${item.source}`}
             title={`${item.name || item.source} · ${item.version || '版本未知'}`}
-            description={`${item.source} · ${item.installed ? '已安裝' : '設定存在，檔案缺失'} · ${piPackageResourcesLabel(item)}${item.resources.some((resource) => resource.kind === 'extensions' && resource.enabled > 0) ? ` · Extension Tools ${item.extensionToolsEnabled ? '已信任啟用' : '預設停用'}` : ''}${item.filtered ? ' · 已套用 resource filters' : ''}${item.diagnostics[0]?.message ? ` · ${item.diagnostics[0].message}` : ''}`}
+            description={`${item.source} · ${item.installed ? '已安裝' : '設定存在，檔案缺失'} · ${piPackageResourcesLabel(item)} · ${piPackageToolTrustLabel(item)}${item.filtered ? ' · 已套用 resource filters' : ''}${item.diagnostics[0]?.message ? ` · ${item.diagnostics[0].message}` : ''}`}
             control={packageMutationAvailable ? (
               <div className="flex items-center gap-2">
-                {item.resources.some((resource) => resource.kind === 'extensions' && resource.enabled > 0)
-                  && window.subagents?.piHost?.packages?.setExtensionsEnabled && (
-                  <button
-                    type="button"
-                    className={settingsBtnCls}
+                {item.toolTrust !== 'unsupported' && window.subagents?.piHost?.packages?.setToolsEnabled && (
+                  <SettingsToggle
+                    checked={item.toolTrust === 'active'}
                     disabled={packageMutating}
-                    onClick={() => void setPackageExtensionsEnabled(item)}
-                  >
-                    {item.extensionToolsEnabled ? '停用 Tools' : '信任並啟用 Tools'}
-                  </button>
+                    onChange={() => void togglePackageTools(item)}
+                  />
                 )}
                 <button
                   type="button"

@@ -1,6 +1,7 @@
 import { existsSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { planModeToolDecision } from '../src/agent/planPolicy.ts'
+import type { PiPackageToolProvenance } from './piPackageDomain.ts'
 import type { PiToolContractSource } from './piToolContract.ts'
 
 export type PiInvocationOrigin = 'model' | 'direct-protocol' | 'code-mode' | 'mcp'
@@ -20,10 +21,7 @@ export type PiInvocationContractIdentity = {
   schemaDigest: string
   toolSource: PiToolContractSource
   toolPack?: string
-  packageName?: string
-  packageVersion?: string
-  packageSource?: string
-  resourceOrigin?: 'package'
+  packageProvenance?: PiPackageToolProvenance
 }
 
 export type PiFrozenRunPolicy = Readonly<{

@@ -29,6 +29,7 @@ import {
 import {
   clearVaultSecret,
   getVaultSecret,
+  hasSecretPlaceholder,
   isVaultEncryptionAvailable,
   listVaultMeta,
   migrateIntoVault,
@@ -36,16 +37,14 @@ import {
 } from './secretsVault'
 import { handleCredentialVaultIntent } from './integrationCredentialVault'
 import type { CredentialVaultIntent } from './credentialVaultAuthority'
-import { migrateIntegrationCredentials, migrateIntegrationSettingsFile } from './integrationCredentialMigration'
-import { legacyIntegrationCredentials, withoutIntegrationCredentials } from '../src/agent/integrationCredentials'
 import {
-  migrateCustomToolCredentials,
-  migrateCustomToolSettingsFile,
-  withoutLegacyCustomToolCredentials,
-} from './customToolCredentialMigration'
-import { executeConfiguredCustomTool, executeHttpTemplate } from './customToolExecution'
-import { customToolsForSettings } from '../src/agent/tools/customTools.ts'
-import type { LlmSettings } from '../src/agent/types.ts'
+  migrateIntegrationCredentials,
+  migrateIntegrationSettingsFile,
+  migrateIntegrationSettingsFileWithStatus,
+} from './integrationCredentialMigration'
+import { SettingsPersistence, SettingsPersistenceError } from './settingsPersistence'
+import { credentialBash, credentialHttpRequest, createToolCredentialScope } from './customToolCredentials'
+import { hasLegacyCustomToolCredentials, legacyIntegrationCredentials, withoutIntegrationCredentials } from '../src/agent/integrationCredentials'
 import {
   decidePermissionRequest,
   isAllowedNavigationUrl,
@@ -60,7 +59,7 @@ import {
   type WebhookPayload,
 } from './webhookServer'
 import {
-  mcpHttpRpcWithSecretPlaceholders,
+  mcpHttpRpc,
   mcpStdioCallTool,
   mcpStdioEnsure,
   mcpStdioListSessions,
@@ -579,18 +578,40 @@ function writeUsageLedger(ledger: UsageLedger): void {
 }
 
 function settingsForDisk(value: unknown) {
-  if (!value || typeof value !== 'object') return value
-  return withoutLegacyCustomToolCredentials(withoutIntegrationCredentials({ ...(value as Record<string, unknown>) }))
+  return withoutIntegrationCredentials(value)
 }
 
 function settingsForRenderer(value: unknown) {
-  if (!value || typeof value !== 'object') return value
-  return withoutLegacyCustomToolCredentials(withoutIntegrationCredentials({ ...(value as Record<string, unknown>) }))
+  return withoutIntegrationCredentials(value)
 }
 
-function migrateCredentialSettingsFile(file: string) {
-  migrateIntegrationSettingsFile(file)
-  return migrateCustomToolSettingsFile(file)
+type SettingsPersistenceDiagnostic = {
+  state: 'no-settings' | 'primary' | 'recovered-last-good' | 'corrupt-primary' | 'write-failed' | 'migration-failed'
+  stage?: SettingsPersistenceError['stage']
+  at: string
+}
+
+let settingsPersistenceDiagnostic: SettingsPersistenceDiagnostic = {
+  state: 'no-settings',
+  at: new Date().toISOString(),
+}
+
+function recordSettingsPersistence(
+  state: SettingsPersistenceDiagnostic['state'],
+  stage?: SettingsPersistenceError['stage'],
+): void {
+  settingsPersistenceDiagnostic = {
+    state,
+    ...(stage ? { stage } : {}),
+    at: new Date().toISOString(),
+  }
+}
+
+function recordSettingsRead(state: 'no-settings' | 'primary' | 'recovered-last-good'): void {
+  // Recovery is boot-significant evidence. A later read of the repaired primary
+  // must not erase it; the next successful user write clears the degraded state.
+  if (state === 'primary' && settingsPersistenceDiagnostic.state === 'recovered-last-good') return
+  recordSettingsPersistence(state)
 }
 
 /** Open native folder picker and push path to renderer */
@@ -916,31 +937,41 @@ app.whenReady().then(async () => {
 
   // Auto-start webhook / telegram if settings request it
   try {
-    const file = settingsPath()
-    if (fs.existsSync(file)) {
-      const s = migrateCredentialSettingsFile(file) as {
-        webhookEnabled?: boolean
-        webhookPort?: number
-        telegramEnabled?: boolean
-        telegramAllowedChatIds?: string
-      }
-      if (s.webhookEnabled) {
-        void startWebhookServer({
-          port: s.webhookPort || 8787,
-        }).catch((e) => {
-          console.error('Webhook auto-start failed', e)
-        })
-      }
-      if (s.telegramEnabled) {
-        void startTelegramGateway({
-          allowedChatIds: s.telegramAllowedChatIds || '',
-        }).catch((e) => {
-          console.error('Telegram gateway auto-start failed', e)
-        })
-      }
+    const result = migrateIntegrationSettingsFileWithStatus(settingsPath())
+    recordSettingsRead(result.state)
+    if (result.state === 'recovered-last-good') {
+      console.warn('[settings] startup recovered last-good settings after an invalid primary')
     }
-  } catch {
-    /* ignore */
+    const s = result.value as {
+      webhookEnabled?: boolean
+      webhookPort?: number
+      telegramEnabled?: boolean
+      telegramAllowedChatIds?: string
+    } | null
+    if (s?.webhookEnabled) {
+      void startWebhookServer({
+        port: s.webhookPort || 8787,
+      }).catch((e) => {
+        console.error('Webhook auto-start failed', e)
+      })
+    }
+    if (s?.telegramEnabled) {
+      void startTelegramGateway({
+        allowedChatIds: s.telegramAllowedChatIds || '',
+      }).catch((e) => {
+        console.error('Telegram gateway auto-start failed', e)
+      })
+    }
+  } catch (error) {
+    if (error instanceof SettingsPersistenceError) {
+      recordSettingsPersistence(
+        error.code === 'CORRUPT_PRIMARY' ? 'corrupt-primary' : 'write-failed',
+        error.stage,
+      )
+    } else {
+      recordSettingsPersistence('migration-failed')
+    }
+    console.warn('[settings] startup settings recovery unavailable')
   }
 
   app.on('activate', () => {
@@ -1047,22 +1078,49 @@ ipcMain.handle('usage:clear', async () => {
 
 ipcMain.handle('settings:get', async () => {
   try {
-    return settingsForRenderer(migrateCredentialSettingsFile(settingsPath()))
-  } catch {
+    const result = migrateIntegrationSettingsFileWithStatus(settingsPath())
+    recordSettingsRead(result.state)
+    if (result.state === 'recovered-last-good') {
+      console.warn('[settings] recovered last-good settings after an invalid primary')
+    }
+    return settingsForRenderer(result.value)
+  } catch (error) {
+    if (error instanceof SettingsPersistenceError) {
+      recordSettingsPersistence(
+        error.code === 'CORRUPT_PRIMARY' ? 'corrupt-primary' : 'write-failed',
+        error.stage,
+      )
+      throw new Error(error.message)
+    }
+    recordSettingsPersistence('migration-failed')
     throw new Error('設定或憑證遷移失敗；原始資料已保留，請重試。')
   }
 })
 
 ipcMain.handle('settings:set', async (_evt, settings: unknown) => {
-  const file = settingsPath()
-  migrateCredentialSettingsFile(file)
-  if (Object.keys(legacyIntegrationCredentials(settings)).length) throw new Error('請使用憑證 Vault intent 儲存 Token')
-  if (settings && typeof settings === 'object' && Object.keys((settings as { customToolSecrets?: Record<string, string> }).customToolSecrets || {}).length) {
-    throw new Error('請使用憑證 Vault intent 儲存 Custom-tool secret')
+  try {
+    const file = settingsPath()
+    migrateIntegrationSettingsFile(file)
+    if (Object.keys(legacyIntegrationCredentials(settings)).length) throw new Error('請使用憑證 Vault intent 儲存 Token')
+    const safe = settingsForDisk(settings)
+    if (!safe || typeof safe !== 'object' || Array.isArray(safe)) throw new Error('設定格式無效。')
+    new SettingsPersistence(file).write(safe as Record<string, unknown>)
+    recordSettingsPersistence('primary')
+    return { ok: true }
+  } catch (error) {
+    if (error instanceof SettingsPersistenceError) {
+      recordSettingsPersistence(
+        error.code === 'CORRUPT_PRIMARY' ? 'corrupt-primary' : 'write-failed',
+        error.stage,
+      )
+      throw new Error(error.message)
+    }
+    recordSettingsPersistence('write-failed')
+    throw new Error('設定儲存失敗；原始資料已保留，請重試。')
   }
-  fs.writeFileSync(file, JSON.stringify(settingsForDisk(settings), null, 2), 'utf-8')
-  return { ok: true }
 })
+
+ipcMain.handle('settings:diagnostics', async () => ({ ...settingsPersistenceDiagnostic }))
 
 // ── LLM proxy (OpenAI-compatible) ───────────────────────────────
 
@@ -1425,7 +1483,22 @@ ipcMain.handle(
     _evt,
     input: { url: string; headers?: Record<string, string>; body: unknown },
   ) => {
-    return mcpHttpRpcWithSecretPlaceholders(input)
+    const scope = createToolCredentialScope()
+    // Resolve vault placeholders only at this main-owned execution boundary.
+    const headers = Object.fromEntries(
+      Object.entries(input?.headers || {}).map(([k, v]) => [
+        k,
+        typeof v === 'string' && hasSecretPlaceholder(v)
+          ? scope.resolve(v)
+          : v,
+      ]),
+    )
+    try {
+      const result = await mcpHttpRpc({ ...input, headers })
+      return scope.redactValue(result)
+    } catch {
+      throw new Error('MCP 請求失敗：請確認憑證與連線設定。')
+    }
   },
 )
 
@@ -1502,7 +1575,7 @@ ipcMain.handle(
       cwd = path.resolve(workspaceRoot(), cwd)
     }
     if (!cwd || !fs.existsSync(cwd)) cwd = workspaceRoot()
-    return runBash({ ...input, cwd })
+    return credentialBash({ ...input, cwd })
   },
 )
 
@@ -2376,9 +2449,10 @@ ipcMain.handle('pi-host:runs:claim', async (_evt, runId?: string) => piHostSuper
 ipcMain.handle('pi-host:runs:settle', async (_evt, runId: string, settlement: PiTurnSettlement) => piHostSupervisor.settleQueuedRun(runId, settlement))
 ipcMain.handle('pi-host:resources:list', async () => ({ resources: await piHostSupervisor.listResources() }))
 ipcMain.handle('pi-host:packages:list', async () => piHostSupervisor.listPackages())
+ipcMain.handle('pi-host:packages:catalog-search', async (_evt, query: string) => piHostSupervisor.searchPackageCatalog(query))
 ipcMain.handle('pi-host:packages:install', async (_evt, input: { source: string; trusted: boolean }) => piHostSupervisor.installPackage(input.source, input.trusted))
 ipcMain.handle('pi-host:packages:remove', async (_evt, input: { source: string }) => piHostSupervisor.removePackage(input.source))
-ipcMain.handle('pi-host:packages:extensions:set-enabled', async (_evt, input: { source: string; enabled: boolean; trusted: boolean }) => piHostSupervisor.setPackageExtensionsEnabled(input.source, input.enabled, input.trusted))
+ipcMain.handle('pi-host:packages:set-tools-enabled', async (_evt, input: { source: string; enabled: boolean; trusted: boolean }) => piHostSupervisor.setPackageToolsEnabled(input.source, input.enabled, input.trusted))
 ipcMain.handle('pi-host:resources:reload', async (_evt, resources: unknown[]) => ({ resources: await piHostSupervisor.reloadResources(resources || []) }))
 const memoryProjectionAdmin: MemoryAccessContext = {
   origin: 'admin', memoryReadEnabled: false, memoryWriteEnabled: false, temporary: true,
@@ -3957,18 +4031,6 @@ async function tokenConsistencyGateSubDesignArtifact(input: { artifact: unknown;
 }
 
 async function runPiHostMainService(service: string, input: Record<string, unknown>): Promise<unknown> {
-  if (service === 'custom-tool/execute') {
-    const settings = migrateCredentialSettingsFile(settingsPath())
-    const toolName = String(input.toolName || '')
-    const tool = settings
-      ? customToolsForSettings(settings as unknown as LlmSettings).find((candidate) => candidate.name === toolName)
-      : undefined
-    if (!tool) throw new Error(`Custom tool not configured: ${toolName}`)
-    const args = input.input && typeof input.input === 'object' && !Array.isArray(input.input)
-      ? input.input as Record<string, unknown>
-      : {}
-    return executeConfiguredCustomTool(tool, args, String(input.cwd || '') || workspaceRoot())
-  }
   if (service === 'messaging/send') {
     return gatewaySendMessage({ channel: 'telegram', chatId: String(input.chatId || ''), text: String(input.text || ''), runId: typeof input.runId === 'string' ? input.runId : undefined })
   }
@@ -4885,9 +4947,7 @@ ipcMain.handle('tools:httpFetch', async (_evt, targetUrl: string, maxChars = 400
   }
 })
 
-ipcMain.handle('tools:httpRequest', async (_evt, input: { url: string; method?: string; headers?: Record<string, string>; body?: string; maxChars?: number }) => {
-  return executeHttpTemplate(input)
-})
+ipcMain.handle('tools:httpRequest', (_evt, input: Parameters<typeof credentialHttpRequest>[0]) => credentialHttpRequest(input))
 
 // ── Connector credential vault (renderer sees metadata only) ──
 
@@ -4895,10 +4955,13 @@ ipcMain.handle(
   'credentials:intent',
   async (_evt, intent: CredentialVaultIntent) => {
     // Prevent a later settings read from resurrecting a cleared legacy credential.
-    try { migrateCredentialSettingsFile(settingsPath()) } catch {
+    try { migrateIntegrationSettingsFile(settingsPath()) } catch {
       return { ok: false, code: 'VAULT_ERROR', error: '憑證遷移尚未完成，請重試。', availability: handleCredentialVaultIntent({ action: 'list' }).availability }
     }
     const result = handleCredentialVaultIntent(intent)
+    if (result.ok && intent.action !== 'list' && (intent.action === 'store' ? intent.kind === 'custom-tool' : intent.ref.startsWith('credential:custom-tool:'))) {
+      mcpStdioStopAll()
+    }
     if (result.ok && intent.action === 'clear') {
       if (intent.ref === 'credential:telegram:primary') await stopTelegramGateway()
       if (intent.ref === 'credential:webhook:primary') await stopWebhookServer()
@@ -4909,9 +4972,9 @@ ipcMain.handle(
 
 ipcMain.handle('credentials:migrateLegacy', async (_evt, legacy: unknown) => {
   try {
-    migrateCredentialSettingsFile(settingsPath())
+    migrateIntegrationSettingsFile(settingsPath())
     migrateIntegrationCredentials(legacyIntegrationCredentials(legacy))
-    migrateCustomToolCredentials(legacy && typeof legacy === 'object' ? legacy : {})
+    if (hasLegacyCustomToolCredentials(legacy)) mcpStdioStopAll()
     return { ok: true }
   } catch {
     return { ok: false, error: '憑證遷移失敗：原始資料已保留，請確認安全儲存後重試。' }
@@ -4938,6 +5001,7 @@ ipcMain.handle(
     if (!input?.id || !input?.token?.trim()) {
       return { ok: false as const, error: 'id 與 token 必填' }
     }
+    if (input.id.startsWith('credential:')) return { ok: false as const, error: '整合憑證必須使用 credentials intent' }
     try {
       const meta = setVaultSecret(input.id, input.token, input)
       return { ok: true as const, meta }
@@ -4949,6 +5013,7 @@ ipcMain.handle(
 )
 
 ipcMain.handle('secrets:clear', async (_evt, id: string) => {
+  if (String(id).startsWith('credential:')) return { ok: false }
   clearVaultSecret(String(id || ''))
   return { ok: true }
 })
@@ -4956,6 +5021,7 @@ ipcMain.handle('secrets:clear', async (_evt, id: string) => {
 ipcMain.handle(
   'secrets:migrate',
   async (_evt, map: Record<string, { token: string; refreshToken?: string; expiresAt?: number; tokenType?: string; updatedAt?: string }>) => {
+    if (Object.keys(map || {}).some((id) => id.startsWith('credential:'))) return { ok: false, imported: 0, error: '整合憑證必須使用 credentials migration ingress' }
     // 無 OS 鑰匙圈：拒絕把 legacy 明文轉寫成新明文檔；renderer 需保留 localStorage
     if (Object.keys(map || {}).length && !isVaultEncryptionAvailable()) {
       return { ok: false, imported: 0, error: 'OS 安全儲存不可用，暫不匯入 legacy 憑證' }

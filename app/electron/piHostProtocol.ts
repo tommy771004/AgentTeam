@@ -74,7 +74,7 @@ export type PiHostConfigStatus = {
 
 export type PiHostRequest = {
   id: string | number
-  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'packages/list' | 'packages/install' | 'packages/remove' | 'packages/extensions/set-enabled' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'agents/spawn' | 'agents/send' | 'agents/mailbox' | 'agents/ack' | 'agents/follow-up' | 'agents/wait' | 'agents/lease/resolve' | 'agents/interrupt' | 'agents/cancel' | 'agents/close' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/update' | 'runs/reorder' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
+  method: 'initialize' | 'health/get' | 'lifecycle/shutdown' | 'runtime/status' | 'tools/list' | 'tools/contract' | 'tools/read' | 'tools/grep' | 'tools/find' | 'tools/ls' | 'tools/write' | 'tools/edit' | 'tools/bash' | 'tools/code' | 'tools/mcp' | 'tools/pack' | 'approvals/resolve' | 'state/snapshot' | 'settings/get' | 'settings/update' | 'settings/profile' | 'resources/list' | 'resources/reload' | 'packages/list' | 'packages/install' | 'packages/remove' | 'packages/set-tools-enabled' | 'packages/catalog-search' | 'resources/sync-skills' | 'resources/read-skill-files' | 'instructions/v1/get' | 'instructions/v1/save' | 'instructions/v1/migrate-legacy' | 'instructions/v1/resolve' | 'instructions/v1/authorize-include' | 'instructions/v1/project-write' | 'instructions/v1/project-read' | 'instructions/v1/export' | 'instructions/v1/import-preview' | 'instructions/v1/import-apply' | 'review/v1/admit' | 'memory-control/v1/package/get' | 'memory/v1/upsert' | 'memory/v1/append' | 'memory/v1/get' | 'memory/v1/list' | 'memory/v1/recall' | 'memory/v1/delete' | 'memory/v1/clear' | 'memory/v1/delete-entry' | 'memory/v1/clear-project' | 'memory/v1/clear-global' | 'memory/v1/clear-all' | 'memory/v1/deletion-capability' | 'memory/v1/consolidate-dream' | 'memory/v1/export' | 'memory/v1/import-preview' | 'memory/v1/import-apply' | 'capabilities/list' | 'capabilities/load' | 'capabilities/search' | 'extensions/list' | 'extensions/install' | 'extensions/update' | 'extensions/reload' | 'extensions/set-enabled' | 'extensions/uninstall' | 'agents/list' | 'agents/spawn' | 'agents/send' | 'agents/mailbox' | 'agents/ack' | 'agents/follow-up' | 'agents/wait' | 'agents/lease/resolve' | 'agents/interrupt' | 'agents/cancel' | 'agents/close' | 'sessions/create' | 'sessions/list' | 'sessions/fork' | 'sessions/reset' | 'sessions/archive' | 'sessions/compact' | 'sessions/record' | 'runs/enqueue' | 'runs/claim' | 'runs/settle' | 'runs/list' | 'runs/cancel' | 'runs/update' | 'runs/reorder' | 'runs/active' | 'runs/attach' | 'runs/finalize-claim' | 'runs/finalize-complete' | 'runs/ack' | 'turn/submit' | 'turn/cancel' | 'turn/interrupt'
     | 'review/v1/finalize' | 'review/v1/read' | 'review/v1/payload-page' | 'review/v1/describe' | 'review/v1/files' | 'review/v1/file-diff' | 'review/v1/refresh' | 'review/v1/comments/list' | 'review/v1/draft/save' | 'review/v1/draft/delete' | 'review/v1/comment/transition' | 'review/v1/file-state/list' | 'review/v1/file-state/mark' | 'review/v1/state/inherit' | 'review/v1/feedback/prepare' | 'review/v1/feedback/claim' | 'review/v1/feedback/release' | 'review/v1/verification/list' | 'review/v1/verification/run' | 'review/v1/verification/output' | 'review/v1/mutation/preview' | 'review/v1/mutation/apply' | 'review/v1/delivery/preview' | 'review/v1/delivery/apply' | 'review/v1/artifact/export' | 'review/v1/artifact/import-preview' | 'review/v1/artifact/import-apply' | 'review/v1/artifact/rebind' | 'review/v1/artifact/retention' | 'review/v1/artifact/hard-delete'
   params: Record<string, unknown>
 }
@@ -133,6 +133,7 @@ export type PiHostResponse = {
     packages?: import('./piPackageDomain.ts').PiPackageInventoryItem[]
     packageDiagnostics?: import('./piPackageDomain.ts').PiPackageDiagnostic[]
     packageMutation?: { action: import('./piPackageDomain.ts').PiPackageMutationAction; source: string }
+    packageCatalog?: import('./piPackageCatalog.ts').PiPackageCatalogItem[]
     report?: { skillsDir?: string; results?: PiSkillSyncResult[] }
     /** The Host skills directory projected back out for renderer hydration (resources/read-skill-files). */
     files?: import('./piSkills.ts').PiSkillCatalogFile[]
@@ -282,7 +283,7 @@ export type PiHostEvent =
     }
   | {
       event: 'host/tool-start' | 'host/tool-decision' | 'host/tool-result'
-      payload: { runId: string; tool: string; callId?: string; parentRunId?: string; decision?: 'allow' | 'ask' | 'deny'; settlement?: 'success' | 'failed' | 'cancelled' | 'denied' | 'not-executed'; reason?: string; item?: unknown; idleLeaseMs?: number; executionEvidence?: WorkingExecutionEvidence; contractRevision?: number; contractDigest?: string; schemaDigest?: string; toolSource?: 'builtin' | 'extension-pack' | 'mcp' | 'pi-package'; toolPack?: string; packageName?: string; packageVersion?: string; packageSource?: string; resourceOrigin?: 'package'; invocationOrigin?: PiInvocationOrigin }
+      payload: { runId: string; tool: string; callId?: string; parentRunId?: string; decision?: 'allow' | 'ask' | 'deny'; settlement?: 'success' | 'failed' | 'cancelled' | 'denied' | 'not-executed'; reason?: string; item?: unknown; idleLeaseMs?: number; executionEvidence?: WorkingExecutionEvidence; contractRevision?: number; contractDigest?: string; schemaDigest?: string; toolSource?: 'builtin' | 'extension-pack' | 'mcp' | 'pi-package'; toolPack?: string; packageProvenance?: import('./piPackageDomain.ts').PiPackageToolProvenance; invocationOrigin?: PiInvocationOrigin }
     }
   | {
       event: 'host/orchestration'
@@ -387,8 +388,8 @@ import { settlePiRunLearning, type PiRunLearningSettlement } from './piRunLearni
 import { DEFAULT_PI_CAPABILITIES, PiCapabilityCatalog } from './piCapabilityExtension.ts'
 import { handlePiHostCapabilityDomain } from './piHostCapabilityDomain.ts'
 import { handlePiHostResourceDomain } from './piHostResourceDomain.ts'
-import { listPiPackageInventory, mutatePiPackage, parsePinnedNpmPackageSource, PiPackageDomainError, resolvePiPackageExtensionResources, type PiPackageInventoryItem } from './piPackageDomain.ts'
-import { resolvePiAgentDir } from './piUserConfig.ts'
+import { listPiPackageInventory, mutatePiPackage, PiPackageDomainError, setPiPackageToolsEnabled } from './piPackageDomain.ts'
+import { searchPiPackageCatalog } from './piPackageCatalog.ts'
 import { handlePiHostExtensionDomain } from './piHostExtensionDomain.ts'
 import { runPiOrchestration, type PiLoopPattern, type PiOrchestrationTurn } from './piOrchestrationExtension.ts'
 import { decideBashAction } from '../src/agent/tools/shellCommandParser.ts'
@@ -437,7 +438,6 @@ import {
   setPiPolicyEvidenceBridge,
   setPiSkillPreflightBridge,
   piSessionRunBinding,
-  piAllPackToolNames,
   WORKING_EXECUTION_EVIDENCE_DETAIL_KEY,
   requestPiToolApproval,
   type PiCatalogEntry,
@@ -452,7 +452,6 @@ import {
   workspaceTextSearchAvailability,
 } from './piWorkspaceTextSearchRuntime.ts'
 import { discoveredPiSkills, selectFrozenPiPreflightSkills, type PiSkillSyncResult } from './piSkills.ts'
-import { buildTrustedPiPackageExtensionPacks } from './piPackageExtensions.ts'
 import {
   clearPiPlanGateCandidate,
   clearPiContinuationItems,
@@ -467,7 +466,7 @@ import { continuationSignature, normalizeContinuationItems, selectContinuationIt
 import { setPiPlanAnnouncer as installPlanAnnouncer } from './piExtensionPacks/interactionPlanning.ts'
 import { isPiMcpInputSchema, piMcpModelToolName, setPiMcpExtensionsLookup } from './piExtensionPacks/mcpBridgePack.ts'
 import { setPiCapabilityBridge, setPiCodeModeExecutor } from './piExtensionPacks/framework.ts'
-import { PiToolContractStore, schemaDigest, type PiTurnToolContract, type PiTurnToolContractTool } from './piToolContract.ts'
+import { PiToolContractStore, schemaDigest, type PiTurnToolContract } from './piToolContract.ts'
 import { enqueuePiHostRun, handlePiHostRunDomain } from './piHostRunDomain.ts'
 import { handlePiHostAgentDomain } from './piHostAgentDomain.ts'
 import { PiAgentCommunicationDomain, type PiAgentCommunicationState } from './piAgentCommunicationDomain.ts'
@@ -827,18 +826,6 @@ const errorResponse = (
 /** A session is the serialization boundary for Pi turns. */
 const activeSessionRuns = new Map<string, { runId: string; cancelled: boolean; interrupt?: PiTurnInterruptReason }>()
 let packageMutationInFlight = false
-
-function projectPackageAdmissions(packages: PiPackageInventoryItem[], extensions: PiExtension[]): PiPackageInventoryItem[] {
-  return packages.map((item) => {
-    const admission = extensions.find((extension) => extension.kind === 'package' && extension.source === item.source)
-    return {
-      ...item,
-      extensionToolsEnabled: admission?.enabled === true && admission.trusted === true,
-      extensionToolsTrusted: admission?.trusted === true,
-    }
-  })
-}
-
 const PI_HOST_TOOL_UPDATE_MAX_BYTES = 16_384
 
 async function prepareHostLlmEgress(input: {
@@ -1619,17 +1606,6 @@ function runAutoCompactionPreflight(input: {
   else input.turnEvents.push(compacted.event)
 }
 
-function packageToolContractIdentity(tool: PiTurnToolContractTool): Partial<TurnRecordToolContractIdentity> {
-  return tool.source === 'pi-package'
-    ? {
-        packageName: tool.packageName,
-        packageVersion: tool.packageVersion,
-        packageSource: tool.packageSource,
-        resourceOrigin: tool.resourceOrigin,
-      }
-    : {}
-}
-
 function modelToolContractIdentity(
   state: HostState,
   sessionId: string,
@@ -1643,7 +1619,7 @@ function modelToolContractIdentity(
     schemaDigest: lookup.tool.schemaDigest,
     toolSource: lookup.tool.source,
     ...(lookup.tool.pack ? { toolPack: lookup.tool.pack } : {}),
-    ...packageToolContractIdentity(lookup.tool),
+    ...(lookup.tool.packageProvenance ? { packageProvenance: lookup.tool.packageProvenance } : {}),
     invocationOrigin: 'model',
   }
 }
@@ -1771,6 +1747,7 @@ function recordToolAudit(state: HostState, sessionId: unknown, event: PiHostEven
         schemaDigest: payload.schemaDigest,
         toolSource: payload.toolSource,
         ...(payload.toolPack ? { toolPack: payload.toolPack } : {}),
+        ...(payload.packageProvenance ? { packageProvenance: payload.packageProvenance } : {}),
         invocationOrigin: payload.invocationOrigin,
       } : {}),
     })
@@ -2084,7 +2061,7 @@ function contractIdentityForCurrentTool(
       schemaDigest: lookup.tool.schemaDigest,
       toolSource: lookup.tool.source,
       ...(lookup.tool.pack ? { toolPack: lookup.tool.pack } : {}),
-      ...packageToolContractIdentity(lookup.tool),
+      ...(lookup.tool.packageProvenance ? { packageProvenance: lookup.tool.packageProvenance } : {}),
     },
   }
 }
@@ -2407,6 +2384,7 @@ function appendInvocationEvidence(sessionId: string, event: PiPolicyEvidenceEven
     schemaDigest: event.schemaDigest,
     toolSource: event.toolSource,
     ...(event.toolPack ? { toolPack: event.toolPack } : {}),
+    ...(event.packageProvenance ? { packageProvenance: event.packageProvenance } : {}),
     invocationOrigin: event.origin,
   })
 }
@@ -4947,75 +4925,17 @@ export function handlePiHostRequest(
     if (packageMutationInFlight) return [errorResponse(id, 'busy', 'Pi package state is changing; retry after the current operation settles')]
     return listPiPackageInventory().then((inventory) => [{
       id,
-      result: { packages: projectPackageAdmissions(inventory.packages, state.extensions.list()), packageDiagnostics: inventory.diagnostics },
+      result: { packages: inventory.packages, packageDiagnostics: inventory.diagnostics },
     }])
   }
-  if (input.method === 'packages/extensions/set-enabled') {
-    const enabled = input.params?.enabled
-    if (typeof enabled !== 'boolean') return [errorResponse(id, 'invalid_request', 'enabled is required')]
-    if (enabled && input.params?.trusted !== true) {
-      return [errorResponse(id, 'forbidden', 'Explicit Trusted Extension confirmation is required')]
-    }
-    if (packageMutationInFlight) return [errorResponse(id, 'busy', 'Another Pi package mutation is already running')]
-    if (activeSessionRuns.size > 0 || activeTurnRecorders.size > 0) {
-      return [errorResponse(id, 'busy', 'Pi package extensions cannot change while a Pi run is active')]
-    }
-    packageMutationInFlight = true
-    return (async () => {
-      const parsed = parsePinnedNpmPackageSource(input.params?.source)
-      const existing = state.extensions.list().find((extension) => extension.kind === 'package' && extension.source === parsed.source)
-      let admissionDiagnostics: Array<{ code: 'resource-resolution-failed'; message: string }> = []
-      if (!enabled && !existing) return [errorResponse(id, 'not_found', 'Package extension admission is not configured')]
-      if (enabled) {
-        const resolved = await resolvePiPackageExtensionResources(resolvePiAgentDir())
-        if (!resolved.resources.some((resource) => resource.source === parsed.source)) {
-          return [errorResponse(id, 'invalid_request', resolved.diagnostics[0]?.message || 'Package has no compatible extension resources')]
-        }
-        ensurePiPacksRegistered()
-        const candidateAdmissions = [
-          ...state.extensions.list()
-            .filter((extension) => extension.kind === 'package' && extension.enabled && extension.trusted && extension.source !== parsed.source)
-            .map((extension) => ({ source: extension.source, name: extension.name, version: extension.version, enabled: true, trusted: true })),
-          { source: parsed.source, name: parsed.name, version: parsed.version, enabled: true, trusted: true },
-        ]
-        const preview = await buildTrustedPiPackageExtensionPacks({
-          agentDir: resolvePiAgentDir(),
-          admissions: candidateAdmissions,
-          reservedToolNames: new Set([...piCoreRuntimeToolCatalog().map((tool) => tool.name), ...piAllPackToolNames()]),
-        })
-        admissionDiagnostics = preview.diagnostics.map((entry) => ({ code: 'resource-resolution-failed' as const, message: entry.message }))
-        const candidateTools = preview.packs.flatMap((pack) => pack.tools)
-          .filter((tool) => tool.packageProvenance?.packageSource === parsed.source)
-        if (candidateTools.length === 0) {
-          return [errorResponse(id, 'conflict', preview.diagnostics.find((entry) => entry.path)?.message || 'Package extension registered no compatible non-colliding tools')]
-        }
-      }
-      const extension = state.extensions.setPackageAdmission({
-        id: existing?.id || `pi-package-${createHash('sha256').update(parsed.source).digest('hex').slice(0, 12)}`,
-        name: parsed.name,
-        version: parsed.version,
-        source: parsed.source,
-        enabled,
-        trusted: enabled ? true : existing?.trusted === true,
-      })
-      state.snapshot.extensions = state.extensions.list()
-      state.snapshot.cursor += 1
-      await disposeAllPiSessions()
-      const inventory = await listPiPackageInventory()
-      return [{
+  if (input.method === 'packages/catalog-search') {
+    return searchPiPackageCatalog(input.params?.query)
+      .then((packageCatalog) => [{ id, result: { packageCatalog } }])
+      .catch((error: unknown) => [errorResponse(
         id,
-        result: {
-          extension,
-          packages: projectPackageAdmissions(inventory.packages, state.extensions.list()).map((item) => item.source === parsed.source
-            ? { ...item, diagnostics: [...item.diagnostics, ...admissionDiagnostics].slice(0, 32) }
-            : item),
-          packageDiagnostics: inventory.diagnostics,
-        },
-      }]
-    })().catch((error: unknown) => {
-      const code = error instanceof PiPackageDomainError ? error.code : 'runtime_error'
-      return [errorResponse(id, code, error instanceof Error ? error.message : 'Unable to change package extension admission')]
-    }).finally(() => { packageMutationInFlight = false })
+        error instanceof PiPackageDomainError ? error.code : 'unavailable',
+        error instanceof Error ? error.message : 'Unable to search the Pi package catalog',
+      )])
   }
   if (input.method === 'packages/install' || input.method === 'packages/remove') {
     const action = input.method === 'packages/install' ? 'install' : 'remove'
@@ -5032,19 +4952,11 @@ export function handlePiHostRequest(
     packageMutationInFlight = true
     return mutatePiPackage(action, input.params?.source)
       .then(async (mutation) => {
-        if (mutation.action === 'remove') {
-          const admission = state.extensions.list().find((extension) => extension.kind === 'package' && extension.source === mutation.source)
-          if (admission) {
-            state.extensions.uninstall(admission.id)
-            state.snapshot.extensions = state.extensions.list()
-            state.snapshot.cursor += 1
-          }
-        }
         await disposeAllPiSessions()
         return [{
           id,
           result: {
-            packages: projectPackageAdmissions(mutation.inventory.packages, state.extensions.list()),
+            packages: mutation.inventory.packages,
             packageDiagnostics: mutation.inventory.diagnostics,
             packageMutation: { action: mutation.action, source: mutation.source },
           },
@@ -5054,6 +4966,29 @@ export function handlePiHostRequest(
         const code = error instanceof PiPackageDomainError ? error.code : 'runtime_error'
         const message = error instanceof Error ? error.message : `Unable to ${action} Pi package`
         return [errorResponse(id, code, message)]
+      })
+      .finally(() => { packageMutationInFlight = false })
+  }
+  if (input.method === 'packages/set-tools-enabled') {
+    if (typeof input.params?.enabled !== 'boolean') {
+      return [errorResponse(id, 'invalid_request', 'enabled must be a boolean')]
+    }
+    if (input.params.enabled && input.params?.trusted !== true) {
+      return [errorResponse(id, 'forbidden', 'Explicit Trusted Extension confirmation is required before enabling Pi package tools')]
+    }
+    if (packageMutationInFlight) return [errorResponse(id, 'busy', 'Another Pi package mutation is already running')]
+    if (activeSessionRuns.size > 0 || activeTurnRecorders.size > 0) {
+      return [errorResponse(id, 'busy', 'Pi package tools cannot change while a Pi run is active')]
+    }
+    packageMutationInFlight = true
+    return setPiPackageToolsEnabled(input.params?.source, input.params.enabled, input.params?.trusted === true)
+      .then(async (inventory) => {
+        await disposeAllPiSessions()
+        return [{ id, result: { packages: inventory.packages, packageDiagnostics: inventory.diagnostics } }]
+      })
+      .catch((error: unknown) => {
+        const code = error instanceof PiPackageDomainError ? error.code : 'runtime_error'
+        return [errorResponse(id, code, error instanceof Error ? error.message : 'Unable to change Pi package tool trust')]
       })
       .finally(() => { packageMutationInFlight = false })
   }
@@ -5790,15 +5725,6 @@ export function handlePiHostRequest(
           unlockedTools: iterationUnlockedTools,
           mcpGenerationKey: mcpTurnGenerationKey,
           mcpCapabilityActive: mcpCapabilityLoaded,
-          packageExtensions: state.extensions.list()
-            .filter((extension) => extension.kind === 'package')
-            .map((extension) => ({
-              source: extension.source,
-              name: extension.name,
-              version: extension.version,
-              enabled: extension.enabled,
-              trusted: extension.trusted,
-            })),
         }, providerMemoryContext, contextPolicy.referenceChatHistory, (registryContextWindow, runtimeSession) => {
           const liveSession = runtimeSession as { getAllTools?: () => readonly unknown[]; getActiveToolNames?: () => readonly string[] } | undefined
           if (liveSession && typeof liveSession.getAllTools === 'function' && typeof liveSession.getActiveToolNames === 'function') {
@@ -6705,7 +6631,7 @@ export function createPiHostServer(
         schemaDigest: lookup.tool.schemaDigest,
         toolSource: lookup.tool.source,
         ...(lookup.tool.pack ? { toolPack: lookup.tool.pack } : {}),
-        ...packageToolContractIdentity(lookup.tool),
+        ...(lookup.tool.packageProvenance ? { packageProvenance: lookup.tool.packageProvenance } : {}),
       }
     },
     append: (sessionId, event) => {
@@ -6725,10 +6651,7 @@ export function createPiHostServer(
         schemaDigest: event.schemaDigest,
         toolSource: event.toolSource,
         ...(event.toolPack ? { toolPack: event.toolPack } : {}),
-        ...(event.packageName ? { packageName: event.packageName } : {}),
-        ...(event.packageVersion ? { packageVersion: event.packageVersion } : {}),
-        ...(event.packageSource ? { packageSource: event.packageSource } : {}),
-        ...(event.resourceOrigin ? { resourceOrigin: event.resourceOrigin } : {}),
+        ...(event.packageProvenance ? { packageProvenance: event.packageProvenance } : {}),
         invocationOrigin: event.origin,
       })
     },

@@ -4,10 +4,14 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** 可交給代理
+**Status:** resolved
 
-- [ ] Settings 使用 temporary write、必要 flush、atomic rename 與明確權限完成 persistence。
-- [ ] Last-good recovery 能區分 no-settings、corrupt-primary 與 recovered states。
-- [ ] Failure injection 覆蓋 temp write 前／中、rename 前與 rename 後，restart 結果永不為 truncated JSON。
-- [ ] Recovery 或 write failure 可被診斷但不暴露 credential material。
-- [ ] Existing settings merge、migration 與 renderer projection 行為保持相容。
+- [x] Settings 使用 temporary write、必要 flush、atomic rename 與明確權限完成 persistence。
+- [x] Last-good recovery 能區分 no-settings、corrupt-primary 與 recovered states。
+- [x] Failure injection 覆蓋 temp write 前／中、rename 前與 rename 後，restart 結果永不為 truncated JSON。
+- [x] Recovery 或 write failure 可被診斷但不暴露 credential material。
+- [x] Existing settings merge、migration 與 renderer projection 行為保持相容。
+
+## Comments
+
+2026-09-01 — `SettingsPersistence` 成為一般 settings 與 credential migration 的單一磁碟 owner：同目錄 0600 temp、file fsync、atomic rename、directory fsync（Windows 保留 atomic rename）與 0600 last-good。`settings:get` 維持原 settings／null projection，另提供 metadata-only diagnostics；startup integration auto-start 也走相同 recovery lifecycle，且 recovery evidence 不會被修復後的 primary read 抹除。真實檔案 failure matrix 覆蓋 temp write 前／中、rename 前／後、write preparation 與 fresh-reader restart，並驗證 no-settings、primary、recovered-last-good、corrupt-primary、權限及 migration scrub 後 last-good 不含 raw credentials。`smoke:settings-persistence` 已納入 `smoke:release`，並由 PR CI 與 release package job 直接 blocking 執行；credential migration、release evidence、build、scoped oxlint（僅四個既有 main warning）與完整 `npm run smoke` 全綠。Paid Beta 仍為 NO-GO（0/43）。

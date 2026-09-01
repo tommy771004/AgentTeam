@@ -27,6 +27,11 @@ for (const name of ['dist', 'dist:mac', 'dist:win', 'dist:all']) {
 
 assert.match(scripts['build:pi-host'] ?? '', /run-pi-host-build\.mts build:pi-host:actual$/, 'Pi Host builds must pass through the release-mode guard')
 assert.match(scripts['build:pi-host:actual'] ?? '', /build-pi-host-bundle\.mts/, 'the real Pi Host build remains independently callable')
-assert.match(scripts.check ?? '', /npm run smoke:pi-build-contract/, 'removed build-time checks must remain reachable from the independent check command')
+assert.match(scripts.check ?? '', /npm run qualify:deterministic/, 'check must delegate to the independent deterministic qualification owner')
+assert.match(
+  scripts['qualify:deterministic'] ?? '',
+  /npm run smoke:pi-build-contract/,
+  'removed build-time checks must remain reachable from deterministic qualification',
+)
 
 console.log('release topology passed: compile/package only; qualification stays independent')

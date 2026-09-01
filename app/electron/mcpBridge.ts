@@ -8,7 +8,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { spawnCommandSpec, terminateProcessTree } from './platformProcess'
-import { hasSecretPlaceholder, redactSecretValues, resolveSecretPlaceholders } from './secretsVault'
+import { createToolCredentialScope } from './customToolCredentials'
 
 type JsonRpc = {
   jsonrpc: '2.0'
@@ -42,7 +42,6 @@ class McpStdioSession {
   readonly command: string
   readonly args: string[]
   readonly env: Record<string, string>
-  private usedSecrets: string[] = []
   private child: ChildProcessWithoutNullStreams | null = null
   private nextId = 1
   private pending = new Map<number, Pending>()
@@ -53,12 +52,13 @@ class McpStdioSession {
   lastError: string | null = null
   requestCount = 0
   private initPromise: Promise<void> | null = null
+  private readonly credentials = createToolCredentialScope()
 
   constructor(id: string, command: string, args: string[], env?: Record<string, string>) {
     this.id = id
     this.command = command
-    this.args = args || []
-    this.env = env || {}
+    this.args = [...(args || [])]
+    this.env = { ...env }
   }
 
   get pid(): number | null {
@@ -73,7 +73,7 @@ class McpStdioSession {
       alive: this.alive && !!this.child && !this.child.killed,
       pid: this.pid,
       startedAt: this.startedAt,
-      lastError: this.lastError,
+      lastError: this.lastError == null ? null : this.credentials.redact(this.lastError),
       requestCount: this.requestCount,
     }
   }
@@ -96,24 +96,16 @@ class McpStdioSession {
         return
       }
       try {
-        const resolve = (value: string) => {
-          if (!hasSecretPlaceholder(value)) return value
-          const resolved = resolveSecretPlaceholders(value, this.usedSecrets)
-          if (resolved.missing.length) throw new Error(`missing MCP credential: ${[...new Set(resolved.missing)].join(', ')}`)
-          return resolved.text
-        }
-        const resolvedArgs = this.args.map(resolve)
-        const resolvedEnv = Object.fromEntries(Object.entries(this.env).map(([key, value]) => [key, resolve(value)]))
-        const spec = spawnCommandSpec(this.command, resolvedArgs)
+        const spec = spawnCommandSpec(this.command, this.args.map(this.credentials.resolve))
+        const env = Object.fromEntries(Object.entries(this.env).map(([key, value]) => [key, this.credentials.resolve(value)]))
         this.child = spawn(spec.file, spec.args, {
           stdio: ['pipe', 'pipe', 'pipe'],
-          env: { ...process.env, ...resolvedEnv },
+          env: { ...process.env, ...env },
           windowsHide: true,
           windowsVerbatimArguments: spec.windowsVerbatimArguments,
         })
       } catch (e) {
-        const message = redactSecretValues(e instanceof Error ? e.message : String(e), this.usedSecrets)
-        reject(new Error(message))
+        reject(new Error(this.credentials.redact(e instanceof Error ? e.message : String(e))))
         return
       }
 
@@ -239,9 +231,9 @@ class McpStdioSession {
     clearTimeout(p.timer)
     this.pending.delete(id)
     if (msg.error) {
-      p.reject(new Error(redactSecretValues(msg.error.message || `MCP error ${msg.error.code}`, this.usedSecrets)))
+      p.reject(new Error(this.credentials.redact(msg.error.message || `MCP error ${msg.error.code}`)))
     } else {
-      p.resolve(redactSecretValues(msg.result, this.usedSecrets))
+      p.resolve(this.credentials.redactValue(msg.result))
     }
   }
 
@@ -346,28 +338,6 @@ export async function mcpHttpRpc(input: {
   const data = (await res.json()) as JsonRpc
   if (data.error) throw new Error(data.error.message || 'MCP error')
   return data.result
-}
-
-/** Main-owned reference resolver for HTTP MCP; every response and error is scrubbed before IPC. */
-export async function mcpHttpRpcWithSecretPlaceholders(input: {
-  url: string
-  headers?: Record<string, string>
-  body: unknown
-}): Promise<unknown> {
-  const missing: string[] = []
-  const usedSecrets: string[] = []
-  const headers = Object.fromEntries(Object.entries(input.headers || {}).map(([key, value]) => {
-    if (!hasSecretPlaceholder(value)) return [key, value]
-    const resolved = resolveSecretPlaceholders(value, usedSecrets)
-    missing.push(...resolved.missing)
-    return [key, resolved.text]
-  }))
-  if (missing.length) throw new Error(`缺少 secret：${[...new Set(missing)].join(', ')}`)
-  try {
-    return redactSecretValues(await mcpHttpRpc({ ...input, headers }), usedSecrets)
-  } catch (error) {
-    throw new Error(redactSecretValues(error instanceof Error ? error.message : String(error), usedSecrets))
-  }
 }
 
 export async function mcpStdioEnsure(input: {

@@ -4,6 +4,8 @@
  * *Credential）不需要改這裡就會被遮罩，避免手寫欄位清單 drift。
  */
 
+import { withoutIntegrationCredentials } from './integrationCredentials.ts'
+
 export const REDACTED = '***REDACTED***'
 
 export function withoutLegacyHermesMemory(value: unknown): unknown {
@@ -62,7 +64,7 @@ export function redactSettingsForExport<T extends Record<string, unknown>>(
 ): { settings: T; redactedFields: string[] } {
   const redactedFields: string[] = []
   const out = Object.fromEntries(
-    Object.entries(settings).map(([key, value]) => [
+    Object.entries(withoutIntegrationCredentials(settings)).map(([key, value]) => [
       key,
       redactValue(value, key, key, redactedFields),
     ]),

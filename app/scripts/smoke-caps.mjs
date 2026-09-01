@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertCanonicalTaskRunIngress } from './lib/task-run-ingress-guard.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.resolve(__dirname, '..')
@@ -630,24 +631,7 @@ await test('Ticket 03: lifecycle-control plumbing is contracted', async () => {
 await test('Ticket 04: lifecycle ownership drift stays blocked at module seams', async () => {
   const fs = await import('node:fs')
   const dispatch = fs.readFileSync(path.join(appRoot, 'src/agent/runDispatch.ts'), 'utf8')
-  const entryFiles = [
-    'src/App.tsx',
-    'src/hooks/useSlashExecutor.ts',
-    'src/pages/ProtocolsPage.tsx',
-    'src/pages/OpsPage.tsx',
-    'src/pages/FailedPage.tsx',
-    'src/pages/RecordsPage.tsx',
-    'src/pages/SuccessPage.tsx',
-    'src/pages/SubDesignPage.tsx',
-    'src/components/InlineRunPanel.tsx',
-    'src/components/subdesign/CritiqueTheater.tsx',
-    'src/agent/hermes/backgroundJobs.ts',
-  ]
-  for (const file of entryFiles) {
-    const source = fs.readFileSync(path.join(appRoot, file), 'utf8')
-    assert.doesNotMatch(source, /dispatchThreadTask\s*\(/, `${file} must enter through runTask`)
-    assert.doesNotMatch(source, /startExecution\s*\(|startLocalCliExecution\s*\(/, `${file} must not enter a runner adapter directly`)
-  }
+  assertCanonicalTaskRunIngress(appRoot)
   assert.doesNotMatch(
     dispatch,
     /reserveRun\s*\(|releaseRun\s*\(|saveToArchive\s*\(|drainExternalRunQueue|drainQueueAfterRun|deferFinalization/,
@@ -1153,10 +1137,10 @@ await test('P1-A vault: renderer never reads raw tokens; main resolves placehold
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   assert.match(main, /secrets:list/)
   assert.match(main, /secrets:refresh/)
-  assert.match(main, /resolveSecretPlaceholders/) // tools:httpRequest + mcp:httpRpc
+  assert.match(main, /credentialHttpRequest|createToolCredentialScope/) // main-only execution owners
 
   const mcpBridge = fs.readFileSync(path.join(appRoot, 'electron/mcpBridge.ts'), 'utf8')
-  assert.match(mcpBridge, /resolveSecretPlaceholders/) // stdio env/args at spawn
+  assert.match(mcpBridge, /createToolCredentialScope/) // stdio env/args at spawn
 
   const mcpSecrets = fs.readFileSync(
     path.join(appRoot, 'src/agent/hermes/mcpSecrets.ts'),
