@@ -12,6 +12,7 @@
 import type { WorkingState } from './workingState.ts'
 import type { MemoryControlPackageIdentity } from './memoryControlPackage.ts'
 import type { ContinuationItem } from './continuation.ts'
+import type { GoalRuntimeCheckpoint } from './goalRuntimeCheckpoint.ts'
 
 export type CompactionReason = 'auto' | 'manual' | 'emergency' | 'interrupt'
 
@@ -82,6 +83,8 @@ export interface CompactionCheckpoint {
   governingPackage?: MemoryControlPackageIdentity
   /** Host-owned continuation backlog captured at the same clean tool boundary. */
   continuationItems?: ContinuationItem[]
+  /** Exact Goal/Acceptance/Workflow state required for replay-safe graph recovery. */
+  goalRuntime?: GoalRuntimeCheckpoint
   /** Set the moment a resume claims this checkpoint; one claim, ever. */
   resumeClaimedAt?: string
 }
@@ -105,6 +108,7 @@ export type CompactionCheckpointSaveInput = {
   workingState?: WorkingState
   governingPackage?: MemoryControlPackageIdentity
   continuationItems?: ContinuationItem[]
+  goalRuntime?: GoalRuntimeCheckpoint
 }
 
 export type CompactionCheckpointBridge = {

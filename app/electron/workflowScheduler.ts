@@ -1,5 +1,6 @@
 import type { TurnRecordRangeRef } from '../src/agent/workflowRecord.ts'
 import { isRepairPlan, type RepairPlan } from '../src/agent/repairPlan.ts'
+import { isWorkflowRecoveryCheckpoint, type WorkflowRecoveryCheckpoint } from '../src/agent/goalRuntimeCheckpoint.ts'
 import {
   validateAndFreezeWorkflowDefinition,
   type WorkflowDefinition,
@@ -121,6 +122,66 @@ function syntheticExecution(attemptId: string, outputs: readonly Readonly<{ arti
   return { settlement: 'completed', resultRef: `${attemptId}:reducer`, outputs }
 }
 
+function assertResumeIdentity(input: {
+  checkpoint: WorkflowRecoveryCheckpoint
+  definition: WorkflowDefinition
+  taskRunId: string
+  workflowRunId: string
+}): void {
+  const { checkpoint, definition } = input
+  if (checkpoint.taskRunId !== input.taskRunId || checkpoint.workflowRunId !== input.workflowRunId) {
+    throw new Error('Workflow resume run identity mismatch')
+  }
+  if (checkpoint.definition.id !== definition.id || checkpoint.definition.revision !== definition.revision
+    || checkpoint.definition.digest !== definition.digest) {
+    throw new Error('Workflow resume definition identity mismatch')
+  }
+}
+
+function assertResumeNodesAndBudgets(checkpoint: WorkflowRecoveryCheckpoint, definition: WorkflowDefinition): void {
+  const expectedNodes = definition.nodes.map((node) => node.id).sort()
+  const restoredNodes = checkpoint.nodeAttempts.map((node) => node.nodeId).sort()
+  if (new Set(restoredNodes).size !== restoredNodes.length
+    || canonicalJson(expectedNodes) !== canonicalJson(restoredNodes)) {
+    throw new Error('Workflow resume node snapshot mismatch')
+  }
+  const attempts = checkpoint.nodeAttempts.reduce((total, node) => total + node.attempts, 0)
+  if (attempts > definition.budgets.maxTotalAttempts
+    || checkpoint.remainingBudgets.attempts !== definition.budgets.maxTotalAttempts - attempts
+    || checkpoint.elapsedMs > definition.budgets.maxWallClockMs
+    || checkpoint.remainingBudgets.wallClockMs !== definition.budgets.maxWallClockMs - checkpoint.elapsedMs) {
+    throw new Error('Workflow resume budget snapshot mismatch')
+  }
+}
+
+async function assertResumeArtifacts(input: {
+  checkpoint: WorkflowRecoveryCheckpoint
+  definition: WorkflowDefinition
+  workflowRunId: string
+  schemaValidators: WorkflowSchedulerOptions['schemaValidators']
+}): Promise<void> {
+  const nodeByRunId = new Map(input.definition.nodes.map((node) => [`${input.workflowRunId}:${node.id}`, node]))
+  const artifactIds = new Set<string>()
+  for (const artifact of input.checkpoint.artifacts) {
+    const producer = nodeByRunId.get(artifact.producerNodeRunId)
+    const output = producer?.outputs.find((candidate) => candidate.id === artifact.artifactId)
+    if (!producer || !output || output.schemaId !== artifact.schemaId || artifactIds.has(artifact.artifactId)) {
+      throw new Error(`Workflow resume artifact contract mismatch: ${artifact.artifactId}`)
+    }
+    if (artifact.digest !== await digestValue(artifact.value)) throw new Error(`Workflow resume artifact drift: ${artifact.artifactId}`)
+    const validator = input.schemaValidators[artifact.schemaId]
+    if (!validator || !validator(artifact.value)) throw new Error(`Workflow resume artifact schema mismatch: ${artifact.artifactId}`)
+    artifactIds.add(artifact.artifactId)
+  }
+  for (const nodeState of input.checkpoint.nodeAttempts) {
+    if (nodeState.status !== 'passed') continue
+    const node = input.definition.nodes.find((candidate) => candidate.id === nodeState.nodeId)!
+    if (node.outputs.some((output) => output.required && !artifactIds.has(output.id))) {
+      throw new Error(`Workflow resume passed node is missing artifacts: ${node.id}`)
+    }
+  }
+}
+
 export class WorkflowScheduler {
   readonly definition: WorkflowDefinition
   readonly workflowRunId: string
@@ -142,15 +203,28 @@ export class WorkflowScheduler {
     taskRunId: string
     workflowRunId: string
     options: WorkflowSchedulerOptions
+    restored?: WorkflowRecoveryCheckpoint
   }) {
     this.definition = input.definition
     this.taskRunId = input.taskRunId
     this.workflowRunId = input.workflowRunId
     this.options = input.options
     this.clock = input.options.clock || Date.now
-    this.startedAt = this.clock()
-    for (const node of this.definition.nodes) this.statuses.set(node.id, 'pending')
-    this.append({ kind: 'workflow-admitted', definitionDigest: this.definition.digest })
+    this.startedAt = this.clock() - (input.restored?.elapsedMs || 0)
+    for (const node of this.definition.nodes) {
+      const restored = input.restored?.nodeAttempts.find((entry) => entry.nodeId === node.id)
+      this.statuses.set(node.id, restored?.status || 'pending')
+      if (restored?.attempts) this.attemptsByNode.set(node.id, restored.attempts)
+      if (restored?.failureReason) this.failureReasons.set(node.id, restored.failureReason)
+    }
+    if (input.restored) {
+      for (const artifact of input.restored.artifacts) this.artifacts.set(artifact.artifactId, Object.freeze(structuredClone(artifact)))
+      this.attempts = input.restored.nodeAttempts.reduce((total, node) => total + node.attempts, 0)
+      this.initialRunComplete = input.restored.initialRunComplete
+      this.append({ kind: 'workflow-resumed', definitionDigest: this.definition.digest })
+    } else {
+      this.append({ kind: 'workflow-admitted', definitionDigest: this.definition.digest })
+    }
     this.recordBudget()
   }
 
@@ -165,6 +239,27 @@ export class WorkflowScheduler {
       throw new Error(`Workflow admission failed: ${admitted.errors.map((entry) => entry.code).join(', ')}`)
     }
     return new WorkflowScheduler({ ...input, definition: admitted.definition })
+  }
+
+  static async resume(input: {
+    checkpoint: WorkflowRecoveryCheckpoint
+    definition: unknown
+    taskRunId: string
+    workflowRunId: string
+    options: WorkflowSchedulerOptions
+  }): Promise<WorkflowScheduler> {
+    if (!isWorkflowRecoveryCheckpoint(input.checkpoint)) throw new Error('Workflow resume checkpoint is malformed')
+    const admitted = await validateAndFreezeWorkflowDefinition(input.definition)
+    if (!admitted.ok || !admitted.definition) throw new Error('Workflow resume definition is invalid')
+    assertResumeIdentity({ ...input, definition: admitted.definition })
+    assertResumeNodesAndBudgets(input.checkpoint, admitted.definition)
+    await assertResumeArtifacts({
+      checkpoint: input.checkpoint,
+      definition: admitted.definition,
+      workflowRunId: input.workflowRunId,
+      schemaValidators: input.options.schemaValidators,
+    })
+    return new WorkflowScheduler({ ...input, definition: admitted.definition, restored: input.checkpoint })
   }
 
   private context(extra: Record<string, unknown> = {}) {
@@ -183,6 +278,39 @@ export class WorkflowScheduler {
         concurrentNodes: Math.max(0, this.definition.budgets.maxConcurrentNodes - this.active),
         wallClockMs: Math.max(0, this.definition.budgets.maxWallClockMs - (this.clock() - this.startedAt)),
       },
+    })
+  }
+
+  async checkpoint(): Promise<WorkflowRecoveryCheckpoint> {
+    if (this.active !== 0 || [...this.statuses.values()].some((status) => status === 'running')) {
+      throw new Error('Workflow checkpoint requires a clean node boundary')
+    }
+    for (const artifact of this.artifacts.values()) {
+      if (artifact.digest !== await digestValue(artifact.value)) throw new Error(`Workflow artifact drift: ${artifact.artifactId}`)
+    }
+    const elapsedMs = Math.min(this.definition.budgets.maxWallClockMs, Math.max(0, this.clock() - this.startedAt))
+    return Object.freeze({
+      schemaVersion: 1,
+      taskRunId: this.taskRunId,
+      workflowRunId: this.workflowRunId,
+      definition: Object.freeze({ id: this.definition.id, revision: this.definition.revision, digest: this.definition.digest }),
+      nodeAttempts: Object.freeze(this.definition.nodes.map((node) => {
+        const current = this.statuses.get(node.id)
+        const status: Exclude<WorkflowNodeStatus, 'running'> = current === 'running' ? 'blocked' : current || 'blocked'
+        return Object.freeze({
+          nodeId: node.id,
+          attempts: this.attemptsByNode.get(node.id) || 0,
+          status,
+          ...(this.failureReasons.get(node.id) ? { failureReason: this.failureReasons.get(node.id) } : {}),
+        })
+      })),
+      artifacts: Object.freeze([...this.artifacts.values()].map((artifact) => Object.freeze(structuredClone(artifact)))),
+      remainingBudgets: Object.freeze({
+        attempts: Math.max(0, this.definition.budgets.maxTotalAttempts - this.attempts),
+        wallClockMs: Math.max(0, this.definition.budgets.maxWallClockMs - elapsedMs),
+      }),
+      elapsedMs,
+      initialRunComplete: this.initialRunComplete,
     })
   }
 
@@ -447,6 +575,11 @@ export class WorkflowScheduler {
     const impacted = this.impactedClosure(this.repairSeeds(plan))
     this.assertRepairBudget(impacted)
     this.invalidateSubgraph(impacted, plan.digest)
+    await this.runPending()
+    return this.finish()
+  }
+
+  async continueRun(): Promise<WorkflowSchedulerResult> {
     await this.runPending()
     return this.finish()
   }

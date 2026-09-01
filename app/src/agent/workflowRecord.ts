@@ -21,6 +21,7 @@ export type WorkflowRecordContext = Readonly<{
 
 export type WorkflowRecordEvent =
   | Readonly<{ kind: 'workflow-admitted'; definitionDigest: string }>
+  | Readonly<{ kind: 'workflow-resumed'; definitionDigest: string }>
   | Readonly<{ kind: 'node-ready'; nodeRunId: string }>
   | Readonly<{ kind: 'node-dispatched'; nodeRunId: string; attemptId: string; agentSessionId?: string }>
   | Readonly<{ kind: 'node-observed'; nodeRunId: string; attemptId: string; settlement: 'completed' | 'failed' | 'cancelled' | 'interrupted'; resultRef: string }>
@@ -55,6 +56,7 @@ export function isTurnRecordRangeRef(value: unknown): value is TurnRecordRangeRe
 type EntryValidator = (entry: Record<string, unknown>) => boolean
 const EVENT_VALIDATORS: Readonly<Record<string, EntryValidator>> = {
   'workflow-admitted': (entry) => validDigest(entry.definitionDigest),
+  'workflow-resumed': (entry) => validDigest(entry.definitionDigest),
   'node-ready': (entry) => validId(entry.nodeRunId),
   'node-dispatched': (entry) => validId(entry.nodeRunId) && validId(entry.attemptId),
   'node-observed': (entry) => validId(entry.nodeRunId) && validId(entry.attemptId)

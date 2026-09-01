@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { CompactionCheckpoint, CompactionCheckpointSaveInput } from '../src/agent/compactionCheckpoint'
+import { isGoalRuntimeCheckpoint } from '../src/agent/goalRuntimeCheckpoint.ts'
 
 /**
  * Durable pre-compaction transcripts, one file per run.
@@ -20,6 +21,9 @@ export class JsonCompactionCheckpointStore {
   save(input: CompactionCheckpointSaveInput): { ok: boolean; checkpoint?: CompactionCheckpoint; error?: string } {
     const runId = input.runId.trim()
     if (!runId) return { ok: false, error: 'runId is required' }
+    if (input.goalRuntime && !isGoalRuntimeCheckpoint(input.goalRuntime)) {
+      return { ok: false, error: 'goal runtime checkpoint is malformed' }
+    }
     try {
       const existing = this.list(runId)
       const checkpoint: CompactionCheckpoint = {
@@ -47,6 +51,7 @@ export class JsonCompactionCheckpointStore {
         workingState: input.workingState ? structuredClone(input.workingState) : undefined,
         governingPackage: input.governingPackage ? structuredClone(input.governingPackage) : undefined,
         continuationItems: input.continuationItems ? structuredClone(input.continuationItems) : undefined,
+        goalRuntime: input.goalRuntime ? structuredClone(input.goalRuntime) : undefined,
       }
       const file = this.fileFor(runId, checkpoint.sequence || existing.length + 1)
       fs.mkdirSync(path.dirname(file), { recursive: true })
