@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
 import { GOAL_CONTRACT_CAPABILITY, goalContractFromWorkingState, hasExecutableGoalCriterion, type GoalContractSnapshot } from '../src/agent/goalContract.ts'
 import { WORKFLOW_GRAPH_CAPABILITY } from '../src/agent/workflowGraph.ts'
+import { WORKFLOW_RECORD_CAPABILITY } from '../src/agent/workflowRecord.ts'
 import type { AcceptanceSnapshot } from '../src/agent/acceptanceContract.ts'
 import { evaluateAcceptanceGate, goalVerdictFromAcceptance } from './acceptanceGate.ts'
 import type { GoalVerdict } from '../src/agent/goalOutcome.ts'
@@ -58,7 +59,7 @@ import type { ReviewDeliveryApproval, ReviewDeliveryIntent, ReviewDeliveryPrevie
  * field. Durable memory is available only through negotiated memory-store-v1.
  */
 export const PI_HOST_PROTOCOL_VERSION = 5 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'packages', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', GOAL_CONTRACT_CAPABILITY, WORKFLOW_GRAPH_CAPABILITY, 'capabilities'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'packages', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', GOAL_CONTRACT_CAPABILITY, WORKFLOW_GRAPH_CAPABILITY, WORKFLOW_RECORD_CAPABILITY, 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
@@ -520,6 +521,7 @@ type HostState = {
   agentCollaborationNegotiated: boolean
   goalContractNegotiated: boolean
   workflowGraphNegotiated: boolean
+  workflowRecordNegotiated: boolean
   agentCommunication: PiAgentCommunicationDomain
   reviewArtifactStore: ReviewArtifactStore
   reviewWorkspaces: Map<string, ReviewWorkspaceBinding>
@@ -3096,6 +3098,7 @@ function handleInitialization(
   state.agentCollaborationNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'agent-collaboration-v1')
   state.goalContractNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, GOAL_CONTRACT_CAPABILITY)
   state.workflowGraphNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, WORKFLOW_GRAPH_CAPABILITY)
+  state.workflowRecordNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, WORKFLOW_RECORD_CAPABILITY)
   const result = readyResult(state.negotiatedProtocolVersion)
   return [
     { event: 'host/ready', payload: {
@@ -6881,6 +6884,7 @@ export function createPiHostServer(
     agentCollaborationNegotiated: false,
     goalContractNegotiated: false,
     workflowGraphNegotiated: false,
+    workflowRecordNegotiated: false,
     agentCommunication: new PiAgentCommunicationDomain(),
     reviewArtifactStore,
     reviewWorkspaces,
