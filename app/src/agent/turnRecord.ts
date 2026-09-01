@@ -40,6 +40,7 @@ import type { RunnerCapabilities, RunnerInstructionDelivery } from './runners/ty
 import type { RecordedInstructionSnapshot } from './instructionSnapshot.ts'
 import { isAgentLifecycleEvent, type AgentLifecycleEvent } from './agentLifecycle.ts'
 import { isAgentCollaborationEvent, type AgentCollaborationEvent } from './agentCollaboration.ts'
+import { isGoalContractSnapshot, type GoalContractSnapshot } from './goalContract.ts'
 
 /**
  * On-disk format of the record. It is versioned inside the Pi Host Protocol
@@ -57,9 +58,10 @@ import { isAgentCollaborationEvent, type AgentCollaborationEvent } from './agent
  * Version 12 records the exact Host-owned instruction snapshot and runner delivery mode.
  * Version 13 records Host-owned agent tree lifecycle transitions.
  * Version 14 records Host-owned collaboration, mailbox, lease and result events.
+ * Version 15 records the immutable Host-admitted Goal Contract.
  */
-export const TURN_RECORD_FORMAT_VERSION = 14
-const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
+export const TURN_RECORD_FORMAT_VERSION = 15
+const LEGACY_TURN_RECORD_FORMAT_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
 
 /**
  * What one model request actually cost, measured at the boundary that made it.
@@ -387,6 +389,12 @@ export type TurnRecordEntry = TurnRecordCoordinates &
         source: 'host'
         state: WorkingState
       }
+    | {
+        /** Immutable Goal Contract admitted before this turn's first provider call. */
+        kind: 'goal-contract'
+        source: 'host'
+        snapshot: GoalContractSnapshot
+      }
     | { kind: 'delegation-assignment'; source: 'host'; assignment: DelegatedGoalAssignment }
     | { kind: 'delegation-observation'; source: 'host'; observation: DelegatedGoalObservation }
     | { kind: 'delegation-check'; source: 'host'; check: DelegatedGoalCheck; packageIdentity?: MemoryControlPackageIdentity }
@@ -466,6 +474,7 @@ const KINDS = new Set([
   'state-proposal',
   'state-check',
   'working-state',
+  'goal-contract',
   'delegation-assignment',
   'delegation-observation',
   'delegation-check',
@@ -587,7 +596,7 @@ function isHostContextEntry(entry: Record<string, unknown>): boolean {
       && isAgentCollaborationEvent(entry.event)
   }
   if (entry.kind === 'memory-recall') return isMemoryRecallEntry(entry)
-  if (entry.kind === 'instruction-snapshot') return isInstructionSnapshotEntry(entry)
+  if (entry.kind === 'instruction-snapshot' || entry.kind === 'goal-contract') return isAdmissionSnapshotEntry(entry)
   const workingStateEntry = isWorkingStateContextEntry(entry)
   if (workingStateEntry !== undefined) return workingStateEntry
   if (entry.kind === 'notice') return typeof entry.topic === 'string' && typeof entry.text === 'string'
@@ -597,6 +606,14 @@ function isHostContextEntry(entry: Record<string, unknown>): boolean {
     return entry.executionEvidence === undefined || isWorkingExecutionEvidence(entry.executionEvidence)
   }
   return true
+}
+
+function isAdmissionSnapshotEntry(entry: Record<string, unknown>): boolean {
+  return entry.kind === 'goal-contract'
+    ? entry.source === 'host'
+      && Object.keys(entry).every((key) => ['kind', 'source', 'snapshot', 'seq', 'turn', 'step', 'at'].includes(key))
+      && isGoalContractSnapshot(entry.snapshot)
+    : isInstructionSnapshotEntry(entry)
 }
 
 function isInstructionSnapshotEntry(entry: Record<string, unknown>): boolean {
@@ -780,6 +797,7 @@ function isLegacyIncompatibleEntry(version: number, value: unknown): boolean {
   const kind = String(entry.kind || '')
   if (version === 1 && kind === 'memory-recall') return true
   if (version <= 2 && kind === 'working-state') return true
+  if (version < 15 && kind === 'goal-contract') return true
   if (isLegacyLifecycleEntry(version, kind, entry)) return true
   if (isLegacySkillEntry(version, kind, entry)) return true
   return version < 5 && ['delegation-assignment', 'delegation-observation', 'delegation-check'].includes(kind)

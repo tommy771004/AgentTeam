@@ -3,6 +3,8 @@ import type { TurnRecord } from './turnRecord.ts'
 import { clampPiIterations } from './loopBounds.ts'
 import type { SubDesignPluginExecutionProjection, SubDesignPluginExecutionRequest } from './subdesign/pluginExecution.ts'
 import { isWorkingState, type WorkingGoalCompletionPredicate, type WorkingState } from './workingState.ts'
+import type { GoalContractSnapshot } from './goalContract.ts'
+import type { GoalVerdict } from './goalOutcome.ts'
 
 export type PiHostRunConfigInput = {
   forceLoopType?: LoopType
@@ -258,13 +260,15 @@ export type PiHostRunnerApi = {
     create: (title?: string, threadId?: string) => Promise<{ sessionId: string; sessions: unknown[] }>
   }
   turn: {
-    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; workingGoal?: WorkingGoalCompletionPredicate; resumeFromRunId?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; clientMessageId?: string; expectedActiveRunId?: string; pluginExecution?: SubDesignPluginExecutionRequest }) => Promise<{
+    submit: (input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: PiTurnContextPolicy; pattern?: 'Turn-based' | 'Goal-based' | 'Time-based' | 'Proactive'; maxIterations?: number; definitionOfDone?: string; workingGoal?: WorkingGoalCompletionPredicate; goalContractV1?: boolean; resumeFromRunId?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; clientMessageId?: string; expectedActiveRunId?: string; pluginExecution?: SubDesignPluginExecutionRequest }) => Promise<{
       sessionId: string
       runId: string
       settlement: string
       items?: unknown[]
       record?: TurnRecord
       workingState?: WorkingState
+      goalContract?: GoalContractSnapshot
+      goalVerdict?: GoalVerdict
       interruptReason?: PiTurnInterruptReason
       orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
       pluginExecution?: SubDesignPluginExecutionProjection
@@ -290,6 +294,7 @@ export type SubmitPiHostRunInput = {
   maxIterations?: number
   definitionOfDone?: string
   workingGoal?: WorkingGoalCompletionPredicate
+  goalContractV1?: boolean
   resumeFromRunId?: string
   /** Per-turn deadline decided at admission; absent means the Host arms none. */
   timeoutMs?: number
@@ -307,6 +312,8 @@ export type SubmitPiHostRunResult = {
   /** What this turn appended to the session's Turn Record. */
   record?: TurnRecord
   workingState?: WorkingState
+  goalContract?: GoalContractSnapshot
+  goalVerdict?: GoalVerdict
   orchestration?: { pattern: string; iterations: number; maxIterations: number; definitionOfDone?: string; dodMet?: boolean }
   pluginExecution?: SubDesignPluginExecutionProjection
 }
@@ -443,6 +450,7 @@ export async function submitPiHostRun(
     maxIterations: input.maxIterations,
     definitionOfDone: input.definitionOfDone,
     workingGoal: input.workingGoal,
+    goalContractV1: input.goalContractV1,
     resumeFromRunId: input.resumeFromRunId,
     timeoutMs: input.timeoutMs,
     pluginExecution: input.pluginExecution,
@@ -459,6 +467,8 @@ export async function submitPiHostRun(
     items,
     ...(turn.record ? { record: turn.record } : {}),
     ...(turn.workingState ? { workingState: turn.workingState } : {}),
+    ...(turn.goalContract ? { goalContract: turn.goalContract } : {}),
+    ...(turn.goalVerdict ? { goalVerdict: turn.goalVerdict } : {}),
     orchestration: turn.orchestration,
     pluginExecution: turn.pluginExecution,
   }

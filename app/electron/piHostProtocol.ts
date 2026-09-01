@@ -3,6 +3,8 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { clampPiIterations } from '../src/agent/loopBounds.ts'
+import { GOAL_CONTRACT_CAPABILITY, goalContractFromWorkingState, hasExecutableGoalCriterion, type GoalContractSnapshot } from '../src/agent/goalContract.ts'
+import type { GoalVerdict } from '../src/agent/goalOutcome.ts'
 import type { SubscriptionProviderCatalog } from '../src/agent/subscriptionCatalog.ts'
 import { isSubscriptionProviderPreset } from '../src/agent/apiProviders.ts'
 import { assertPiModelConfigured } from './piModelSelection.ts'
@@ -52,7 +54,7 @@ import type { ReviewDeliveryApproval, ReviewDeliveryIntent, ReviewDeliveryPrevie
  * field. Durable memory is available only through negotiated memory-store-v1.
  */
 export const PI_HOST_PROTOCOL_VERSION = 5 as const
-export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'packages', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', 'capabilities'] as const
+export const PI_HOST_CAPABILITIES = ['health', 'settings', 'sessions', 'turns', 'runtime', 'tools', 'tool-contract-v1', 'attachments-v1', 'events', 'automation', 'resources', 'packages', 'memory', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', GOAL_CONTRACT_CAPABILITY, 'capabilities'] as const
 
 export type PiHostCapability = (typeof PI_HOST_CAPABILITIES)[number]
 
@@ -117,6 +119,10 @@ export type PiHostResponse = {
     record?: TurnRecord
     /** Latest canonical Working State for the admitted builtin Task run. */
     workingState?: WorkingState
+    /** Immutable Host-admitted Goal Contract when goal-contract-v1 is active. */
+    goalContract?: GoalContractSnapshot
+    /** Terminal Goal fact; independent from the turn settlement. */
+    goalVerdict?: GoalVerdict
     contractRevision?: number
     contractDigest?: string
     contract?: PiTurnToolContract
@@ -506,6 +512,7 @@ type HostState = {
   reviewNegotiated: boolean
   agentTreeNegotiated: boolean
   agentCollaborationNegotiated: boolean
+  goalContractNegotiated: boolean
   agentCommunication: PiAgentCommunicationDomain
   reviewArtifactStore: ReviewArtifactStore
   reviewWorkspaces: Map<string, ReviewWorkspaceBinding>
@@ -2968,6 +2975,7 @@ function handleInitialization(
   state.reviewNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'review-v1')
   state.agentTreeNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'agent-tree-v1')
   state.agentCollaborationNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, 'agent-collaboration-v1')
+  state.goalContractNegotiated = negotiatedV5Capability(requestedVersion, requestedCapabilities, GOAL_CONTRACT_CAPABILITY)
   const result = readyResult(state.negotiatedProtocolVersion)
   return [
     { event: 'host/ready', payload: {
@@ -5127,13 +5135,100 @@ function cancelPiHostTurnRequest(id: string | number, runId: string): Promise<Pi
         : [errorResponse(id, 'invalid_request', `Unknown Pi run: ${runId}`)])
 }
 
-function submitPiHostTurn(
+async function admitGoalContractForTurn(input: {
+  negotiated: boolean
+  enabled: boolean
+  pattern: PiLoopPattern
+  workingState: WorkingState
+  maxIterations: number
+  maxWallClockMs: number
+  unattended: boolean
+}): Promise<GoalContractSnapshot | undefined> {
+  if (!input.negotiated || !input.enabled || input.pattern !== 'Goal-based') return undefined
+  return goalContractFromWorkingState({
+    state: input.workingState,
+    mode: 'goal',
+    maxIterations: input.maxIterations,
+    maxWallClockMs: input.maxWallClockMs,
+    unattended: input.unattended,
+  })
+}
+
+const goalContractMaxWallClock = (value: unknown): number =>
+  clampTurnTimeout(value) || 5 * 60_000
+
+function shellSandboxVerificationForTurn(
+  contextPolicy: ReturnType<typeof parsePiTurnContextPolicy>,
+  runId: string,
+): Promise<BuiltinShellSandboxVerification> | undefined {
+  return contextPolicy.outboundShellMode === 'required'
+    ? verifyBuiltinShellSandbox({ runId, viewRoot: contextPolicy.viewRoot || '' })
+    : undefined
+}
+
+const goalContractResult = (goalContract: GoalContractSnapshot | undefined) =>
+  goalContract ? { goalContract } : {}
+
+function recordGoalContractAdmission(input: {
+  state: HostState
+  session: SessionRecord
+  sessionId: string
+  runId: string
+  id: string | number
+  emit?: (message: PiHostMessage) => void
+  recorder: ActiveTurnRecorder
+  turnEvents: PiHostEvent[]
+  workingState: WorkingState
+  goalContract?: GoalContractSnapshot
+  pattern: PiLoopPattern
+  iterationLimit: number
+  definitionOfDone?: string
+}): PiHostMessage[] | undefined {
+  if (!input.goalContract) return undefined
+  recordTurnEntry(input.sessionId, { kind: 'goal-contract', source: 'host', snapshot: input.goalContract })
+  if (hasExecutableGoalCriterion(input.goalContract)) return undefined
+  const reason = 'Goal Contract has no executable criterion'
+  recordTurnEntry(input.sessionId, { kind: 'notice', source: 'host', topic: 'goal-unverifiable', text: reason })
+  recordTerminalAgentLifecycle(input.state, input.sessionId, input.runId, 'empty', input.recorder.entries)
+  recordTurnEntry(input.sessionId, { kind: 'turn-end', source: 'host', settlement: 'empty' })
+  input.session.record = appendTurnRecord(input.session.record, input.recorder.entries)
+  const turnRecordSlice: TurnRecord = {
+    version: input.session.record.version,
+    entries: input.session.record.entries.slice(-input.recorder.entries.length),
+  }
+  input.state.snapshot.cursor += 1
+  input.state.attachmentJournal.settle(input.runId, 'empty', reason, turnRecordSlice.entries.at(-1)?.seq)
+  flushDeferredAgentLifecycle(input.state, input.sessionId, input.recorder, input.emit)
+  if (activeTurnRecorders.get(input.sessionId) === input.recorder) activeTurnRecorders.delete(input.sessionId)
+  return [...input.turnEvents, {
+    id: input.id,
+    result: {
+      sessionId: input.sessionId,
+      runId: input.runId,
+      settlement: 'empty',
+      items: [],
+      record: turnRecordSlice,
+      workingState: input.workingState,
+      goalContract: input.goalContract,
+      goalVerdict: 'unverifiable',
+      orchestration: {
+        pattern: input.pattern,
+        iterations: 0,
+        maxIterations: input.iterationLimit,
+        definitionOfDone: input.definitionOfDone,
+        dodMet: false,
+      },
+    },
+  }]
+}
+
+async function submitPiHostTurn(
   state: HostState,
   input: Partial<InternalPiHostRequest>,
   id: string | number,
   emit?: (message: PiHostMessage) => void,
   checkpointWriter?: CompactionCheckpointWriter,
-): PiHostMessage[] | Promise<PiHostMessage[]> {
+): Promise<PiHostMessage[]> {
   const admission = admitPiHostTurnRequest(state, input, id, emit)
   if (admission.response) return admission.response
   const {
@@ -5167,6 +5262,15 @@ function submitPiHostTurn(
   const working = prepareTurnWorkingState(state, input, id, session, runId, prompt, checkpointWriter)
   if (working.response) return working.response
   const { resumed, initialWorkingState, governingPackage, memoryControl } = working.value!
+  const goalContract = await admitGoalContractForTurn({
+    negotiated: state.goalContractNegotiated,
+    enabled: input.params?.goalContractV1 === true,
+    pattern,
+    workingState: initialWorkingState,
+    maxIterations: iterationLimit,
+    maxWallClockMs: goalContractMaxWallClock(input.params?.timeoutMs),
+    unattended: turnSettings.unattended,
+  })
   const recorder: ActiveTurnRecorder = {
     cwd,
     turn: nextTurnNumber(session.record),
@@ -5222,12 +5326,14 @@ function submitPiHostTurn(
   recordGoverningMemoryControlPackage(state, sessionId, governingPackage)
   let workingState = initialWorkingState
   recordTurnEntry(sessionId, { kind: 'working-state', source: 'host', state: workingState })
+  const goalAdmissionResult = recordGoalContractAdmission({
+    state, session, sessionId, runId, id, emit, recorder, turnEvents, workingState,
+    goalContract, pattern, iterationLimit, definitionOfDone,
+  })
+  if (goalAdmissionResult) return goalAdmissionResult
   // Trusted Host verification starts from the admitted run/view. No field in
   // contextPolicy, model text, or tool args can supply or deserialize it.
-  const shellSandboxVerification: Promise<BuiltinShellSandboxVerification> | undefined =
-    contextPolicy.outboundShellMode === 'required'
-      ? verifyBuiltinShellSandbox({ runId, viewRoot: contextPolicy.viewRoot || '' })
-      : undefined
+  const shellSandboxVerification = shellSandboxVerificationForTurn(contextPolicy, runId)
   const { workspaceTextSearchRun, unlockedTools, mcpCapabilityLoaded } = loadTurnCapabilities({
     state, request: input, session, sessionId, runId, settings: turnSettings,
     explicitWorkspaceRoot, turnEvents, emit,
@@ -5386,6 +5492,7 @@ function submitPiHostTurn(
           items: [{ type: 'assistant_message', content: pluginExecution.summary }],
           record: stoppedRecord,
           workingState,
+          ...goalContractResult(goalContract),
           pluginExecution,
           orchestration: { pattern, iterations: 0, maxIterations: iterationLimit, definitionOfDone, dodMet: false },
         },
@@ -5855,6 +5962,7 @@ function submitPiHostTurn(
         items: orchestration.result ? [{ type: 'assistant_message', content: orchestration.result }] : [],
         record: turnRecordSlice,
         workingState,
+        ...goalContractResult(goalContract),
         orchestration: {
           pattern: orchestration.pattern,
           iterations: orchestration.iterations,
@@ -6510,6 +6618,7 @@ export function createPiHostServer(
     reviewNegotiated: false,
     agentTreeNegotiated: false,
     agentCollaborationNegotiated: false,
+    goalContractNegotiated: false,
     agentCommunication: new PiAgentCommunicationDomain(),
     reviewArtifactStore,
     reviewWorkspaces,

@@ -326,7 +326,7 @@ const piHostSupervisor = new PiHostSupervisor(async () => {
   })
 },
   {
-    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1'],
+    requestedCapabilities: ['attachments-v1', 'tool-contract-v1', 'memory-store-v1', 'memory-control-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', 'goal-contract-v1'],
     serviceHandler: runPiHostMainService,
   },
 )
@@ -2562,7 +2562,7 @@ ipcMain.handle('pi-host:sessions:reset', async (_evt, sessionId: string) => piHo
 ipcMain.handle('pi-host:sessions:archive', async (_evt, sessionId: string) => piHostSupervisor.archiveSession(sessionId))
 ipcMain.handle('pi-host:sessions:compact', async (_evt, sessionId: string) => piHostSupervisor.compactSession(sessionId))
 ipcMain.handle('pi-host:tools:execute', async (_evt, input: { tool: 'read' | 'grep' | 'find' | 'ls' | 'write' | 'edit' | 'bash' | 'code' | 'mcp'; params?: Record<string, unknown> }) => piHostSupervisor.executeTool(input.tool, input.params || {}))
-ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; clientMessageId?: string; expectedActiveRunId?: string; pluginExecution?: unknown }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { contextPolicy: input.contextPolicy, pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, timeoutMs: input.timeoutMs, mode: input.mode, queue: input.queue, clientMessageId: input.clientMessageId, expectedActiveRunId: input.expectedActiveRunId, pluginExecution: input.pluginExecution }))
+ipcMain.handle('pi-host:turn:submit', async (_evt, input: { sessionId: string; prompt: string; runId?: string; cwd?: string; profile?: Record<string, unknown>; contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; workingGoal?: unknown; goalContractV1?: boolean; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; clientMessageId?: string; expectedActiveRunId?: string; pluginExecution?: unknown }) => piHostSupervisor.submitTurn(input.sessionId, input.prompt, input.runId, input.cwd, input.profile, { contextPolicy: input.contextPolicy, pattern: input.pattern, maxIterations: input.maxIterations, definitionOfDone: input.definitionOfDone, workingGoal: input.workingGoal, goalContractV1: input.goalContractV1, timeoutMs: input.timeoutMs, mode: input.mode, queue: input.queue, clientMessageId: input.clientMessageId, expectedActiveRunId: input.expectedActiveRunId, pluginExecution: input.pluginExecution }))
 ipcMain.handle('pi-host:turn:cancel', async (_evt, runId: string) => piHostSupervisor.cancelTurn(runId))
 ipcMain.handle('pi-host:turn:interrupt', async (_evt, input: { runId: string; reason?: 'user' | 'timeout' }) => piHostSupervisor.interruptTurn(input.runId, input.reason))
 

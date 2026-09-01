@@ -139,6 +139,7 @@
     "smoke:security:logic": "node --experimental-strip-types scripts/smoke-security.mts && node scripts/security-gates.mjs",
     "smoke:security": "npm run smoke:security:logic && npm run smoke:deterministic-qualification",
     "smoke:composer": "node --experimental-strip-types scripts/smoke-composer-approval-handoff.mts && node scripts/smoke-permission-ask-panel.mjs",
+    "smoke:goal-contract": "node --experimental-strip-types scripts/smoke-goal-contract-admission.mts",
     "smoke:permission-ask-panel": "node scripts/smoke-permission-ask-panel.mjs",
     "smoke:artifact-index": "node --experimental-strip-types scripts/smoke-artifact-index-handoff.mts",
     "smoke:paid-workflow": "node --experimental-strip-types scripts/smoke-paid-workflow.mts",
@@ -180,7 +181,7 @@
     "check:agent-collaboration-boundary": "node --experimental-strip-types scripts/check-agent-collaboration-boundary.mts",
     "smoke:learning-export": "node --experimental-strip-types scripts/smoke-learning-export.mts",
     "smoke:capability-inspection": "node --experimental-strip-types scripts/smoke-capability-inspection.mts",
-    "qualify:pi-runtime-contract": "npm run build:pi-host && node --experimental-strip-types scripts/qualify-pi-agent-runtime-contract.mts && npm run smoke:pi-host-catalog && npm run smoke:pi-real-tool-contract && npm run smoke:pi-host-capability-contract && npm run smoke:pi-all-origin-policy && npm run smoke:pi-direct-code-policy && npm run smoke:pi-mcp-native && npm run smoke:pi-mcp-reload && npm run smoke:pi-builtin-shell-sandbox && npm run smoke:pi-packages:built",
+    "qualify:pi-runtime-contract": "npm run build:pi-host && node --experimental-strip-types scripts/qualify-pi-agent-runtime-contract.mts && npm run smoke:pi-host-catalog && npm run smoke:pi-real-tool-contract && npm run smoke:pi-host-capability-contract && npm run smoke:pi-all-origin-policy && npm run smoke:pi-direct-code-policy && npm run smoke:pi-mcp-native && npm run smoke:pi-mcp-reload && npm run smoke:pi-builtin-shell-sandbox && npm run smoke:pi-packages:built && npm run smoke:goal-contract",
     "qualify:macos-runtime-contract": "npm run build:pi-host && node --experimental-strip-types scripts/smoke-platform.mts && node --experimental-strip-types scripts/smoke-pi-seatbelt-builtin-shell.mts && node --experimental-strip-types scripts/smoke-pi-adr0047-real-turn-denial.mts && node --experimental-strip-types scripts/smoke-outbound-shell-evidence.mts",
     "verify:mac-signature": "node --experimental-strip-types scripts/verify-mac-release-signature.mts"
   },

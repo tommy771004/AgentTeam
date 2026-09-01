@@ -72,7 +72,7 @@ export class PiHostSupervisor {
     this.turnIdleTimeoutMs = options.turnIdleTimeoutMs ?? 5 * 60_000
     this.requestedCapabilities = options.requestedCapabilities
       ? [...options.requestedCapabilities]
-      : ['attachments-v1', 'tool-contract-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1']
+      : ['attachments-v1', 'tool-contract-v1', 'instructions-v1', 'review-v1', 'agent-tree-v1', 'agent-collaboration-v1', 'goal-contract-v1']
     this.serviceHandler = options.serviceHandler
   }
 
@@ -749,7 +749,7 @@ export class PiHostSupervisor {
     return true
   }
 
-  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; clientMessageId?: string; expectedActiveRunId?: string; pluginExecution?: unknown }): Promise<NonNullable<PiHostResponse['result']>> {
+  async submitTurn(sessionId: string, prompt: string, runId?: string, cwd?: string, profile?: Record<string, unknown>, orchestration?: { contextPolicy?: Record<string, unknown>; pattern?: string; maxIterations?: number; definitionOfDone?: string; workingGoal?: unknown; goalContractV1?: boolean; timeoutMs?: number; mode?: 'steer' | 'queue'; queue?: boolean; clientMessageId?: string; expectedActiveRunId?: string; pluginExecution?: unknown }): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('turn/submit', { sessionId, prompt, ...(runId ? { runId } : {}), ...(cwd ? { cwd } : {}), ...(profile ? { profile } : {}), ...(orchestration || {}) })
     if (response.error || !response.result?.settlement) throw new Error(response.error?.message || 'Pi turn failed')
     return response.result

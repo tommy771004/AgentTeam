@@ -290,6 +290,8 @@ export interface RuntimeOverrides {
   hostSessionId?: string
   /** Explicit Host-verifiable goal contract; never inferred from model prose. */
   workingGoal?: import('./workingState.ts').WorkingGoalCompletionPredicate
+  /** Default-off rollout gate; Host also requires negotiated goal-contract-v1. */
+  goalContractV1?: boolean
   /** Host-owned durable checkpoint to resume; renderer supplies only its run id. */
   resumeFromRunId?: string
   /**
