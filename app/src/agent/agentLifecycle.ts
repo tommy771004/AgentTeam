@@ -1,5 +1,9 @@
 /** Host-owned lifecycle vocabulary shared by protocol, Turn Record, and UI projections. */
 import type { PiTurnSettlement } from './piHostRun.ts'
+import {
+  executionSettlementFromTurnSettlement,
+  type RunExecutionSettlement,
+} from './goalOutcome.ts'
 
 export const AGENT_LIFECYCLE_STATES = [
   'queued',
@@ -69,16 +73,19 @@ export function isTerminalAgentLifecycle(state: AgentLifecycleState): boolean {
   return state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'interrupted'
 }
 
-/** One exhaustive mapping shared by queue settlement and tree replay. */
-export function agentLifecycleFromTurnSettlement(settlement: PiTurnSettlement): AgentLifecycleState {
+/** Actor completion is execution-only and never implies a parent Goal verdict. */
+export function agentLifecycleFromExecutionSettlement(settlement: RunExecutionSettlement): AgentLifecycleState {
   switch (settlement) {
-    case 'answered': return 'completed'
-    case 'empty':
-    case 'truncated':
+    case 'completed': return 'completed'
     case 'failed': return 'failed'
     case 'cancelled': return 'cancelled'
     case 'interrupted': return 'interrupted'
   }
+}
+
+/** @deprecated Convert the turn observation to execution settlement first. */
+export function agentLifecycleFromTurnSettlement(settlement: PiTurnSettlement): AgentLifecycleState {
+  return agentLifecycleFromExecutionSettlement(executionSettlementFromTurnSettlement(settlement))
 }
 
 /** Host writers use the same byte-bounded constructor as replay validation. */

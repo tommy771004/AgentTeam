@@ -29,6 +29,7 @@ import {
   EXTERNAL_ORCHESTRATED_RUNNER_CAPABILITIES,
 } from '../agent/runners/index.ts'
 import { runExternalCliOrchestration } from '../agent/externalCliOrchestration.ts'
+import { deriveRunOutcome } from '../agent/goalOutcome.ts'
 
 type CliExecutionOptions = Parameters<typeof runPromptViaLocalCli>[0] & {
   loopType?: LoopType
@@ -196,11 +197,46 @@ function emptyAgent(): AgentState {
   }
 }
 
-function toArchiveStatus(s: AgentState['status']): ArchiveRecord['status'] {
-  if (s === 'success') return 'success'
-  if (s === 'failed') return 'failed'
-  if (s === 'halted' || s === 'manual_intervention') return 'halted'
-  if (s === 'running' || s === 'awaiting_user') return 'running'
+function outcomeFromAgent(agent: AgentState) {
+  return deriveRunOutcome({
+    turnSettlement: agent.turnSettlement,
+    executionSettlement: agent.executionSettlement,
+    goalVerdict: agent.goalVerdict,
+    appFinalization: agent.appFinalization,
+    executionKind: agent.executionKind,
+    legacyStatus: agent.status,
+    legacyDodMet: agent.orchestration?.dodMet,
+    iterations: agent.orchestration?.iterations ?? agent.currentIteration,
+    maxIterations: agent.orchestration?.maxIterations ?? agent.loopConfig.maxIterations,
+  })
+}
+
+function builtinTurnOutcome(input: {
+  settlement: import('../agent/piHostRun.ts').PiTurnSettlement
+  status: AgentState['status']
+  orchestration?: AgentState['orchestration']
+}) {
+  return deriveRunOutcome({
+    turnSettlement: input.settlement,
+    executionKind: 'loop',
+    legacyStatus: input.status,
+    legacyDodMet: input.orchestration?.dodMet,
+    iterations: input.orchestration?.iterations,
+    maxIterations: input.orchestration?.maxIterations,
+  })
+}
+
+function toArchiveStatus(agent: AgentState): ArchiveRecord['status'] {
+  if (agent.status === 'running' || agent.status === 'awaiting_user') return 'running'
+  if (agent.status === 'manual_intervention') return 'halted'
+  const outcome = outcomeFromAgent(agent)
+  if (outcome.executionSettlement === 'failed') return 'failed'
+  if (outcome.executionSettlement === 'cancelled' || outcome.executionSettlement === 'interrupted') return 'halted'
+  if (outcome.executionSettlement === 'completed') {
+    return outcome.goalProjection === 'passed' || outcome.goalProjection === 'not-applicable'
+      ? 'success'
+      : 'warning'
+  }
   return 'warning'
 }
 
@@ -436,6 +472,7 @@ async function executePiHostTurn(
           dodMet: result.orchestration.dodMet,
         }
       : undefined
+    const runOutcome = builtinTurnOutcome({ settlement: result.settlement, status: settled.status, orchestration })
     const final = emptyAgentLike({
       id: runId,
       objective: text,
@@ -450,6 +487,8 @@ async function executePiHostTurn(
       confidence: settled.confidence,
       loopConfig,
       executionKind: 'loop',
+      turnSettlement: runOutcome.turnSettlement,
+      executionSettlement: runOutcome.executionSettlement,
       runnerCapabilities: { ...BUILTIN_RUNNER_CAPABILITIES },
       startedAt,
       finishedAt: new Date().toISOString(),
@@ -1143,12 +1182,18 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       } catch {
         /* ignore */
       }
+      const outcome = outcomeFromAgent(agent)
       const record: ArchiveRecord = {
         turnRecord: agent.turnRecord,
         runnerCapabilities: agent.runnerCapabilities,
         executionKind: agent.executionKind,
+        turnSettlement: outcome.turnSettlement,
+        executionSettlement: outcome.executionSettlement,
+        goalVerdict: outcome.goalVerdict,
+        goalProjection: outcome.goalProjection,
+        appFinalization: outcome.appFinalization,
         id: agent.id,
-        status: toArchiveStatus(agent.status),
+        status: toArchiveStatus(agent),
         objective: agent.objective,
         loopType: agent.loopConfig.loopType,
         confidence: agent.confidence || null,

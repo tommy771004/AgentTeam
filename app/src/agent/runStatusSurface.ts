@@ -76,6 +76,7 @@ function safeToolPhase(events: readonly RunActivityEvent[]): string | undefined 
 
 function executionLabel(lifecycle: RunLifecycleView, events: readonly RunActivityEvent[]): string {
   if (lifecycle.phase === 'executing') return safeToolPhase(events) || PHASE_COPY.executing
+  if (lifecycle.terminal) return lifecycle.label
   return PHASE_COPY[lifecycle.phase]
 }
 
@@ -120,12 +121,23 @@ function terminalSurface(input: RunStatusSurfaceInput): RunSecondarySurface | un
   if (!input.lifecycle.terminal && !input.activity.terminal) return undefined
   const phase = input.lifecycle.phase
   const outcome = phase === 'failed' ? 'failed' : phase === 'cancelled' ? 'cancelled' : 'completed'
+  const goal = input.lifecycle.outcome.goalProjection
   const items: string[] = []
   if (outcome === 'failed') {
     items.push('執行未完成。可開啟執行資訊查看原因後重試。')
   } else if (outcome === 'cancelled') {
     items.push(input.lifecycle.interruptReason === 'timeout' ? '執行因逾時中止。' : '執行已停止。')
-  } else if (input.isExternal) {
+  } else if (goal === 'failed') {
+    items.push('執行已完成，但 Goal 驗收未通過。')
+  } else if (goal === 'blocked') {
+    items.push('執行已完成，但 Goal 驗收被阻擋。')
+  } else if (goal === 'unverifiable') {
+    items.push('執行已完成，但 Goal 缺少可執行的驗收方式。')
+  } else if (goal === 'exhausted') {
+    items.push('執行已完成，但 Goal 在 budget 內仍未通過。')
+  } else if (goal === 'legacy-unverified') {
+    items.push('這是舊格式結果；沒有足夠證據推定 Goal 已通過。')
+  } else if (input.isExternal || goal === 'not-applicable') {
     items.push('外部程序已結束；這不代表 Checker 已確認任務完成。')
   } else if (input.lifecycle.iterationExhausted) {
     items.push('執行已結束，但仍有未完成的目標。')

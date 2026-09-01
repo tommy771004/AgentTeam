@@ -68,6 +68,29 @@ recordRunStarted({ runId: 'run-complete', threadId: 'thread-complete' })
 recordRunTerminal({ runId: 'run-complete', threadId: 'thread-complete', status: 'success' })
 assert.equal(reconcileStartup(), null)
 assert.equal(getJournalEntry('run', 'run-complete')?.status, 'success')
+assert.equal(getJournalEntry('run', 'run-complete')?.executionSettlement, 'completed')
+assert.equal(getJournalEntry('run', 'run-complete')?.goalVerdict, undefined)
+assert.equal(getJournalEntry('run', 'run-complete')?.goalProjection, 'legacy-unverified')
+
+recordRunAdmitted({ runId: 'run-unverifiable', objective: 'answer without checker' })
+recordRunStarted({ runId: 'run-unverifiable', threadId: 'thread-unverifiable' })
+recordRunTerminal({
+  runId: 'run-unverifiable',
+  threadId: 'thread-unverifiable',
+  status: 'success',
+  settlement: {
+    executionKind: 'loop',
+    turnSettlement: 'answered',
+    goalVerdict: 'unverifiable',
+    appFinalization: 'pending',
+  },
+})
+const unverifiable = getJournalEntry('run', 'run-unverifiable')
+assert.equal(unverifiable?.turnSettlement, 'answered')
+assert.equal(unverifiable?.executionSettlement, 'completed')
+assert.equal(unverifiable?.goalVerdict, 'unverifiable')
+assert.equal(unverifiable?.goalProjection, 'unverifiable')
+assert.equal(unverifiable?.appFinalization, 'pending')
 
 // Pi Host is the execution authority after a renderer reload. Host-recognized
 // active/terminal attachments must survive startup reconciliation; only a run

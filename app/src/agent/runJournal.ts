@@ -6,6 +6,19 @@
  * admission/terminal marker is persisted before the coordinator can yield.
  */
 
+import {
+  deriveRunOutcome,
+  isAppFinalizationStatus,
+  isGoalOutcomeProjection,
+  isGoalVerdict,
+  isRunExecutionSettlement,
+  type AppFinalizationStatus,
+  type GoalOutcomeProjection,
+  type GoalVerdict,
+  type RunExecutionSettlement,
+} from './goalOutcome.ts'
+import { isPiTurnSettlement, type PiTurnSettlement } from './piHostRun.ts'
+
 export type JournalKind = 'run' | 'queue' | 'schedule' | 'background'
 export type JournalStatus =
   | 'queued'
@@ -48,6 +61,13 @@ export type JournalEntry = {
   delivery?: JournalDelivery
   /** `external` runs may never claim a Definition of Done. */
   executionKind?: 'loop' | 'external'
+  /** Orthogonal terminal facts; Goal truth never derives from actor completion. */
+  turnSettlement?: PiTurnSettlement
+  executionSettlement?: RunExecutionSettlement
+  goalVerdict?: GoalVerdict
+  /** Conservative read model for legacy entries; never canonical Goal truth. */
+  goalProjection?: GoalOutcomeProjection
+  appFinalization?: AppFinalizationStatus
   /** Bounded settlement evidence — counters only, never prompts or payloads. */
   dodMet?: boolean
   iterations?: number
@@ -243,6 +263,13 @@ function parseState(raw: string | null): JournalState | null {
           entry.executionKind === 'loop' || entry.executionKind === 'external'
             ? entry.executionKind
             : undefined,
+        turnSettlement: isPiTurnSettlement(entry.turnSettlement) ? entry.turnSettlement : undefined,
+        executionSettlement: isRunExecutionSettlement(entry.executionSettlement)
+          ? entry.executionSettlement
+          : undefined,
+        goalVerdict: isGoalVerdict(entry.goalVerdict) ? entry.goalVerdict : undefined,
+        goalProjection: isGoalOutcomeProjection(entry.goalProjection) ? entry.goalProjection : undefined,
+        appFinalization: isAppFinalizationStatus(entry.appFinalization) ? entry.appFinalization : undefined,
         dodMet: typeof entry.dodMet === 'boolean' ? entry.dodMet : undefined,
         iterations: counter(entry.iterations),
         maxIterations: counter(entry.maxIterations),
@@ -495,6 +522,10 @@ export function classifyRunDelivery(facts: RunDeliveryFacts): JournalDelivery {
 
 export type RunTerminalSettlement = {
   executionKind?: 'loop' | 'external'
+  turnSettlement?: PiTurnSettlement
+  executionSettlement?: RunExecutionSettlement
+  goalVerdict?: GoalVerdict
+  appFinalization?: AppFinalizationStatus
   dodMet?: boolean
   iterations?: number
   maxIterations?: number
@@ -510,6 +541,17 @@ export function recordRunTerminal(input: {
 }): void {
   const finishedAt = now()
   const external = input.settlement?.executionKind === 'external'
+  const outcome = deriveRunOutcome({
+    turnSettlement: input.settlement?.turnSettlement,
+    executionSettlement: input.settlement?.executionSettlement,
+    goalVerdict: input.settlement?.goalVerdict,
+    appFinalization: input.settlement?.appFinalization,
+    executionKind: input.settlement?.executionKind,
+    legacyStatus: input.status,
+    legacyDodMet: input.settlement?.dodMet,
+    iterations: input.settlement?.iterations,
+    maxIterations: input.settlement?.maxIterations,
+  })
   upsert({
     id: input.runId,
     kind: 'run',
@@ -521,6 +563,11 @@ export function recordRunTerminal(input: {
     // is no second write point that could disagree about delivery.
     delivery: input.delivery ? classifyRunDelivery(input.delivery) : 'pending-delivery',
     executionKind: input.settlement?.executionKind,
+    turnSettlement: outcome.turnSettlement,
+    executionSettlement: outcome.executionSettlement,
+    goalVerdict: outcome.goalVerdict,
+    goalProjection: outcome.goalProjection,
+    appFinalization: outcome.appFinalization,
     // An external CLI exit is never a DoD claim, so its settlement carries no
     // DoD verdict at all rather than an unmet one.
     dodMet: external ? undefined : input.settlement?.dodMet,

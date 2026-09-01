@@ -43,6 +43,15 @@ function ArchiveRunStatus({ archive }: { archive: ArchiveRecord }) {
     status: archive.status === 'warning' ? 'success' : archive.status,
     terminal: archive.status !== 'running',
     active: archive.status === 'running',
+    outcome: {
+      turnSettlement: archive.turnSettlement,
+      executionSettlement: archive.executionSettlement,
+      goalVerdict: archive.goalVerdict,
+      legacyGoalProjection: archive.goalProjection,
+      appFinalization: archive.appFinalization,
+      executionKind: archive.executionKind,
+      legacyStatus: archive.status,
+    },
     orchestration: {
       iterations: archive.iterations,
       maxIterations: archive.maxIterations,

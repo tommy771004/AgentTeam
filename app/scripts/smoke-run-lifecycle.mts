@@ -7,6 +7,15 @@ import {
 import { deriveSubDesignWorkspace } from '../src/agent/subdesign/workspaceProjection.ts'
 import { useRunActivityStore } from '../src/store/runActivityStore.ts'
 import { continuationAnchorBubbleId } from '../src/agent/conversationRunLifecycle.ts'
+import {
+  deriveRunOutcome,
+  executionSettlementFromTurnSettlement,
+  type GoalVerdict,
+} from '../src/agent/goalOutcome.ts'
+import {
+  agentLifecycleFromExecutionSettlement,
+  agentLifecycleFromTurnSettlement,
+} from '../src/agent/agentLifecycle.ts'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -51,8 +60,45 @@ presentation = useRunActivityStore.getState().getPresentation('lifecycle_smoke')
 assert(!presentation?.active, 'run should be inactive after end')
 assert(presentation?.phase === 'completed', 'successful run should be completed')
 assert(presentation?.terminal?.phase === 'completed', 'terminal digest should preserve completed phase')
-view = deriveRunLifecycle({ phase: 'completed', status: 'success', active: true, terminal: true })
+view = deriveRunLifecycle({
+  phase: 'completed',
+  status: 'success',
+  active: true,
+  terminal: true,
+  outcome: { executionSettlement: 'completed', goalVerdict: 'passed' },
+})
 assert(!view.live && view.terminal && view.tone === 'success', 'terminal state must stop live motion')
+
+// ── Orthogonal execution / Goal / finalization outcomes (ticket 02) ──
+assert(executionSettlementFromTurnSettlement('answered') === 'completed', 'answered is an execution observation')
+assert(executionSettlementFromTurnSettlement('empty') === 'completed', 'an empty provider turn still completed execution')
+assert(agentLifecycleFromTurnSettlement('empty') === 'completed', 'actor lifecycle follows execution, not answer content')
+assert(agentLifecycleFromExecutionSettlement('completed') === 'completed', 'child actor completion is execution-only')
+
+for (const goalVerdict of ['failed', 'unverifiable', 'exhausted'] as const satisfies readonly GoalVerdict[]) {
+  const outcome = deriveRunOutcome({ turnSettlement: 'answered', goalVerdict, appFinalization: 'pending' })
+  assert(outcome.turnSettlement === 'answered', `${goalVerdict}: answer observation must survive`)
+  assert(outcome.executionSettlement === 'completed', `${goalVerdict}: execution must remain completed`)
+  assert(outcome.goalVerdict === goalVerdict, `${goalVerdict}: Goal truth must remain independent`)
+  const finalized = deriveRunOutcome({ ...outcome, appFinalization: 'completed' })
+  assert(finalized.executionSettlement === outcome.executionSettlement, `${goalVerdict}: finalization cannot rewrite execution`)
+  assert(finalized.goalVerdict === outcome.goalVerdict, `${goalVerdict}: finalization cannot rewrite Goal truth`)
+}
+
+const childOnly = deriveRunOutcome({ executionSettlement: 'completed' })
+assert(childOnly.goalVerdict === undefined && childOnly.goalProjection === undefined, 'child completed cannot pass its parent Goal')
+const legacyUnknown = deriveRunOutcome({ executionKind: 'loop', legacyStatus: 'success' })
+assert(legacyUnknown.goalVerdict === undefined, 'legacy-unverified must never enter canonical GoalVerdict')
+assert(legacyUnknown.goalProjection === 'legacy-unverified', 'legacy records without proof project conservatively')
+
+view = deriveRunLifecycle({
+  status: 'success',
+  terminal: true,
+  outcome: { turnSettlement: 'answered', goalVerdict: 'unverifiable' },
+})
+assert(view.outcome.executionSettlement === 'completed', 'UI projection keeps execution completion')
+assert(view.outcome.goalVerdict === 'unverifiable', 'UI projection keeps the independent Goal verdict')
+assert(view.tone === 'attention' && view.label.includes('無法驗證'), 'UI must not render unverifiable as success')
 
 const eventCount = presentation?.events.length || 0
 store.push({ kind: 'tool', runId: 'lifecycle_smoke', title: 'late event', callId: 'late' })
@@ -91,7 +137,8 @@ view = deriveRunLifecycle({ status: 'success', terminal: true, orchestration: { 
 assert(!view.iterationExhausted, 'an unmet DoD with budget left is not exhaustion')
 
 view = deriveRunLifecycle({ status: 'success', terminal: true })
-assert(!view.iterationExhausted && view.tone === 'success', 'runs without settlement evidence stay unchanged')
+assert(!view.iterationExhausted && view.tone === 'attention', 'legacy success without Goal proof must not become passed')
+assert(view.outcome.goalProjection === 'legacy-unverified', 'legacy success is explicitly unverified')
 
 // External CLI never claims a DoD, so it can never read as failing one.
 assert(!isIterationExhausted({ ...exhausted, executionKind: 'external' }), 'external CLI runs must never claim or fail a DoD')

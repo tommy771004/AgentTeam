@@ -7,6 +7,13 @@
  * of inventing a second `isRunning` boolean.
  */
 
+import {
+  deriveRunOutcome,
+  type DeriveRunOutcomeInput,
+  type GoalOutcomeProjection,
+  type RunOutcomeProjection,
+} from './goalOutcome.ts'
+
 export type RunLifecyclePhase =
   | 'starting'
   | 'thinking'
@@ -76,6 +83,8 @@ export type RunLifecycleInput = {
   objective?: string
   /** Iteration/DoD evidence; drives the honest exhausted terminal wording. */
   orchestration?: RunOrchestrationSnapshot
+  /** Canonical outcome facts; legacy status/DoD are adapted at this seam. */
+  outcome?: DeriveRunOutcomeInput
   /**
    * Set when the run was parked rather than allowed to settle. A stop the user
    * pressed and a spent time budget are different events and must not share
@@ -106,6 +115,8 @@ export type RunLifecycleView = {
   interruptReason?: RunInterruptReason
   /** A stop has been acknowledged and the runner is parking. */
   stopping: boolean
+  /** Orthogonal execution, Goal, turn, and finalization facts. */
+  outcome: RunOutcomeProjection
 }
 
 const LIVE_PHASES = new Set<RunLifecyclePhase>([
@@ -246,6 +257,92 @@ function phaseLabel(
   return statusLine || '已停止'
 }
 
+const GOAL_ATTENTION = new Set<GoalOutcomeProjection>([
+  'failed',
+  'blocked',
+  'unverifiable',
+  'exhausted',
+  'legacy-unverified',
+])
+
+function goalOutcomeLabel(goal: GoalOutcomeProjection | undefined): string | undefined {
+  switch (goal) {
+    case 'failed': return '執行已完成，Goal 未通過'
+    case 'blocked': return '執行已完成，Goal 被阻擋'
+    case 'unverifiable': return '執行已完成，Goal 無法驗證'
+    case 'exhausted': return '執行已完成，Goal 用盡 budget'
+    case 'legacy-unverified': return '執行已完成，Goal 未經新驗收'
+    default: return undefined
+  }
+}
+
+function outcomeFromLifecycle(input: RunLifecycleInput): RunOutcomeProjection {
+  return deriveRunOutcome({
+    ...input.outcome,
+    executionKind: input.outcome?.executionKind ?? input.orchestration?.executionKind,
+    legacyStatus: input.outcome?.legacyStatus ?? input.status,
+    legacyDodMet: input.outcome?.legacyDodMet ?? input.orchestration?.dodMet,
+    iterations: input.outcome?.iterations ?? input.orchestration?.iterations,
+    maxIterations: input.outcome?.maxIterations ?? input.orchestration?.maxIterations,
+  })
+}
+
+function lifecycleTone(input: {
+  phase: RunLifecyclePhase | 'idle'
+  iterationExhausted: boolean
+  goalNeedsAttention: boolean
+  interruptReason?: RunInterruptReason
+  needsAttention: boolean
+  live: boolean
+}): RunLifecycleTone {
+  if (input.phase === 'completed') return input.iterationExhausted || input.goalNeedsAttention ? 'attention' : 'success'
+  if (input.phase === 'failed') return 'danger'
+  if (input.phase === 'cancelled') return input.interruptReason === 'timeout' ? 'attention' : 'muted'
+  if (input.needsAttention) return 'attention'
+  return input.live ? 'active' : 'muted'
+}
+
+function lifecycleIcon(input: {
+  phase: RunLifecyclePhase | 'idle'
+  iterationExhausted: boolean
+  goalNeedsAttention: boolean
+  interruptReason?: RunInterruptReason
+  stopping: boolean
+  live: boolean
+}): string {
+  if (input.phase === 'completed') {
+    if (input.iterationExhausted) return 'timer_off'
+    return input.goalNeedsAttention ? 'warning' : 'check_circle'
+  }
+  if (input.phase === 'failed') return 'error'
+  if (input.phase === 'cancelled') return input.interruptReason === 'timeout' ? 'hourglass_disabled' : 'stop_circle'
+  if (input.phase === 'manual_intervention') return 'shield'
+  if (input.phase === 'awaiting_user') return 'question_mark'
+  if (input.stopping) return 'pause_circle'
+  return input.live ? 'progress_activity' : 'play_circle'
+}
+
+function lifecycleLabel(input: {
+  phase: RunLifecyclePhase | 'idle'
+  iterationExhausted: boolean
+  iterations?: number
+  terminalGoalLabel?: string
+  stopping: boolean
+  statusLine?: string
+  objective?: string
+  interruptReason?: RunInterruptReason
+}): string {
+  if (input.iterationExhausted) return iterationExhaustedLabel(input.iterations)
+  if (input.terminalGoalLabel) return input.terminalGoalLabel
+  if (input.stopping) return '正在安全停車…'
+  return phaseLabel(
+    input.phase,
+    input.statusLine?.trim() || '',
+    input.objective?.trim() || '',
+    input.interruptReason,
+  )
+}
+
 /**
  * Resolve one deterministic visual state from activity + agent signals.
  * HITL states always win. While activity is still active, its phase wins over
@@ -253,6 +350,7 @@ function phaseLabel(
  */
 export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
   const status = normalized(input.status)
+  const outcome = outcomeFromLifecycle(input)
   const statusPhase = phaseFromAgentStatus(input.status)
   const activityPhase = input.phase
   const activityIsLive = Boolean(input.active) && Boolean(activityPhase)
@@ -283,10 +381,14 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
   const live = phase !== 'idle' && hasLiveSignal && !input.terminal
   const terminalPhase = phase !== 'idle' && TERMINAL_PHASES.has(phase)
   const terminal = Boolean(input.terminal) || (terminalPhase && !live)
-  const needsAttention = phase === 'awaiting_user' || phase === 'manual_intervention'
+  const interactionNeedsAttention = phase === 'awaiting_user' || phase === 'manual_intervention'
   // A truncated run still settles as `completed`; only its wording, tone and
   // icon change, so HITL and activity-phase precedence above stay untouched.
   const iterationExhausted = phase === 'completed' && isIterationExhausted(input.orchestration)
+  const goalNeedsAttention = phase === 'completed'
+    && Boolean(outcome.goalProjection && GOAL_ATTENTION.has(outcome.goalProjection))
+  const terminalGoalLabel = phase === 'completed' ? goalOutcomeLabel(outcome.goalProjection) : undefined
+  const needsAttention = interactionNeedsAttention || goalNeedsAttention
   // Only a parked run carries a reason; a plain stop keeps the neutral wording.
   const interruptReason = phase === 'cancelled' ? input.interruptReason : undefined
 
@@ -303,49 +405,21 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
     phase = 'cancel_requested'
   }
 
-  const tone: RunLifecycleTone =
-    phase === 'completed'
-      ? iterationExhausted
-        ? 'attention'
-        : 'success'
-      : phase === 'failed'
-        ? 'danger'
-        : phase === 'cancelled'
-        // A stop the user pressed needs no alarm; a spent time budget does.
-          ? interruptReason === 'timeout' ? 'attention' : 'muted'
-          : needsAttention
-            ? 'attention'
-            : live
-              ? 'active'
-              : 'muted'
-  const icon =
-    phase === 'completed'
-      ? iterationExhausted
-        ? 'timer_off'
-        : 'check_circle'
-      : phase === 'failed'
-        ? 'error'
-        : phase === 'cancelled'
-          ? interruptReason === 'timeout' ? 'hourglass_disabled' : 'stop_circle'
-          : phase === 'manual_intervention'
-            ? 'shield'
-            : phase === 'awaiting_user'
-              ? 'question_mark'
-              // A stop already registered must not keep spinning as if nothing
-              // happened; `progress_activity` is what the surfaces animate.
-              : stopping
-                ? 'pause_circle'
-                : live
-                  ? 'progress_activity'
-                  : 'play_circle'
+  const tone = lifecycleTone({ phase, iterationExhausted, goalNeedsAttention, interruptReason, needsAttention, live })
+  const icon = lifecycleIcon({ phase, iterationExhausted, goalNeedsAttention, interruptReason, stopping, live })
 
   return {
     phase,
-    label: iterationExhausted
-      ? iterationExhaustedLabel(input.orchestration?.iterations)
-      : stopping
-        ? '正在安全停車…'
-        : phaseLabel(phase, input.statusLine?.trim() || '', input.objective?.trim() || '', interruptReason),
+    label: lifecycleLabel({
+      phase,
+      iterationExhausted,
+      iterations: input.orchestration?.iterations,
+      terminalGoalLabel,
+      stopping,
+      statusLine: input.statusLine,
+      objective: input.objective,
+      interruptReason,
+    }),
     tone,
     icon,
     live,
@@ -354,6 +428,7 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
     iterationExhausted,
     interruptReason,
     stopping,
+    outcome,
     // Once the runner has returned, finalization is an atomic hand-off; the
     // stop affordance must not suggest that archive/queue settlement is abortable.
     canStop: live && phase !== 'finalizing' && phase !== 'cancel_requested' && !stopping,

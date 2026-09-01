@@ -90,7 +90,7 @@ try {
 }
 
 assert.equal(agentLifecycleFromTurnSettlement('truncated'), 'failed')
-assert.equal(agentLifecycleFromTurnSettlement('empty'), 'failed')
+assert.equal(agentLifecycleFromTurnSettlement('empty'), 'completed')
 const bounded = createAgentLifecycleEvent({ agentId: 'agent', rootAgentId: 'agent', taskPath: '/root', state: 'failed', runId: 'run', reason: '界'.repeat(2_000) })!
 assert.ok(new TextEncoder().encode(bounded.reason).byteLength <= 2_048)
 assert.equal(isLegalAgentLifecycleTransition(

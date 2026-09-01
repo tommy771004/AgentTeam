@@ -474,6 +474,11 @@ export interface AgentState {
    * UI must not show DoD iteration chrome for `external`.
    */
   executionKind?: 'loop' | 'external'
+  /** Orthogonal run facts. Actor completion alone never supplies goalVerdict. */
+  turnSettlement?: import('./piHostRun.ts').PiTurnSettlement
+  executionSettlement?: import('./goalOutcome.ts').RunExecutionSettlement
+  goalVerdict?: import('./goalOutcome.ts').GoalVerdict
+  appFinalization?: import('./goalOutcome.ts').AppFinalizationStatus
   /**
    * Declared adapter capabilities for this run (honest matrix).
    * continueGoal / validateDoD only when true.
@@ -545,6 +550,12 @@ export interface ArchiveRecord {
   /** Run-time frozen runner guarantees; never reconstructed from Settings. */
   runnerCapabilities?: import('./runners/types.ts').RunnerCapabilities
   executionKind?: 'loop' | 'external'
+  turnSettlement?: import('./piHostRun.ts').PiTurnSettlement
+  executionSettlement?: import('./goalOutcome.ts').RunExecutionSettlement
+  goalVerdict?: import('./goalOutcome.ts').GoalVerdict
+  /** Display-only conservative mapping for legacy records. */
+  goalProjection?: import('./goalOutcome.ts').GoalOutcomeProjection
+  appFinalization?: import('./goalOutcome.ts').AppFinalizationStatus
   id: string
   status: 'success' | 'failed' | 'warning' | 'running' | 'halted'
   objective: string
