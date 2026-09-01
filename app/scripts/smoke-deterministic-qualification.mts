@@ -15,6 +15,7 @@ const required = [
   'check:complexity',
   'smoke:complexity-merge-base',
   'check:release-build-once',
+  'smoke:ci-shipped-runtime-coverage',
   'check:pi-production-owners',
   'check:pi-contract',
   'check:no-retired-provider',

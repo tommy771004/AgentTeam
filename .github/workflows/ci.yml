@@ -1,6 +1,6 @@
-# AgentStudio — dual-platform verify (app/)
-# Runs build + stable smoke matrix on Ubuntu and Windows.
-# Linux additionally proves the bubblewrap builtin-shell sandbox (ADR-0051).
+# AgentStudio — platform-separated blocking verification
+# Ubuntu + Windows own the common build/stable smoke matrix. Linux additionally
+# proves bubblewrap, while macOS owns only its native unsigned runtime contracts.
 # Marketplace E2E is optional (continue-on-error) due to Electron/CJS fragility.
 
 name: CI
@@ -10,12 +10,28 @@ on:
     branches: [main, master]
     paths:
       - 'app/**'
+      - 'vendor/pi/**'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'CONTEXT.md'
+      - 'docs/adr/**'
+      - 'docs/SECURITY_BASELINE.md'
+      - 'docs/RELEASE_SIGNING_SETUP.md'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
   pull_request:
     branches: [main, master]
     paths:
       - 'app/**'
+      - 'vendor/pi/**'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'CONTEXT.md'
+      - 'docs/adr/**'
+      - 'docs/SECURITY_BASELINE.md'
+      - 'docs/RELEASE_SIGNING_SETUP.md'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 concurrency:
@@ -68,22 +84,6 @@ jobs:
       - name: Smoke (CI stable matrix)
         run: npm run smoke:ci
 
-      # ADR-0051 / issue 14: the bubblewrap builtin-shell adapter can only be
-      # PROVEN where a Linux kernel can answer — a view escape and outbound
-      # network have to actually fail, not be reasoned about. The smoke reports
-      # honestly on other platforms, so this job is the only place its
-      # kernel-settled assertions ever run.
-      - name: Install bubblewrap (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap
-
-      - name: Builtin shell sandbox — bubblewrap (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          bwrap --version
-          npm run build:pi-host
-          node --experimental-strip-types scripts/smoke-pi-bwrap-builtin-shell.mts
-
       - name: Smoke built Electron contract (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm run smoke:built
@@ -91,6 +91,64 @@ jobs:
       - name: Smoke built Electron contract (Windows)
         if: runner.os == 'Windows'
         run: npm run smoke:built
+
+  # One Linux owner exercises the complete shipped Pi compatibility graph.
+  # This is intentionally separate from the OS matrix so vendored source and
+  # pin-only PRs cannot pass on compilation alone.
+  pi-runtime:
+    name: Pi shipped-runtime compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ADR-0051: the Pi runtime owner also provisions the Linux kernel adapter
+      # used by its qualification, so the proof is neither implicit nor duplicated.
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      - name: Pi runtime compatibility
+        run: |
+          bwrap --version
+          npm run qualify:pi-runtime-contract
+
+  # PR evidence only: native runtime contracts, never packaging/signing or a
+  # customer-facing publish. Production trust evidence remains release-owned.
+  macos-runtime:
+    name: macOS runtime contracts (unsigned)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: macOS platform runtime contract
+        run: npm run qualify:macos-runtime-contract
 
   marketplace:
     name: marketplace e2e (optional)
