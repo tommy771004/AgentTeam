@@ -63,7 +63,7 @@ ProtocolsPage / slash executor / SubDesign follow-up
 Coordinator snapshot 與 Host runtime 組合以下資料，並保留各自 trust boundary：
 
 - project guidance（`AGENTS.md`／`CLAUDE.md` hierarchy）
-- recent conversation projection／長對話摘要
+- Host-owned structured conversation history／compaction（renderer 不重組 builtin prompt）
 - relevant memory、failure lessons、session recall（temporary chat 跳過）
 - skill／capability preload 與 progressive disclosure
 - attachment／workspace evidence
@@ -82,6 +82,8 @@ Pi Core Host 在受監督的 Electron utility process 中擁有：
 - run settlement 回傳
 
 Renderer 只透過 feature-detected bridge 取得 projection，不擁有第二套 loop。
+
+Builtin same-session queue 也由 Host 擁有生命週期：正常完成或失敗後自動取下一筆；使用者中斷 active turn 時，後續排隊項目保持可編輯但停止自動執行，直到使用者按「開始」。Queue drain 會沿用該對話的 temporary、history 與 memory policy，不把互動追問降級成 delegated temporary run。
 
 Goal-based run 在第一個 provider call 前 admission immutable `GoalContractSnapshot`。每個 settled iteration 由 Host Acceptance Gate 產生 evidence、criterion verdict 與 `AcceptanceSnapshot`；模型回答與 execution completed 都不等於 Goal passed。需要拆分工作時，Host scheduler 執行 digested Workflow DAG：ready nodes bounded fan-out、verified artifacts 才開 fan-in、repair 只重跑 impacted downstream closure。Fresh semantic verifier 只讀 sanitized artifact projection，仍受 Outbound Data Gate 與 Goal budget 約束。
 

@@ -47,6 +47,7 @@ const RUN_METHODS: Record<string, RunMethodHandler> = {
   'runs/settle': settleRun,
   'runs/enqueue': enqueueRun,
   'runs/cancel': cancelRun,
+  'runs/start': startRun,
   'runs/update': updateRun,
   'runs/reorder': reorderRuns,
 }
@@ -133,6 +134,16 @@ function cancelRun(input: RunDomainInput): PiHostMessage[] {
   const cancelled = queue.markInterrupted(runId)
   if (!input.recordLifecycle(run.sessionId, 'interrupted', runId)) return [errorResponse(input.id, 'Illegal agent lifecycle transition')]
   return [{ id: input.id, result: { queue: commitQueue(input, queue), followUp: cancelled, queueRevision: queue.revision() } }]
+}
+
+function startRun(input: RunDomainInput): PiHostMessage[] {
+  const runId = typeof input.params?.runId === 'string' ? input.params.runId : ''
+  const expectedRevision = input.params?.expectedRevision
+  if (!runId || !Number.isSafeInteger(expectedRevision)) return [errorResponse(input.id, 'runId and expectedRevision are required')]
+  const queue = new PiRunQueue(24, input.snapshot.queue)
+  const outcome = queue.start(runId, Number(expectedRevision))
+  if (!outcome.ok) return [errorResponse(input.id, outcome.code === 'conflict' ? 'Pi queue revision changed' : 'Paused follow-up is immutable or unknown', outcome.code === 'conflict' ? 'conflict' : 'invalid_request')]
+  return [{ id: input.id, result: { queue: commitQueue(input, queue), followUp: outcome.item, queueRevision: queue.revision() } }]
 }
 
 function updateRun(input: RunDomainInput): PiHostMessage[] {

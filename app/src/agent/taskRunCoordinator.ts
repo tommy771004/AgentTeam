@@ -2006,6 +2006,7 @@ function builtinFollowUpProfile(input: {
     speed: input.opts.overrides?.speed,
     approvalMode: input.opts.overrides?.approvalMode || input.settings.approvalMode,
     agentMode: input.opts.overrides?.agentMode || input.existingThread?.agentMode,
+    temporary: input.opts.overrides?.temporary ?? input.settings.temporaryChatDefault === true,
   }).filter(([, value]) => value !== undefined))
 }
 

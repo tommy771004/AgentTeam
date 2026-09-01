@@ -55,15 +55,23 @@ function agentMode(profile: Record<string, unknown>): 'build' | 'plan' | undefin
 }
 
 function queueHasWaitingRun(value: unknown): boolean {
-  return Array.isArray(value) && value.some((run) => run && typeof run === 'object' && (run as { status?: unknown }).status === 'queued')
+  return Array.isArray(value) && value.some((run) => run && typeof run === 'object'
+    && (run as { status?: unknown }).status === 'queued'
+    && (run as { autoStartPaused?: unknown }).autoStartPaused !== true)
 }
 
 function enumValue<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
   return typeof value === 'string' && allowed.includes(value as T) ? value as T : undefined
 }
 
-function queuedRunOverrides(claimed: ClaimedRun, runner: RunnerId, projectRoot: string | undefined) {
+function queuedRunOverrides(
+  claimed: ClaimedRun,
+  runner: RunnerId,
+  projectRoot: string | undefined,
+  interactive: boolean,
+) {
   const profile = claimed.profile
+  const temporary = interactive ? profile.temporary === true : true
   return {
     runId: claimed.runId,
     sourceKind: 'delegate' as const,
@@ -77,12 +85,14 @@ function queuedRunOverrides(claimed: ClaimedRun, runner: RunnerId, projectRoot: 
     approvalMode: enumValue(profile.approvalMode, ['always', 'auto', 'full'] as const),
     unattended: profile.unattended === true,
     preloadCapabilityIds: Array.isArray(profile.capabilities) ? profile.capabilities.map(String) : undefined,
-    temporary: true,
-    contextPolicySnapshot: {
-      memoryEnabled: false, memoryWriteEnabled: false, referenceChatHistory: false, temporary: true,
-      project: projectRoot,
-      outboundShellMode: enumValue(profile.outbound, ['off', 'demo', 'optional', 'required'] as const) || 'off',
-    },
+    temporary,
+    ...(interactive ? {} : {
+      contextPolicySnapshot: {
+        memoryEnabled: false, memoryWriteEnabled: false, referenceChatHistory: false, temporary: true,
+        project: projectRoot,
+        outboundShellMode: enumValue(profile.outbound, ['off', 'demo', 'optional', 'required'] as const) || 'off',
+      },
+    }),
     externalCliContract: runner === 'builtin' ? undefined : buildExternalCliDelegateContract({ role: 'leaf' as const, unattended: profile.unattended === true }),
   }
 }
@@ -105,7 +115,7 @@ async function executeClaimedRun(claimed: ClaimedRun) {
     skipUserBubble: true,
     projectRoot,
     _fromQueue: true,
-    overrides: queuedRunOverrides(claimed, runner, projectRoot),
+    overrides: queuedRunOverrides(claimed, runner, projectRoot, Boolean(interactiveThreadId)),
   })
 }
 
@@ -154,7 +164,7 @@ export function startHostAgentQueuePump(): () => void {
   }
 
   const unsubscribeEvent = api.onEvent?.((event) => {
-    if (event.event === 'host/agent-collaboration' || event.event === 'host/agent-lifecycle') wake()
+    if (event.event === 'host/agent-collaboration' || event.event === 'host/agent-lifecycle' || event.event === 'host/queue') wake()
   })
   const unsubscribeAgent = useAgentStore.subscribe((state, previous) => {
     if (state.activeRunIds.length < previous.activeRunIds.length) wake()

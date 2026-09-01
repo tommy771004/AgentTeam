@@ -333,7 +333,7 @@ export function ProtocolsPage() {
     try {
       const result = await api.list()
       const projected = projectPendingFollowUps(Array.isArray(result.queue) ? result.queue : [], activeId)
-        .filter((item) => item.state === 'queued' || item.state === 'dispatching' || (item.action === 'steer' && lifecycle.live))
+        .filter((item) => item.state === 'queued' || item.state === 'paused' || item.state === 'dispatching' || (item.action === 'steer' && lifecycle.live))
       setPendingFollowUps([...projected, ...compatibility])
     } catch {
       // Host projection is optional in plain-browser mode; only show the
@@ -391,6 +391,17 @@ export function ProtocolsPage() {
       await refreshPendingFollowUps()
     } catch (error) {
       if (activeId) pushBubble(activeId, 'system', `排隊指令未刪除：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [activeId, pushBubble, refreshPendingFollowUps])
+
+  const startPendingFollowUp = useCallback(async (item: PendingFollowUpProjection) => {
+    try {
+      const start = window.subagents?.piHost?.runs?.start
+      if (!start) throw new Error('Pi Host queue start bridge unavailable')
+      await start(item.runId, item.queueRevision)
+      await refreshPendingFollowUps()
+    } catch (error) {
+      if (activeId) pushBubble(activeId, 'system', `排隊指令未開始：${error instanceof Error ? error.message : String(error)}`)
     }
   }, [activeId, pushBubble, refreshPendingFollowUps])
 
@@ -1021,6 +1032,7 @@ export function ProtocolsPage() {
                 pendingFollowUps={visiblePendingFollowUps}
                 onEditPendingFollowUp={editPendingFollowUp}
                 onCancelPendingFollowUp={cancelPendingFollowUp}
+                onStartPendingFollowUp={startPendingFollowUp}
                 onMovePendingFollowUp={movePendingFollowUp}
                 onQueueRejectedFollowUp={queueRejectedFollowUp}
                 onStop={() => {

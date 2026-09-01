@@ -55,6 +55,18 @@ try {
   const sessionId = String(created.result.sessionId)
   send(3, 'turn/submit', { sessionId, runId: 'interrupt-run', cwd: process.cwd(), prompt: 'wait forever' })
   await new Promise((resolveDelay) => setTimeout(resolveDelay, 80))
+  send(30, 'turn/submit', {
+    sessionId,
+    runId: 'queued-after-interrupt',
+    cwd: process.cwd(),
+    prompt: 'continue only when explicitly started',
+    mode: 'queue',
+    clientMessageId: 'queued-after-interrupt',
+    expectedActiveRunId: 'interrupt-run',
+    profile: { threadId: 'interrupt-thread', runner: 'builtin' },
+  })
+  const queued = await waitFor(30)
+  assert.equal(queued.result?.queued, 'queue')
   send(4, 'turn/interrupt', { runId: 'interrupt-run', reason: 'user' })
   const interruptAck = await waitFor(4)
   // The acknowledgement is immediate: the UI must not wait for settlement.
@@ -64,6 +76,20 @@ try {
   // A stop the user pressed is `interrupted`, never `failed` and never `cancelled`.
   assert.equal(settled.result?.settlement, 'interrupted')
   assert.equal(settled.result?.interruptReason, 'user')
+
+  send(31, 'runs/list')
+  const paused = await waitFor(31)
+  const pausedItem = paused.result?.queue?.find((item: Record<string, unknown>) => item.runId === 'queued-after-interrupt')
+  assert.equal(pausedItem?.status, 'queued')
+  assert.equal(pausedItem?.autoStartPaused, true, 'interruption pauses automatic queue draining')
+  send(32, 'runs/claim')
+  assert.match(String((await waitFor(32)).error?.message || ''), /No claimable/)
+  const queueRevision = Math.max(...paused.result.queue.map((item: Record<string, unknown>) => Number(item.revision || 0)))
+  send(33, 'runs/start', { runId: 'queued-after-interrupt', expectedRevision: queueRevision })
+  const started = await waitFor(33)
+  assert.equal(started.error, undefined)
+  send(34, 'runs/claim')
+  assert.equal((await waitFor(34)).result?.run?.runId, 'queued-after-interrupt')
 
   // Interrupting a run the Host does not know is refused, not acknowledged.
   send(5, 'turn/interrupt', { runId: 'no-such-run' })

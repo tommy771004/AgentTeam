@@ -54,6 +54,7 @@ function assertProviderOrder(
   current: string,
   expected: readonly string[],
   forbidden: readonly string[],
+  allowForbiddenInHistory = false,
 ) {
   const messages = request.messages || []
   const lastUser = [...messages].reverse().find((message) => message.role === 'user')
@@ -65,7 +66,10 @@ function assertProviderOrder(
     assert.equal(occurrence(text, sentinel), 1, `${sentinel} exactly once in provider user message`)
     assert.ok(text.indexOf(sentinel) < currentAt, `${sentinel} precedes current request`)
   }
-  for (const sentinel of forbidden) assert.equal(occurrence(JSON.stringify(messages), sentinel), 0, `${sentinel} is absent`)
+  for (const sentinel of forbidden) {
+    const haystack = allowForbiddenInHistory ? text : JSON.stringify(messages)
+    assert.equal(occurrence(haystack, sentinel), 0, `${sentinel} is absent from ${allowForbiddenInHistory ? 'the current turn' : 'the provider request'}`)
+  }
   const suffix = text.slice(currentAt + current.length)
   for (const sentinel of [...expected, ...forbidden]) assert.equal(occurrence(suffix, sentinel), 0, `${sentinel} is not reinjected after current request`)
 }
@@ -289,6 +293,19 @@ try {
   const oldSave = await bounded('initial instruction save', host.call('instructions/v1/save', { expectedRevision: 0, globalCustomInstructions: 'GLOBAL_OLD' }))
   assert.equal(oldSave.error, undefined)
   assert.equal(oldSave.result.instructions.revision, 1)
+  const memorySentinel = 'RUN_TASK_HOST_A RUN_TASK_HOST_B QUEUED_CONVERSATION_MEMORY'
+  const seededMemory = await bounded('queued conversation memory seed', host.call('memory/v1/upsert', {
+    access: { origin: 'admin', memoryReadEnabled: true, memoryWriteEnabled: true, temporary: false },
+    entry: {
+      scope: { kind: 'global' },
+      logicalKey: 'queued-conversation-memory',
+      kind: 'memory',
+      text: memorySentinel,
+      tags: ['queue-lifecycle'],
+      createdAt: '2026-09-01T00:00:00.000Z',
+    },
+  }))
+  assert.equal(seededMemory.error, undefined)
 
   const storage = new MemoryStorage()
   Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true })
@@ -353,8 +370,10 @@ try {
     maxConcurrentRuns: 1,
     followUpMode: 'queue',
     model: 'run-task-host-model',
+    memoryEnabled: true,
+    memoryWriteEnabled: true,
     sessionRecallEnabled: false,
-    referenceChatHistory: false,
+    referenceChatHistory: true,
   } })
   const threadId = useThreadStore.getState().createThread({ title: 'real Host queue scenario' })
 
@@ -414,7 +433,11 @@ try {
   const newSentinels = ['GLOBAL_NEW', 'PROJECT_NEW', 'INCLUDE_NEW', 'NESTED_NEW']
   assert.equal(providerRequests.length, 2, 'A uses the held provider request and B is dispatched by the coordinator')
   assertProviderOrder(providerRequests[0], 'RUN_TASK_HOST_A', oldSentinels, newSentinels)
-  assertProviderOrder(providerRequests[1], 'RUN_TASK_HOST_B', newSentinels, oldSentinels)
+  assertProviderOrder(providerRequests[1], 'RUN_TASK_HOST_B', newSentinels, oldSentinels, true)
+  const queuedConversation = JSON.stringify(providerRequests[1].messages || [])
+  assert.match(queuedConversation, /RUN_TASK_HOST_A/, 'queued follow-up resumes the same Host conversation')
+  assert.match(queuedConversation, /run-task-host-answer-1/, 'queued follow-up sees the prior assistant answer')
+  assert.match(queuedConversation, new RegExp(memorySentinel), 'queued follow-up retains durable conversation memory policy')
 
   // The Host responses returned through production turn/submit carry exact
   // records. Capture the record by reading the session after both runs.

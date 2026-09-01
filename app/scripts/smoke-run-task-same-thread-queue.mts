@@ -106,6 +106,8 @@ useSettingsStore.setState({
     ...useSettingsStore.getState().settings,
     maxConcurrentRuns: 1,
     followUpMode: 'queue',
+    memoryEnabled: true,
+    memoryWriteEnabled: true,
     sessionRecallEnabled: false,
     referenceChatHistory: false,
   },
@@ -151,6 +153,10 @@ assert.equal(resultA.status, 'success')
 await scheduler.until(() => submissions.length === 2)
 assert.equal(submissions[1]?.runId, 'run-task-queue-B')
 assert.equal(submissions[1]?.revision, 2, 'B observes mutation at its real admission, not enqueue time')
+const queuedContextPolicy = submissions[1]?.contextPolicy as Record<string, unknown> | undefined
+assert.equal(queuedContextPolicy?.temporary, false, 'an interactive queued turn remains a durable conversation turn')
+assert.equal(queuedContextPolicy?.memoryEnabled, true, 'queue drain preserves the conversation memory policy')
+assert.equal(queuedContextPolicy?.memoryWriteEnabled, true, 'queue drain preserves the conversation memory-write policy')
 assert.equal(listQueuedRuns().length, 0, 'production finalization drain consumed B')
 await scheduler.until(() => settledB.some((result) => result.runId === 'run-task-queue-B'))
 assert.equal(settledB.some((result) => result.runId === 'run-task-queue-B' && result.status === 'success'), true)

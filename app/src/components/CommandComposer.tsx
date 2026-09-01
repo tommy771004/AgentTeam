@@ -112,6 +112,7 @@ export interface CommandComposerProps {
   pendingFollowUps?: readonly PendingFollowUpProjection[]
   onEditPendingFollowUp?: (item: PendingFollowUpProjection, text: string) => void | Promise<void>
   onCancelPendingFollowUp?: (item: PendingFollowUpProjection) => void | Promise<void>
+  onStartPendingFollowUp?: (item: PendingFollowUpProjection) => void | Promise<void>
   onMovePendingFollowUp?: (item: PendingFollowUpProjection, direction: 'up' | 'down') => void | Promise<void>
   onQueueRejectedFollowUp?: (item: PendingFollowUpProjection) => void | Promise<void>
 }
@@ -217,13 +218,14 @@ const FOLLOW_UP_STATE_LABEL: Record<PendingFollowUpProjection['state'], string> 
   submitting: '送出中',
   accepted: '已接受',
   queued: '排隊中',
+  paused: '已暫停',
   dispatching: '開始執行',
   rejected: '未接受',
   settled: '已完成',
   cancelled: '已取消',
 }
 
-type FollowUpCardHandlers = Pick<CommandComposerProps, 'onEditPendingFollowUp' | 'onCancelPendingFollowUp' | 'onMovePendingFollowUp' | 'onQueueRejectedFollowUp'>
+type FollowUpCardHandlers = Pick<CommandComposerProps, 'onEditPendingFollowUp' | 'onCancelPendingFollowUp' | 'onStartPendingFollowUp' | 'onMovePendingFollowUp' | 'onQueueRejectedFollowUp'>
 
 function followUpActionLabel(action: PendingFollowUpProjection['action']): string {
   if (action === 'steer') return '引導'
@@ -319,7 +321,7 @@ function FollowUpActionMenu({
 function FollowUpCardControls({ item, movable, movableIndex, handlers }: {
   item: PendingFollowUpProjection; movable: readonly PendingFollowUpProjection[]; movableIndex: number; handlers: FollowUpCardHandlers
 }) {
-  const { onEditPendingFollowUp: onEdit, onCancelPendingFollowUp: onCancel, onMovePendingFollowUp: onMove, onQueueRejectedFollowUp: onQueueRejected } = handlers
+  const { onEditPendingFollowUp: onEdit, onCancelPendingFollowUp: onCancel, onStartPendingFollowUp: onStart, onMovePendingFollowUp: onMove, onQueueRejectedFollowUp: onQueueRejected } = handlers
   const edit = () => {
     const next = window.prompt('編輯排隊指令', item.text)
     if (next?.trim() && next.trim() !== item.text) void onEdit?.(item, next.trim())
@@ -330,6 +332,7 @@ function FollowUpCardControls({ item, movable, movableIndex, handlers }: {
       <button type="button" disabled={movableIndex < 0 || movableIndex === movable.length - 1} onClick={() => void onMove(item, 'down')} className="flex size-8 items-center justify-center text-ink-3 hover:text-ink disabled:opacity-25" aria-label={`下移：${item.text}`} title="下移"><Icon name="keyboard_arrow_down" size={16} /></button>
     </span> : null}
     {item.state === 'rejected' && item.action !== 'queue' && onQueueRejected ? <button type="button" onClick={() => void onQueueRejected(item)} className="min-h-8 shrink-0 px-2 text-[12px] text-accent-ink hover:bg-hover-1" aria-label={`改為排隊：${item.text}`} title="改為排隊">改排隊</button> : null}
+    {item.startable && onStart ? <button type="button" onClick={() => void onStart(item)} className="min-h-8 shrink-0 px-2 text-[12px] text-accent-ink hover:bg-hover-1" aria-label={`開始：${item.text}`} title="開始排隊指令">開始</button> : null}
     {item.editable && onEdit ? <button type="button" onClick={edit} className="flex size-8 shrink-0 items-center justify-center text-ink-3 hover:text-ink" aria-label={`編輯：${item.text}`} title="編輯"><Icon name="edit" size={14} /></button> : null}
     {item.cancellable && onCancel ? <button type="button" onClick={() => void onCancel(item)} className="flex size-8 shrink-0 items-center justify-center text-ink-3 hover:text-red" aria-label={`刪除：${item.text}`} title="刪除"><Icon name="delete" size={14} /></button> : null}
   </>
@@ -356,12 +359,14 @@ function PendingFollowUpCards({
   items,
   onEdit,
   onCancel,
+  onStart,
   onMove,
   onQueueRejected,
 }: {
   items: readonly PendingFollowUpProjection[]
   onEdit?: CommandComposerProps['onEditPendingFollowUp']
   onCancel?: CommandComposerProps['onCancelPendingFollowUp']
+  onStart?: CommandComposerProps['onStartPendingFollowUp']
   onMove?: CommandComposerProps['onMovePendingFollowUp']
   onQueueRejected?: CommandComposerProps['onQueueRejectedFollowUp']
 }) {
@@ -379,7 +384,7 @@ function PendingFollowUpCards({
         待處理後續指令 {items.length} 筆；最新狀態 {FOLLOW_UP_STATE_LABEL[items.at(-1)?.state || 'queued']}
       </span>
       <div className="space-y-1">
-        {items.map((item) => <PendingFollowUpCard key={item.id} item={item} items={items} expanded={expanded.has(item.id)} onToggle={() => toggleExpanded(item.id)} handlers={{ onEditPendingFollowUp: onEdit, onCancelPendingFollowUp: onCancel, onMovePendingFollowUp: onMove, onQueueRejectedFollowUp: onQueueRejected }} />)}
+        {items.map((item) => <PendingFollowUpCard key={item.id} item={item} items={items} expanded={expanded.has(item.id)} onToggle={() => toggleExpanded(item.id)} handlers={{ onEditPendingFollowUp: onEdit, onCancelPendingFollowUp: onCancel, onStartPendingFollowUp: onStart, onMovePendingFollowUp: onMove, onQueueRejectedFollowUp: onQueueRejected }} />)}
       </div>
     </div>
   )
@@ -562,7 +567,7 @@ type ComposerSurfaceProps = FollowUpCardHandlers & {
 function ComposerSurface(props: ComposerSurfaceProps) {
   return <div className={`agent-composer relative w-full max-w-full min-w-0 box-border border bg-surface ${props.compact ? 'rounded-control' : 'rounded-card'} ${props.dragOver ? 'border-accent/60 bg-accent-tint' : 'border-line'}`} data-composer={props.primary ? 'primary' : props.mode} onDragEnter={props.onDragEnter} onDragOver={props.onDragOver} onDragLeave={props.onDragLeave} onDrop={props.onDrop}>
     <ComposerLoader active={props.running} />
-    <PendingFollowUpCards items={props.pendingFollowUps} onEdit={props.onEditPendingFollowUp} onCancel={props.onCancelPendingFollowUp} onMove={props.onMovePendingFollowUp} onQueueRejected={props.onQueueRejectedFollowUp} />
+    <PendingFollowUpCards items={props.pendingFollowUps} onEdit={props.onEditPendingFollowUp} onCancel={props.onCancelPendingFollowUp} onStart={props.onStartPendingFollowUp} onMove={props.onMovePendingFollowUp} onQueueRejected={props.onQueueRejectedFollowUp} />
     <ComposerMentionMenu open={props.showMentionMenu} items={props.mentionItems} index={props.mentionIndex} onIndex={props.setMentionIndex} onSelect={props.pickMention} />
     <SlashCommandMenu open={props.showMenu} items={props.filtered} activeIndex={props.safeIndex} onSelect={props.applyCommand} onHover={props.setActiveIndex} anchor="bottom" query={props.slashQuery ?? ''} />
     <ComposerAttachments enabled={props.canAttach} attachments={props.attachments} error={props.attachError} dragOver={props.dragOver} fileRef={props.fileRef} onAdd={props.addFiles} onRemove={props.removeAttachment} />
@@ -604,6 +609,7 @@ export function CommandComposer({
   pendingFollowUps = [],
   onEditPendingFollowUp,
   onCancelPendingFollowUp,
+  onStartPendingFollowUp,
   onMovePendingFollowUp,
   onQueueRejectedFollowUp,
 }: CommandComposerProps) {
@@ -1009,7 +1015,7 @@ export function CommandComposer({
   }
   return <ComposerSurface
     compact={compact} dragOver={dragOver} primary={primary} mode={mode} canAttach={canAttach} running={running}
-    pendingFollowUps={pendingFollowUps} onEditPendingFollowUp={onEditPendingFollowUp} onCancelPendingFollowUp={onCancelPendingFollowUp} onMovePendingFollowUp={onMovePendingFollowUp} onQueueRejectedFollowUp={onQueueRejectedFollowUp}
+    pendingFollowUps={pendingFollowUps} onEditPendingFollowUp={onEditPendingFollowUp} onCancelPendingFollowUp={onCancelPendingFollowUp} onStartPendingFollowUp={onStartPendingFollowUp} onMovePendingFollowUp={onMovePendingFollowUp} onQueueRejectedFollowUp={onQueueRejectedFollowUp}
     showMentionMenu={showMentionMenu} mentionItems={mentionItems} mentionIndex={mentionIndex} setMentionIndex={setMentionIndex} pickMention={pickMention}
     showMenu={showMenu} filtered={filtered} safeIndex={safeIndex} applyCommand={applyCommand} setActiveIndex={setActiveIndex} slashQuery={slashQuery}
     attachments={attachments} attachError={attachError} fileRef={fileRef} addFiles={(files) => void addFiles(files)} removeAttachment={removeAttachment}

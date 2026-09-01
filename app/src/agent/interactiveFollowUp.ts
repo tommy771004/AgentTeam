@@ -4,7 +4,7 @@ import type { ChatAttachment } from './types.ts'
 import type { QueuedExternalRun } from './runQueue.ts'
 
 export type FollowUpAction = 'steer' | 'queue' | 'takeover'
-export type PendingFollowUpState = 'submitting' | 'accepted' | 'queued' | 'dispatching' | 'rejected' | 'settled' | 'cancelled'
+export type PendingFollowUpState = 'submitting' | 'accepted' | 'queued' | 'paused' | 'dispatching' | 'rejected' | 'settled' | 'cancelled'
 
 export type PendingFollowUpProjection = {
   id: string
@@ -19,6 +19,7 @@ export type PendingFollowUpProjection = {
   editable: boolean
   cancellable: boolean
   reorderable: boolean
+  startable?: boolean
   targetRunId?: string
   reason?: string
   attachmentCount?: number
@@ -35,6 +36,7 @@ type HostQueueItem = {
   clientMessageId?: string
   targetRunId?: string
   revision?: number
+  autoStartPaused?: boolean
 }
 
 export function followUpActionForRunner(runner: RunnerId, mode: FollowUpMode): FollowUpAction {
@@ -172,11 +174,13 @@ function asHostQueueItem(value: unknown): HostQueueItem | undefined {
     clientMessageId: typeof item.clientMessageId === 'string' ? item.clientMessageId : undefined,
     targetRunId: typeof item.targetRunId === 'string' ? item.targetRunId : undefined,
     revision: typeof item.revision === 'number' ? item.revision : undefined,
+    autoStartPaused: item.autoStartPaused === true,
   }
 }
 
 function projectedState(item: HostQueueItem): PendingFollowUpState {
   if (item.action === 'steer') return 'accepted'
+  if (item.status === 'queued' && item.autoStartPaused) return 'paused'
   if (item.status === 'queued') return 'queued'
   if (item.status === 'running') return 'dispatching'
   if (item.status === 'interrupted') return 'cancelled'
@@ -196,7 +200,7 @@ export function projectPendingFollowUps(queue: readonly unknown[], threadId: str
     if (seen.has(id)) continue
     seen.add(id)
     const state = projectedState(item)
-    const mutable = item.action === 'queue' && state === 'queued'
+    const mutable = item.action === 'queue' && (state === 'queued' || state === 'paused')
     const attachments = Array.isArray(item.profile.attachments) ? item.profile.attachments : []
     projected.push({
       id,
@@ -211,6 +215,7 @@ export function projectPendingFollowUps(queue: readonly unknown[], threadId: str
       editable: mutable,
       cancellable: mutable,
       reorderable: mutable,
+      startable: state === 'paused',
       attachmentCount: attachments.length,
       ...(item.targetRunId ? { targetRunId: item.targetRunId } : {}),
     })

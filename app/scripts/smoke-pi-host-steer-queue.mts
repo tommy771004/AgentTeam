@@ -14,10 +14,12 @@ const projectedFixture = projectPendingFollowUps([
   { runId: 'projection-steer', sessionId: 'projection-session', prompt: 'redirect', trigger: 'interactive', profile: { threadId: 'projection-thread' }, status: 'settled', action: 'steer', clientMessageId: 'projection-client-1', revision: 1 },
   { runId: 'projection-queue', sessionId: 'projection-session', prompt: 'later', trigger: 'interactive', profile: { threadId: 'projection-thread' }, status: 'queued', action: 'queue', clientMessageId: 'projection-client-2', revision: 2 },
   { runId: 'projection-queue-same-text', sessionId: 'projection-session', prompt: 'later', trigger: 'interactive', profile: { threadId: 'projection-thread' }, status: 'queued', action: 'queue', clientMessageId: 'projection-client-3', revision: 3 },
+  { runId: 'projection-paused', sessionId: 'projection-session', prompt: 'start me', trigger: 'interactive', profile: { threadId: 'projection-thread' }, status: 'queued', action: 'queue', clientMessageId: 'projection-client-4', revision: 4, autoStartPaused: true },
 ], 'projection-thread')
-assert.deepEqual(projectedFixture.map((item) => item.state), ['accepted', 'queued', 'queued'])
-assert.equal(projectedFixture.length, 3, 'same text with different client identities remains two intents')
+assert.deepEqual(projectedFixture.map((item) => item.state), ['accepted', 'queued', 'queued', 'paused'])
+assert.equal(projectedFixture.length, 4, 'same text with different client identities remains two intents')
 assert.equal(projectedFixture[1]?.editable, true)
+assert.equal(projectedFixture[3]?.startable, true)
 const externalCompatibility = projectRendererQueuedFollowUps([
   { id: 'external-q', enqueuedAt: new Date(0).toISOString(), dedupeKey: 'external-q', objective: 'resume external work', reuseThreadId: 'projection-thread', runner: 'codex', followUpAction: 'takeover' },
 ], 'projection-thread')
@@ -89,7 +91,7 @@ try {
   assert.equal(queuedFollowUp?.profile?.threadId, 'thread-follow-up')
   assert.equal(typeof queuedFollowUp?.revision, 'number')
   send(60, 'turn/submit', { sessionId, runId: 'queued-request-2', cwd: process.cwd(), prompt: 'second queued task', mode: 'queue', clientMessageId: 'client-queue-2', expectedActiveRunId: 'active-run', profile: { runner: 'builtin', threadId: 'thread-follow-up' } })
-  const queuedSecond = await waitFor((m) => m.id === 60)
+  await waitFor((m) => m.id === 60)
   send(66, 'turn/submit', { sessionId, runId: 'queued-request-3', cwd: process.cwd(), prompt: 'third queued task', mode: 'queue', clientMessageId: 'client-queue-3', expectedActiveRunId: 'active-run', profile: { runner: 'builtin', threadId: 'thread-follow-up' } })
   const queuedThird = await waitFor((m) => m.id === 66)
   const queueRevision = Number(queuedThird.result?.queueRevision)

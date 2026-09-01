@@ -16,6 +16,10 @@ export type PiQueuedRun = {
   targetRunId?: string
   /** Monotonic queue mutation revision. */
   revision?: number
+  /** Automatic draining is paused after the active turn was interrupted. */
+  autoStartPaused?: boolean
+  /** One explicitly selected paused item should be claimed before FIFO resumes. */
+  manualStartRequested?: boolean
   createdAt?: number
   updatedAt?: number
 }
@@ -43,11 +47,42 @@ export class PiRunQueue {
     this.items.push({ ...run, revision: this.revision() + 1, createdAt: run.createdAt || now, updatedAt: now })
     return { ok: true }
   }
-  dequeue(canClaim: (item: PiQueuedRun) => boolean = () => true) { return this.items.find((item) => item.status === 'queued' && canClaim(item)) }
+  dequeue(canClaim: (item: PiQueuedRun) => boolean = () => true) {
+    return this.items.find((item) => item.status === 'queued' && item.manualStartRequested === true && item.autoStartPaused !== true && canClaim(item))
+      || this.items.find((item) => item.status === 'queued' && item.autoStartPaused !== true && canClaim(item))
+  }
   claim(runId?: string, canClaim: (item: PiQueuedRun) => boolean = () => true) {
     const item = runId ? this.items.find((candidate) => candidate.runId === runId && candidate.status === 'queued' && canClaim(candidate)) : this.dequeue(canClaim)
-    if (item) item.status = 'running'
+    if (item) { item.status = 'running'; item.autoStartPaused = false; item.manualStartRequested = false }
     return item
+  }
+  pauseSession(sessionId: string) {
+    const paused = this.items.filter((item) => item.sessionId === sessionId && item.status === 'queued' && item.autoStartPaused !== true)
+    if (paused.length === 0) return false
+    const nextRevision = this.revision() + 1
+    const now = Date.now()
+    for (const item of paused) {
+      item.autoStartPaused = true
+      item.manualStartRequested = false
+      item.revision = nextRevision
+      item.updatedAt = now
+    }
+    return true
+  }
+  start(runId: string, expectedRevision: number) {
+    if (expectedRevision !== this.revision()) return { ok: false as const, code: 'conflict' as const }
+    const item = this.items.find((candidate) => candidate.runId === runId && candidate.status === 'queued' && candidate.autoStartPaused === true)
+    if (!item) return { ok: false as const, code: 'immutable' as const }
+    const nextRevision = expectedRevision + 1
+    const now = Date.now()
+    for (const candidate of this.items) {
+      if (candidate.sessionId !== item.sessionId || candidate.status !== 'queued') continue
+      candidate.autoStartPaused = false
+      candidate.manualStartRequested = candidate.runId === runId
+      candidate.revision = nextRevision
+      candidate.updatedAt = now
+    }
+    return { ok: true as const, item }
   }
   markInterrupted(runId: string) {
     const item = this.items.find((candidate) => candidate.runId === runId)

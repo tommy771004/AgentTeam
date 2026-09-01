@@ -483,6 +483,12 @@ export class PiHostSupervisor {
     return response.result
   }
 
+  async startQueuedRun(runId: string, expectedRevision: number): Promise<NonNullable<PiHostResponse['result']>> {
+    const response = await this.request('runs/start', { runId, expectedRevision })
+    if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queued run start failed')
+    return response.result
+  }
+
   async updateQueuedRun(input: { runId: string; prompt: string; expectedRevision: number }): Promise<NonNullable<PiHostResponse['result']>> {
     const response = await this.request('runs/update', input)
     if (response.error || !response.result?.queue) throw new Error(response.error?.message || 'Pi queued run update failed')

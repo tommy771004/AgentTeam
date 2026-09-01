@@ -201,6 +201,7 @@ const api = {
         ack: (runId: string) => ipcRenderer.invoke('pi-host:runs:ack', runId) as Promise<{ runId: string; resolved: boolean }>,
         enqueue: (input: Record<string, unknown>) => ipcRenderer.invoke('pi-host:runs:enqueue', input) as Promise<{ queue: unknown[] }>,
         cancel: (runId: string, expectedRevision?: number) => ipcRenderer.invoke('pi-host:runs:cancel', runId, expectedRevision) as Promise<{ queue: unknown[]; followUp?: unknown; queueRevision?: number }>,
+        start: (runId: string, expectedRevision: number) => ipcRenderer.invoke('pi-host:runs:start', runId, expectedRevision) as Promise<{ queue: unknown[]; followUp?: unknown; queueRevision?: number }>,
         update: (input: { runId: string; prompt: string; expectedRevision: number }) => ipcRenderer.invoke('pi-host:runs:update', input) as Promise<{ queue: unknown[]; followUp?: unknown; queueRevision?: number }>,
         reorder: (input: { sessionId: string; runIds: string[]; expectedRevision: number }) => ipcRenderer.invoke('pi-host:runs:reorder', input) as Promise<{ queue: unknown[]; queueRevision?: number }>,
         claim: (runId?: string) => ipcRenderer.invoke('pi-host:runs:claim', runId) as Promise<{ run?: unknown; queue: unknown[] }>,

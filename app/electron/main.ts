@@ -2438,6 +2438,7 @@ ipcMain.handle('pi-host:runs:finalize-complete', async (_evt, runId: string, cla
 ipcMain.handle('pi-host:runs:ack', async (_evt, runId: string) => ({ runId, resolved: await piHostSupervisor.acknowledgeRun(runId) }))
 ipcMain.handle('pi-host:runs:enqueue', async (_evt, input: Record<string, unknown>) => ({ queue: await piHostSupervisor.enqueueRun(input || {}) }))
 ipcMain.handle('pi-host:runs:cancel', async (_evt, runId: string, expectedRevision?: number) => piHostSupervisor.cancelQueuedRun(runId, expectedRevision))
+ipcMain.handle('pi-host:runs:start', async (_evt, runId: string, expectedRevision: number) => piHostSupervisor.startQueuedRun(runId, expectedRevision))
 ipcMain.handle('pi-host:runs:update', async (_evt, input: { runId: string; prompt: string; expectedRevision: number }) => piHostSupervisor.updateQueuedRun(input))
 ipcMain.handle('pi-host:runs:reorder', async (_evt, input: { sessionId: string; runIds: string[]; expectedRevision: number }) => piHostSupervisor.reorderQueuedRuns(input))
 ipcMain.handle('pi-host:runs:claim', async (_evt, runId?: string) => piHostSupervisor.claimQueuedRun(runId))
