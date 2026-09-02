@@ -641,8 +641,6 @@ export interface ParseResult {
   steps: ExecutionStep[]
 }
 
-export type AgentRoleKey = 'orchestrator' | 'analyst' | 'synthesizer' | 'executor'
-
 export interface RoleModelConfig {
   orchestrator: string
   analyst: string
@@ -1062,11 +1060,6 @@ export interface ProactiveEvent {
   triggerCount: number
   /** Latest matcher evidence, retained for event audit and retry lineage. */
   lastTriggerEvidence?: EventTriggerSnapshot
-}
-
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant'
-  content: string
 }
 
 export interface LlmChatResult {

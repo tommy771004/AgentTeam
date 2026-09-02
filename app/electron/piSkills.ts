@@ -654,11 +654,6 @@ async function syncRendererSkill(
 }
 
 /** The pinned names the turn should expand up front (issue 16). */
-export async function loadPinnedPiSkills(agentDir: string | undefined): Promise<string[]> {
-  const state = await readSkillsStateSafely(agentDir)
-  return Object.entries(state.skills).filter(([, meta]) => meta.status === 'pinned').map(([name]) => name)
-}
-
 async function readSkillsStateSafely(agentDir: string | undefined): Promise<PiSkillsState> {
   const dir = resolvePiSkillsDir(agentDir)
   if (!dir) return { version: 1, skills: {} }
@@ -785,16 +780,6 @@ export async function readPiSkillFiles(agentDir: string | undefined): Promise<Ar
 }
 
 /** Remove one skill's file and its pin/archive record. */
-export async function deletePiSkill(agentDir: string | undefined, name: string): Promise<boolean> {
-  const dir = resolvePiSkillsDir(agentDir)
-  if (!dir) return false
-  const state = await readSkillsState(dir)
-  if (!state.skills[name]) return false
-  delete state.skills[name]
-  await writeSkillsState(dir, state)
-  return true
-}
-
 /**
  * The system-prompt block that expands pinned skill bodies up front, or an
  * empty string when nothing is pinned.
@@ -834,10 +819,6 @@ export function discoveredPiSkills(): DiscoveredSkills {
 }
 
 /** Test seam. */
-export function resetDiscoveredPiSkills(): void {
-  discovered = { skills: [], diagnostics: [], capturedAt: 0 }
-}
-
 export function captureDiscoveredPiSkills(loaded: unknown, resourceView?: PiSkillResourceSnapshot): void {
   if (!loaded || typeof loaded !== 'object') return
   const skills = Array.isArray((loaded as { skills?: unknown }).skills) ? (loaded as { skills: unknown[] }).skills : []

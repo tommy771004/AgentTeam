@@ -64,34 +64,6 @@ export function canTransitionReviewSnapshot(
 
 export type AttributionFidelity = 'exact' | 'attributed' | 'shared' | 'partial'
 
-export type HostAttributionEvidence =
-  | {
-      source: 'host'
-      claim: 'exact'
-      isolatedWorktree: boolean
-      baselineCaptured: boolean
-      settlementCaptured: boolean
-      contaminationReasons: string[]
-    }
-  | {
-      source: 'host'
-      claim: 'attributed'
-      trustedMutationCount: number
-      coverageComplete: boolean
-      contaminationReasons: string[]
-    }
-  | {
-      source: 'host'
-      claim: 'shared'
-      captureComplete: boolean
-      contaminationReasons: string[]
-    }
-  | {
-      source: 'host'
-      claim: 'partial'
-      reasons: string[]
-    }
-
 function evidenceRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>

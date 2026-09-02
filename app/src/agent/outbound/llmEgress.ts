@@ -55,10 +55,6 @@ export function resolveLlmEgressProfile(opts: {
 /** Per-run/connection cache so FC rounds reuse one company profile. */
 const _profileCache = new Map<string, LlmEgressProfileDecision>()
 
-export function clearLlmEgressProfileCache(): void {
-  _profileCache.clear()
-}
-
 export type ChatMessageLite = { role: string; content: string }
 
 export async function prepareLlmEgressMessages(opts: {

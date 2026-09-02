@@ -1,5 +1,5 @@
 import { createHash, createVerify, verify as cryptoVerify } from 'node:crypto'
-import { artifactSignaturePayload, canonicalJson, unsignedManifestPayload, type SignedUpdateManifest, type UpdateArtifactDescriptor } from '../src/agent/updateContracts.ts'
+import { artifactSignaturePayload, unsignedManifestPayload, type SignedUpdateManifest, type UpdateArtifactDescriptor } from '../src/agent/updateContracts.ts'
 
 export function sha256Hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -31,8 +31,4 @@ export function verifyManifestSignature(manifest: SignedUpdateManifest, publicKe
 
 export function verifyArtifactSignature(artifact: UpdateArtifactDescriptor, bytes: Uint8Array, publicKeyPem: string): boolean {
   return sha256Hex(bytes) === artifact.sha256 && verifyDetachedSignature(artifactSignaturePayload(artifact), artifact.signature, publicKeyPem, artifact.signatureAlgorithm)
-}
-
-export function sha256ForManifest(manifest: SignedUpdateManifest): string {
-  return createHash('sha256').update(canonicalJson(manifest)).digest('hex')
 }

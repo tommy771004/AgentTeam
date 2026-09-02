@@ -40,10 +40,6 @@ function sanitizedChildEnvironment(overrides: NodeJS.ProcessEnv): NodeJS.Process
   return environment
 }
 
-export function listActiveBashRuns(): Array<{ runId: string; tag?: string }> {
-  return [...activeRuns.entries()].map(([runId, v]) => ({ runId, tag: v.tag }))
-}
-
 /** Kill one run, all runs with a tag, or everything */
 export function cancelBash(opts?: {
   runId?: string

@@ -327,7 +327,6 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   const admission = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunAdmission.ts'), 'utf8')
   const runtime = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/runtime.ts'), 'utf8')
   const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
-  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   const queuePump = fs.readFileSync(path.join(appRoot, 'src/agent/hostAgentQueuePump.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
   assert.match(types, /subAgentsEnabled: boolean/)
@@ -340,17 +339,17 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   assert.match(admission, /input\.sourceKind === 'delegate' && !input\.delegateEnabled/)
   assert.match(runtime, /capability\.id !== 'delegate'/)
   assert.match(decision, /Sub Agent 功能目前已關閉/)
-  assert.match(delegate, /Renderer delegation lifecycle 已凍結/)
-  assert.doesNotMatch(delegate, /\brunTask\s*\(/)
-  assert.match(background, /never starts work/)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/hermes/delegate.ts')), false)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts')), false)
   assert.match(queuePump, /sourceKind: 'delegate'/)
   assert.match(settings, /title="啟用 Sub Agent"/)
 })
 
-await test('custom tools: bash_template always approval-gated', async () => {
+await test('custom tools: bash_template is privileged and names stay validated', async () => {
   const fs = await import('node:fs')
   const custom = fs.readFileSync(path.join(appRoot, 'src/agent/tools/customTools.ts'), 'utf8')
-  assert.match(custom, /kind === 'bash_template' \|\| tool\.requiresApproval === true/)
+  const toolPackage = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolPackage.ts'), 'utf8')
+  assert.match(toolPackage, /const privileged = opClass !== 'read' \|\| t\.kind === 'bash_template'/)
   assert.match(custom, /\^\[A-Za-z\]\[A-Za-z0-9_-\]\{0,63\}\$/)
 })
 
@@ -1233,7 +1232,7 @@ await test('P1-C: wiring contract — packages compile through the custom-tool p
   assert.match(ct, /listPendingToolPackages/)
   const tp = fs.readFileSync(path.join(appRoot, 'src/agent/tools/toolPackage.ts'), 'utf8')
   assert.match(tp, /operationClass 必填/)
-  assert.match(tp, /requiresReview: escalations\.length > 0/)
+  assert.match(tp, /needsReview: !approved/)
   const ls = fs.readFileSync(path.join(appRoot, 'src/store/learningStore.ts'), 'utf8')
   assert.match(ls, /approveToolPackage/)
 })
@@ -2122,9 +2121,8 @@ await test('drift guard: remaining hook points are passive-only and wired', asyn
   for (const point of ['permissionDenied', 'beforeCompaction', 'afterCompaction', 'delegateStart', 'delegateEnd', 'userTurn']) {
     assert.match(hooks, new RegExp(`${point}: \\['log', 'notify'\\]`), `${point} passive-only`)
   }
-  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   const hostDomain = fs.readFileSync(path.join(appRoot, 'electron/piAgentCommunicationDomain.ts'), 'utf8')
-  assert.match(delegate, /Production delegation must enter through Pi Host agents\/spawn/)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/hermes/delegate.ts')), false)
   assert.match(hostDomain, /type: 'spawned'/)
   assert.match(hostDomain, /recordCompletion/)
   const runExternal = readTaskRunRuntimeSource(fs)
@@ -2147,9 +2145,8 @@ await test('drift guard: project hooks require folder trust and stay sanitized',
 
 await test('drift guard: delegate capability_mode stacks on role blocks; wait primitives wired', async () => {
   const fs = await import('node:fs')
-  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   const hostDomain = fs.readFileSync(path.join(appRoot, 'electron/piAgentCommunicationDomain.ts'), 'utf8')
-  assert.doesNotMatch(delegate, /\brunTask\s*\(/)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/hermes/delegate.ts')), false)
   assert.match(hostDomain, /isRestrictiveAgentPolicy\(parentPolicy, childPolicy\)/)
   assert.match(hostDomain, /capabilities: profile\.capabilities \?\? profile\.activeTools/)
   assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts')), false)
@@ -2178,18 +2175,16 @@ await test('drift guard: metrics recorded at coordinator settle + guard decision
 
 await test('drift guard: persona resolution — role > persona > parent; unknown persona fails spawn', async () => {
   const fs = await import('node:fs')
-  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   const hostDomain = fs.readFileSync(path.join(appRoot, 'electron/piAgentCommunicationDomain.ts'), 'utf8')
-  assert.match(delegate, /Legacy renderer delegation contract/)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/hermes/delegate.ts')), false)
   assert.match(hostDomain, /objective, role, profile, context, and depth are required/)
   assert.match(hostDomain, /admittedChildProfile\(profile, childPolicy\)/)
 })
 
 await test('drift guard: Host worktree isolation fails closed', async () => {
   const fs = await import('node:fs')
-  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
   const authority = fs.readFileSync(path.join(appRoot, 'electron/piAgentWorkspaceAuthority.ts'), 'utf8')
-  assert.doesNotMatch(delegate, /worktreeCreate\?\.\(/)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/hermes/delegate.ts')), false)
   assert.match(authority, /worktree', 'add'/)
   assert.match(authority, /Isolated worktree creation failed/)
   assert.doesNotMatch(authority, /fallback|回退共用 workspace/i)

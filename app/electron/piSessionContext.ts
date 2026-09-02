@@ -158,15 +158,6 @@ export function buildPiAutoMemory(
   }
 }
 
-export function buildPiTurnMemoryCandidate(
-  prompt: string,
-  input: { runId: string; sessionId: string; project?: string; createdAt?: string },
-  automaticLearning: boolean,
-): PiMemory | undefined {
-  return buildPiTurnMemory(prompt, input)
-    || (automaticLearning ? buildPiAutoMemory(prompt, input) : undefined)
-}
-
 export function buildPiTurnLearningCandidate(
   prompt: string,
   input: { runId: string; sessionId: string; project?: string; createdAt?: string },

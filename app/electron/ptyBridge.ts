@@ -139,11 +139,6 @@ export function writeTerm(id: string, data: string): { ok: boolean; error?: stri
   }
 }
 
-export function resizeTerm(_id: string, _cols: number, _rows: number): { ok: boolean } {
-  // soft PTY: no true winsize without node-pty
-  return { ok: true }
-}
-
 export function killTerm(id: string): { ok: boolean } {
   const s = sessions.get(id)
   if (!s) return { ok: false }

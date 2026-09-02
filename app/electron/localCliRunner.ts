@@ -373,14 +373,6 @@ export function buildLocalCliArgv(input: LocalCliRunInput): {
   return { file, args, displayCommand }
 }
 
-/**
- * Shell-string form (legacy / smoke / logging). Prefer buildLocalCliArgv for spawn.
- */
-export function buildLocalCliCommand(input: LocalCliRunInput): string {
-  const { displayCommand } = buildLocalCliArgv(input)
-  return displayCommand
-}
-
 async function preflightBinary(
   kind: LocalCliKind,
   binary: string,

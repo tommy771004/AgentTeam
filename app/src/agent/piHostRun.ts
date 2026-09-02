@@ -81,12 +81,6 @@ export function piTurnStopReason(
  * A genuinely silent model (`stopReason: 'stop'`, no text) must not be misfiled
  * as truncated.
  */
-export function isLengthTruncatedTurn(
-  messages: ReadonlyArray<{ role?: string; stopReason?: string }>,
-): boolean {
-  return piTurnStopReason(messages) === 'length'
-}
-
 /**
  * A provider failure Pi surfaced in-band instead of throwing.
  *

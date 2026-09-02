@@ -163,50 +163,6 @@ export function compileToolPackage(
   return { tools, withheld, needsReview: !approved, fingerprint }
 }
 
-export type PackageDiff = {
-  added: string[]
-  removed: string[]
-  escalations: string[]
-  requiresReview: boolean
-}
-
-/** Update diff — new/escalated privileges force re-review. */
-export function diffToolPackages(
-  prev: ToolPackageManifest | null | undefined,
-  next: ToolPackageManifest,
-): PackageDiff {
-  const rank: Record<OperationClass, number> = {
-    read: 0,
-    external: 1,
-    write: 2,
-    destructive: 3,
-  }
-  const prevMap = new Map((prev?.tools || []).map((t) => [t.name, t]))
-  const nextMap = new Map(next.tools.map((t) => [t.name, t]))
-  const added = [...nextMap.keys()].filter((n) => !prevMap.has(n))
-  const removed = [...prevMap.keys()].filter((n) => !nextMap.has(n))
-  const escalations: string[] = []
-  for (const [name, t] of nextMap) {
-    const p = prevMap.get(name)
-    if (!p) {
-      if (t.operationClass !== 'read' || t.kind === 'bash_template') {
-        escalations.push(`${name}（新增 ${t.operationClass}${t.kind === 'bash_template' ? '·bash' : ''}）`)
-      }
-      continue
-    }
-    if (rank[t.operationClass] > rank[p.operationClass]) {
-      escalations.push(`${name}（${p.operationClass} → ${t.operationClass}）`)
-    }
-    if (p.kind === 'http_template' && t.kind === 'bash_template') {
-      escalations.push(`${name}（http → bash）`)
-    }
-  }
-  if ((prev?.auth?.secretKey || '') !== (next.auth?.secretKey || '')) {
-    escalations.push(`secret owner 變更（${prev?.auth?.secretKey || '無'} → ${next.auth?.secretKey || '無'}）`)
-  }
-  return { added, removed, escalations, requiresReview: escalations.length > 0 }
-}
-
 export type PackageHealth = {
   tool: string
   ok: boolean

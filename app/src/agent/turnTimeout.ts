@@ -65,11 +65,3 @@ export function resolveTurnTimeout(input: ResolveTurnTimeoutInput): number | und
 }
 
 /** Human-readable budget for settings and status copy. */
-export function describeTurnTimeout(ms: number | undefined): string {
-  if (!ms) return '不限制'
-  const minutes = Math.round(ms / 60_000)
-  if (minutes < 60) return `${minutes} 分鐘`
-  const hours = Math.floor(minutes / 60)
-  const rest = minutes % 60
-  return rest ? `${hours} 小時 ${rest} 分鐘` : `${hours} 小時`
-}

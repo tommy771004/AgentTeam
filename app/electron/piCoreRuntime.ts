@@ -117,10 +117,6 @@ export function piCoreRuntimeToolCatalog(cwd = process.cwd()): Array<{ name: str
   }).sort((left, right) => left.name.localeCompare(right.name))
 }
 
-export async function executePiRead(cwd: string, args: { path: string; offset?: number; limit?: number }) {
-  return executePiTool('read', cwd, args)
-}
-
 export async function executePiTool(
   toolName: PiBuiltinToolName,
   cwd: string,
@@ -957,13 +953,6 @@ export function steerPiTurn(sessionId: string, prompt: string): boolean {
   const runtime = sessionRuntimes.get(sessionId)
   if (!runtime?.session.steer) return false
   void runtime.session.steer(prompt)
-  return true
-}
-
-export function followUpPiTurn(sessionId: string, prompt: string): boolean {
-  const runtime = sessionRuntimes.get(sessionId)
-  if (!runtime?.session.followUp) return false
-  void runtime.session.followUp(prompt)
   return true
 }
 

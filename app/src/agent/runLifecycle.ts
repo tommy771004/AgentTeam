@@ -471,10 +471,6 @@ export function deriveRunLifecycle(input: RunLifecycleInput): RunLifecycleView {
   }
 }
 
-export function isRunLive(input: RunLifecycleInput) {
-  return deriveRunLifecycle(input).live
-}
-
 /** Tailwind class hook shared by the compact status surfaces. */
 export function lifecycleToneClass(tone: RunLifecycleTone) {
   switch (tone) {

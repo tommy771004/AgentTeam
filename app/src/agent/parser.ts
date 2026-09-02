@@ -475,20 +475,3 @@ export function formatPlanBubble(
 }
 
 /** Render loop config as the markdown schema from the docs. */
-export function formatConfigMarkdown(config: LoopConfiguration, objective: string): string {
-  return `### [Loop Configuration]
-- **Loop_Type**: ${config.loopType}
-- **Trigger**: ${config.trigger}
-- **Objective**: ${objective}
-
-### [Execution Sequence]
-${config.executionSequence.map((s, i) => `${i + 1}. ${s}`).join('\n')}
-
-### [Validation & Constraints]
-- **Definition_of_Done (DoD)**: ${config.definitionOfDone}
-- **Max_Iterations**: ${config.maxIterations}
-- **Fallback_Protocol**: ${config.fallbackProtocol}
-
-### [Post-Execution]
-- **Next_State**: ${config.nextState}`
-}

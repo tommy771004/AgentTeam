@@ -1362,10 +1362,6 @@ export function markRunRegistryReconciled(): void {
 }
 
 /** Test/diagnostic seam for proving admission remains fail-closed during boot. */
-export function isRunRegistryReconciled(): boolean {
-  return runRegistryReconciled
-}
-
 /** Delete archive records older than N days (0 = off) */
 async function pruneArchiveByAge(days: number) {
   if (!days || days <= 0) return

@@ -126,11 +126,6 @@ export function setPiLivePlan(sessionId: string, steps: PiPlanStep[]): void {
   livePlans.set(sessionId, steps.map(clonePlanStep))
 }
 
-export function getPiLivePlan(sessionId: string): PiPlanStep[] | undefined {
-  const plan = livePlans.get(sessionId)
-  return plan ? plan.map(clonePlanStep) : undefined
-}
-
 export function setPiPlanGateCandidate(sessionId: string, candidate: PiPlanGateCandidate): void {
   planGateCandidates.set(sessionId, structuredClone(candidate))
 }

@@ -9,10 +9,6 @@ import type { ChatAttachment, ChatAttachmentKind } from '../agent/types'
 export type { ChatAttachment, ChatAttachmentKind }
 
 /** OpenAI chat content part (subset) */
-export type MultimodalContentPart =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }
-
 export const MAX_ATTACHMENTS = 4
 export const MAX_FILE_BYTES = 8 * 1024 * 1024
 export const MAX_IMAGE_EDGE = 1600
@@ -306,40 +302,6 @@ export function attachmentsToTextAppendix(attachments: ChatAttachment[]): string
 }
 
 /** Build OpenAI multimodal user content */
-export function buildMultimodalUserContent(
-  text: string,
-  attachments: ChatAttachment[] | undefined,
-): string | MultimodalContentPart[] {
-  const images = (attachments || []).filter((a) => a.kind === 'image' && a.dataUrl)
-  const pathOnly = (attachments || []).filter(
-    (a) => a.kind === 'image' && !a.dataUrl && a.filePath,
-  )
-  if (!images.length && !pathOnly.length) return text
-
-  let body = text || '請分析附上的圖片。'
-  if (pathOnly.length) {
-    body +=
-      '\n\n' + pathOnly.map((a) => `(image file on disk: ${a.filePath})`).join('\n')
-  }
-  if (!images.length) return body
-
-  const parts: MultimodalContentPart[] = [{ type: 'text', text: body }]
-  for (const img of images) {
-    if (!img.dataUrl) continue
-    parts.push({
-      type: 'image_url',
-      image_url: { url: img.dataUrl, detail: 'auto' },
-    })
-  }
-  return parts
-}
-
-export function hasImageAttachments(attachments?: ChatAttachment[]): boolean {
-  return Boolean(
-    attachments?.some((a) => a.kind === 'image' && (a.dataUrl || a.filePath)),
-  )
-}
-
 export function defaultGoalForAttachments(attachments: ChatAttachment[]): string {
   const hasImg = attachments.some((a) => a.kind === 'image')
   const hasText = attachments.some((a) => a.kind === 'text')
@@ -456,18 +418,4 @@ export function attachmentsPathAppendix(attachments: ChatAttachment[]): string {
     '## 附件本機路徑',
     ...paths.map((a) => `- [${a.kind}] ${a.filePath}`),
   ].join('\n')
-}
-
-export function contentPartsToPlainText(
-  content: string | null | MultimodalContentPart[] | undefined,
-): string {
-  if (content == null) return ''
-  if (typeof content === 'string') return content
-  return content
-    .map((p) => {
-      if (p.type === 'text') return p.text
-      if (p.type === 'image_url') return '[image]'
-      return ''
-    })
-    .join('\n')
 }

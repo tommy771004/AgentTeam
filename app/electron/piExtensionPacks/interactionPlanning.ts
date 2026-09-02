@@ -1,5 +1,5 @@
 import { registerPiExtensionPack, type PiPackTool } from '../piToolHost.ts'
-import { getPiLivePlan, setPiContinuationItems, setPiLivePlan, setPiPlanGateCandidate, type PiPlanStep } from '../piPackBridges.ts'
+import { setPiContinuationItems, setPiLivePlan, setPiPlanGateCandidate, type PiPlanStep } from '../piPackBridges.ts'
 import { normalizeContinuationItems } from '../../src/agent/continuation.ts'
 
 /**
@@ -253,10 +253,6 @@ const recordContinuationItems: PiPackTool = {
 }
 
 /** The current plan for a session, for projections that read it directly. */
-export function piCurrentPlan(sessionId: string): PiPlanStep[] | undefined {
-  return getPiLivePlan(sessionId)
-}
-
 export function buildInteractionPlanningPacks() {
   return [
     {

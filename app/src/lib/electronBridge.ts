@@ -65,7 +65,3 @@ export function getElectronBridgeStatus(): ElectronBridgeStatus {
       '目前是瀏覽器分頁，沒有桌面 API。請使用 npm run dev 開出的 Electron 視窗（不要只開 localhost:5173）。',
   }
 }
-
-export function isElectronBridgeReady(): boolean {
-  return Boolean(window.subagents)
-}

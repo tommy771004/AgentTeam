@@ -20,20 +20,6 @@ export const SUPPORTED_SPEC_MAJOR = 1
 export const CURRENT_SPEC_VERSION = '1.0.0'
 
 export type PluginKind = 'scenario' | 'template' | 'skill' | 'prompt' | 'craft' | 'media'
-export type TaskKind =
-  | 'new-generation'
-  | 'refine'
-  | 'extend'
-  | 'import'
-  | 'create'
-  | 'export'
-  | 'share'
-  | 'deploy'
-  | 'critique'
-  | 'edit'
-  | 'review'
-export type PluginMode = 'prototype' | 'dashboard' | 'deck' | 'video' | 'hyperframes' | 'prompt' | 'landing' | 'other'
-
 export type PluginInputType = 'string' | 'text' | 'select' | 'number' | 'boolean'
 
 export type PluginInput = {

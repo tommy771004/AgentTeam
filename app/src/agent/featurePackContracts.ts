@@ -2,12 +2,12 @@
  * Issue 09 — Signed Subscription Feature Pack manifest.
  *
  * Browser-safe contract, mirroring updateContracts.ts's signed-manifest
- * pattern (canonicalJson, allowlisted validation) instead of reinventing it.
+ * pattern (allowlisted validation) instead of reinventing it.
  * Permissions reuse the existing tools/toolPackage.ts operationClass model —
  * a feature pack's tool surface IS a ToolPackageManifest, not a new shape.
  */
 
-import { canonicalJson, compareVersions, type UpdateArtifactDescriptor } from './updateContracts.ts'
+import { compareVersions, type UpdateArtifactDescriptor } from './updateContracts.ts'
 import { validateToolPackage, type ToolPackageManifest } from './tools/toolPackage.ts'
 import type { FeatureId } from './entitlement.ts'
 
@@ -38,15 +38,6 @@ const HTTPS = /^https:\/\/[^\s]+$/i
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
-}
-
-export function unsignedFeaturePackManifestPayload(manifest: FeaturePackManifest): string {
-  const { signature: _signature, ...unsigned } = manifest
-  return canonicalJson(unsigned)
-}
-
-export function featurePackArtifactSignaturePayload(artifact: UpdateArtifactDescriptor): string {
-  return canonicalJson({ sha256: artifact.sha256, size: artifact.size, url: artifact.url })
 }
 
 export function validateFeaturePackManifest(

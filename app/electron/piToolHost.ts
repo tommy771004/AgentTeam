@@ -109,11 +109,6 @@ export function registerPiExtensionPack(pack: PiExtensionPack): void {
 }
 
 /** Test seam: forget every registered pack. */
-export function resetPiExtensionPacks(): void {
-  packs.clear()
-  packOrder.length = 0
-}
-
 export function piExtensionPacks(): PiExtensionPack[] {
   return packOrder.map((id) => packs.get(id)!).filter(Boolean)
 }

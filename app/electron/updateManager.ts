@@ -3,7 +3,6 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { app, safeStorage } from 'electron'
 import {
-  artifactSignaturePayload,
   buildMigrationSnapshot,
   normalizeMigrationSnapshot,
   validateUpdateManifest,
@@ -12,11 +11,10 @@ import {
   type UpdateArch,
   type UpdatePlatform,
 } from '../src/agent/updateContracts.ts'
-import { sha256Hex, verifyArtifactSignature, verifyManifestSignature } from './updateVerification'
+import { verifyArtifactSignature, verifyManifestSignature } from './updateVerification'
 import { BUILT_IN_UPDATE_PUBLIC_KEY } from './updatePublicKey'
 
 export const DEFAULT_UPDATE_CHANNEL_URL = 'https://updates.subagents.ai/beta/{platform}/{arch}/manifest.json'
-export const UPDATE_STATE_VERSION = 1
 const MAX_DOWNLOAD_BYTES = 1_000_000_000
 const SENSITIVE_KEY = /(?:apiKey|token|secret|password|clientSecret|accessKey|privateKey)/i
 
@@ -343,6 +341,3 @@ export function updatePublicKeyFromEnv(): string {
   const override = String(process.env.SUBAGENTS_UPDATE_PUBLIC_KEY || '').replace(/\\n/g, '\n').trim()
   return !app.isPackaged && override ? override : BUILT_IN_UPDATE_PUBLIC_KEY
 }
-
-export function artifactDigestForDiagnostics(artifact: Uint8Array) { return sha256Hex(artifact) }
-export function artifactPayloadForDiagnostics(manifest: SignedUpdateManifest) { return artifactSignaturePayload(manifest.artifact) }

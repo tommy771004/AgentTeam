@@ -77,9 +77,6 @@ export async function resolveProjectContext(
   }
 }
 
-export function invalidateProjectContext() {
-  cache = null
-}
 
 /** Prompt block with per-doc source attribution (auditable). */
 export function formatProjectGuidance(docs: AppliedContext[]): string {

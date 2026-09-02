@@ -232,15 +232,6 @@ export function analyzeShellCommand(command: string): ShellCommandAnalysis {
 export type BashPermissionAction = 'allow' | 'ask' | 'deny'
 
 /** deny > ask > allow。 */
-export function maxSeverity(
-  a: BashPermissionAction,
-  b: BashPermissionAction,
-): BashPermissionAction {
-  if (a === 'deny' || b === 'deny') return 'deny'
-  if (a === 'ask' || b === 'ask') return 'ask'
-  return 'allow'
-}
-
 /**
  * 段級決策核心(純函式)。resolver 由呼叫端注入,合約:
  * `resolve(candidate, fallback)` — 明確 pattern 命中回 allow/ask/deny,

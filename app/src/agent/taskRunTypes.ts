@@ -161,4 +161,3 @@ export type ExternalRunResult = DispatchResult & {
 }
 
 /** Canonical input name for the lifecycle controller. */
-export type RunTaskInput = ExternalRunOpts

@@ -199,17 +199,6 @@ export function createJob(input: {
 }
 
 /** Build cron prompt with attached skills (Hermes cron inject skills as context) */
-export function buildJobPromptWithSkills(
-  objective: string,
-  skillBodies: Array<{ name: string; body: string }>,
-): string {
-  if (!skillBodies.length) return objective
-  const block = skillBodies
-    .map((s) => `### 掛載技能：${s.name}\n${s.body.slice(0, 2500)}`)
-    .join('\n\n')
-  return `${objective}\n\n---\n## 本任務掛載的 Skills（必須遵循）\n\n${block}`
-}
-
 /** Parse simple natural language schedule hints from objective */
 export function parseScheduleFromText(text: string): {
   kind: ScheduleKind

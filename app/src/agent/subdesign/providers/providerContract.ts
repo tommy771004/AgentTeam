@@ -89,10 +89,6 @@ export function checkOutputBudget(text: string, budget: number): { ok: boolean; 
   return { ok: false, truncated: new TextDecoder().decode(slice) + '\n…[truncated: output budget exceeded]' }
 }
 
-export function isProviderCancellationError(e: unknown): boolean {
-  return e instanceof Error && (e.name === 'AbortError' || e.message.includes('cancelled') || e.message.includes('aborted'))
-}
-
 /**
  * Trusted adapter boundary. The non-enumerable private brand and WeakSet
  * membership do not survive JSON/IPC/model payload construction, so a caller

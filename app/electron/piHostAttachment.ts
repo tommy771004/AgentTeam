@@ -133,8 +133,6 @@ const PI_HOST_ATTACHMENT_MAX_APPROVAL_KEYS = 32
 const PI_HOST_ATTACHMENT_MAX_APPROVAL_ITEMS = 32
 const SENSITIVE_APPROVAL_KEY = /(?:api[_-]?key|access[_-]?key|token|secret|password|credential|authorization|cookie|private[_-]?key|client[_-]?secret)/i
 
-const emptyState = (): PiHostAttachmentState => ({ records: [] })
-
 function boundedSummary(summary: unknown): string | undefined {
   if (typeof summary !== 'string' || !summary) return undefined
   // UTF-8 byte length is the renderer-facing bound, not a JS code-unit bound.
@@ -654,8 +652,4 @@ export class PiHostAttachmentJournal {
       ...(missingBefore > 0 && page.length ? { gap: { missingBefore, earliestSeq: page[0].seq } } : {}),
     }
   }
-}
-
-export function emptyPiHostAttachmentState(): PiHostAttachmentState {
-  return emptyState()
 }

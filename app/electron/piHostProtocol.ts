@@ -2992,15 +2992,7 @@ async function dispatchDirectBuiltinTool(input: DirectBuiltinToolDispatchInput):
   })
 }
 
-/**
- * Clock used to arm per-turn deadlines. Swapped by the deadline smoke so the
- * timeout path is driven by a fake clock instead of by real waiting.
- */
-let turnDeadlineClock: TurnDeadlineClock = systemTurnDeadlineClock
-
-export function setPiTurnDeadlineClock(clock: TurnDeadlineClock = systemTurnDeadlineClock): void {
-  turnDeadlineClock = clock
-}
+const turnDeadlineClock: TurnDeadlineClock = systemTurnDeadlineClock
 
 function piTurnEventDeadlineLeaseMs(event: {
   type?: unknown

@@ -183,21 +183,6 @@ export function breakerFor(key: string): CircuitBreaker {
   return b
 }
 
-/** Settings 頁/診斷用:所有 provider breaker 現況。 */
-export function allBreakerSnapshots(): Array<{
-  key: string
-  state: BreakerState
-  samples: number
-  errorRate: number
-}> {
-  return [...registry.entries()].map(([key, b]) => ({ key, ...b.snapshot() }))
-}
-
-/** 測試隔離用。 */
-export function resetBreakers(): void {
-  registry.clear()
-}
-
 export interface ResilienceOptions {
   /** 含首次呼叫的最大嘗試次數(1 = 不重試) */
   maxAttempts?: number

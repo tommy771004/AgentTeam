@@ -757,22 +757,6 @@ export function recordScheduleStatus(jobId: string, status: string, runId?: stri
   })
 }
 
-export function recordBackgroundStatus(input: {
-  jobId: string
-  runId?: string
-  objective: string
-  status: 'queued' | 'running' | 'success' | 'failed' | 'cancelled'
-}): void {
-  upsert({
-    id: input.jobId,
-    kind: 'background',
-    status: input.status,
-    runId: bounded(input.runId, 160),
-    objective: bounded(input.objective, 240),
-    finishedAt: ['success', 'failed', 'cancelled'].includes(input.status) ? now() : undefined,
-  })
-}
-
 export function getJournalEntry(kind: JournalKind, id: string): JournalEntry | undefined {
   return loadState().entries.find((entry) => entry.kind === kind && entry.id === id)
 }

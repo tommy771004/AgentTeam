@@ -498,16 +498,3 @@ export function getSanitizedViewForRun(runId: string | undefined): SanitizedWork
  * When a restricted view is bound, tools must use viewRoot instead of original project.
  * @deprecated Prefer resolveProtectedProjectRoot / resolveEffectiveProjectRoot.
  */
-export function resolveRestrictedProjectRoot(opts: {
-  explicitRoot?: string
-  runId?: string
-  protectionActive?: boolean
-}): string | undefined {
-  if (opts.protectionActive && opts.runId) {
-    const pinned = getRestrictedViewRootForRun(opts.runId)
-    if (pinned) return pinned
-    const ws = getSanitizedViewForRun(opts.runId)
-    if (ws) return ws.viewRoot
-  }
-  return opts.explicitRoot
-}

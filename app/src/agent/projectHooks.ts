@@ -83,7 +83,3 @@ export function invalidateProjectHooks(projectRoot?: string): void {
 }
 
 /** 測試隔離用。 */
-export function resetProjectHooks(): void {
-  cache.clear()
-  activeRoot = ''
-}

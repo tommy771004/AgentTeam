@@ -68,14 +68,6 @@ export type GrantScope =
   | { runId: string; threadId?: string }
   | { runId?: string; threadId: string }
 
-export type CapabilityGrantState = {
-  snapshotId: string
-  pluginId: string
-  grants: GrantDecision[]
-  fingerprint: string
-  updatedAt: string
-}
-
 // ── Collision-resistant content hash & capability fingerprint ────────────
 
 function canonicalJson(value: unknown): string {

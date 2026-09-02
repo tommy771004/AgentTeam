@@ -144,14 +144,6 @@ export type RecordedUsage = {
 }
 
 /** Who is accountable for an entry's content (ADR-0048). */
-export type TurnRecordSource =
-  /** The person driving the conversation. */
-  | 'user'
-  /** The model said or asked for it; it is a claim, not evidence. */
-  | 'model'
-  /** The Host performed it; this is the trusted adapter's own account. */
-  | 'host'
-
 /** Where an entry sits in the turn, independent of its position in the array. */
 export type TurnRecordCoordinates = {
   /** Monotonic within one session; ordering is decided by this and nothing else. */

@@ -17,9 +17,6 @@ import {
 
 export { PLAN_FILE_PREFIX }
 
-export const ENTER_PLAN_MODE_TOOL = 'enter_plan_mode'
-export const EXIT_PLAN_MODE_TOOL = 'exit_plan_mode'
-
 const activeRuns = new Set<string>()
 
 export function setPlanMode(runId: string, on: boolean): void {

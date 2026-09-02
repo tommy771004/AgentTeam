@@ -18,9 +18,3 @@ export function admitPluginForTaskRun(contract: PluginContractResult): ContractA
 }
 
 /** Human-readable admission message for UI. */
-export function admissionDisplay(result: ContractAdmissionResult): string {
-  if (result.admitted) {
-    return result.contract.kind === 'legacy' ? '已採用 legacy 契約（相容）' : `已採用 v${result.contract.manifest.specVersion} 契約`
-  }
-  return result.reason
-}

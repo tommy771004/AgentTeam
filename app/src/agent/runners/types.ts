@@ -271,8 +271,7 @@ export type ExternalCliDelegateContract = {
 }
 
 /**
- * Tools a leaf worker never gets, regardless of runner. Named without a CLI
- * prefix because `hermes/delegate.ts` applies it to builtin children too.
+ * Tools a leaf worker never gets, regardless of runner.
  */
 export const LEAF_BLOCKED_TOOLS = [
   'skill_save',

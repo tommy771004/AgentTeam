@@ -8,14 +8,9 @@
  */
 import {
   ExternalCliRunSessionRegistry,
-  type ExternalCliRunSessionOptions,
 } from '../src/agent/externalCliRunSession.ts'
 
 export const externalCliSupervisor = new ExternalCliRunSessionRegistry()
-
-export function createExternalCliSession(options: ExternalCliRunSessionOptions) {
-  return externalCliSupervisor.create(options)
-}
 
 export function getExternalCliSession(runId: string) {
   return externalCliSupervisor.get(runId)

@@ -293,7 +293,3 @@ export function createSeatbeltBuiltinShellAdapter(options: {
     },
   }
 }
-
-export function resolvedSeatbeltViewRoot(viewRoot: string): string {
-  return resolve(viewRoot)
-}

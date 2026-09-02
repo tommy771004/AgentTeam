@@ -76,9 +76,7 @@ await test('legacy renderer loop is gone; only workspace compatibility handlers 
   const regDir = path.join(appRoot, 'src/agent/tools/registered')
   const files = fs.readdirSync(regDir).filter((f) => f.endsWith('.ts') && f !== 'index.ts')
   assert.deepEqual(files.sort(), [...RENDERER_FALLBACK_TOOL_NAMES].map((name) => `${name}.ts`).sort())
-  const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
-  assert.doesNotMatch(delegate, /\brunDelegatedTask\b/)
-  assert.doesNotMatch(delegate, /runFunctionCallingLoop/)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/hermes/delegate.ts')), false)
 })
 
 // The delegate_task schema enum and RUNNER_IDS must not drift apart.

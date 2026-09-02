@@ -100,15 +100,3 @@ export function buildPriorContextBlock(digests: RunMemoryDigest[], limit = 3): s
  * The write result and the journal entry are the only acceptable proof; a
  * model asserting "已沉澱" without one of these is a claim, not an outcome.
  */
-export type RunMemoryWriteEvidence = {
-  ok: boolean
-  path?: string
-  bytes?: number
-  error?: string
-}
-
-export function describeMemorySinkOutcome(evidence: RunMemoryWriteEvidence | null | undefined): string {
-  if (!evidence) return '沒有沉澱（未嘗試寫入）'
-  if (!evidence.ok) return `沉澱未寫入：${evidence.error || '原因不明'}`
-  return `已沉澱到 ${evidence.path || '專案 memory 目錄'}`
-}

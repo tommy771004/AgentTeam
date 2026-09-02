@@ -32,11 +32,6 @@ export const DEFAULT_PI_CAPABILITIES: PiCapability[] = [
  * disappearing (issue 12): skills moved to Pi resources, design critique is
  * its own workflow, and code mode's verbs live in the framework pack.
  */
-export const UNHOSTED_PI_CAPABILITY_IDS = ['skills', 'design-critique'] as const
-
-/** The always-on framework verbs; reserved names across the whole catalog. */
-export const PI_FRAMEWORK_CAPABILITY_ID = 'framework-pack' as const
-
 export class PiCapabilityCatalog {
   private readonly active = new Set<string>()
   private readonly activeBySession = new Map<string, Set<string>>()

@@ -226,16 +226,3 @@ export function selectSubDesignDirection(
   next.updatedAt = new Date().toISOString()
   return { ok: true, brief: next }
 }
-
-export function stageFromPlan(
-  plan: Array<{ text: string; status: string }>,
-): SubDesignStage | null {
-  const active = plan.filter((item) => item.status !== 'pending')
-  const hay = active.map((item) => item.text).join(' ').toLowerCase()
-  if (!hay) return null
-  if (/deliver|交付|export|匯出|handoff/.test(hay)) return 'deliver'
-  if (/critique|review|驗收|檢查|accessibility|a11y/.test(hay)) return 'critique'
-  if (/build|implement|實作|artifact|產物|寫入/.test(hay)) return 'build'
-  if (/direction|方向|比較|選擇/.test(hay)) return 'direction'
-  return 'brief'
-}

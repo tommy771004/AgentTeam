@@ -547,16 +547,6 @@ export function moveQueuedRun(id: string, dir: -1 | 1): boolean {
 }
 
 /** Jump item to front of the queue (highest priority) */
-export function promoteQueuedRun(id: string): boolean {
-  hydrateRunQueue()
-  const idx = queue.findIndex((q) => q.id === id)
-  if (idx <= 0) return false
-  const [item] = queue.splice(idx, 1)
-  queue.unshift(item)
-  emit()
-  return true
-}
-
 /**
  * Enqueue if not duplicate. Returns queued item or null if dropped (full / duplicate).
  */
