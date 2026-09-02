@@ -7,13 +7,6 @@
 import type { LlmSettings, McpServerConfig, McpToolInfo } from '../types.ts'
 import { enrichMcpServerWithSecrets, mcpServerMissingSecret } from './mcpSecrets.ts'
 
-export interface McpCallResult {
-  ok: boolean
-  content: string
-  raw?: unknown
-  error?: string
-}
-
 let rpcId = 1
 
 async function httpRpc(
@@ -113,65 +106,6 @@ export async function mcpListTools(
   }))
 }
 
-export async function mcpCallTool(
-  server: McpServerConfig,
-  toolName: string,
-  args: Record<string, unknown>,
-  settings?: Partial<LlmSettings> | null,
-): Promise<McpCallResult> {
-  if (!server.enabled) return { ok: false, content: '', error: 'server disabled' }
-  const missing = mcpServerMissingSecret(server, settings)
-  if (missing) {
-    return {
-      ok: false,
-      content: '',
-      error: `MCP「${server.name}」缺少授權密鑰（${missing}）。請先在市集授權對應 connector。`,
-    }
-  }
-  const s = enrichMcpServerWithSecrets(server, settings)
-
-  try {
-    if (s.transport === 'stdio') {
-      if (!window.subagents?.mcp?.stdioCallTool) {
-        return { ok: false, content: '', error: 'stdio MCP 僅支援 Electron' }
-      }
-      const r = await window.subagents.mcp.stdioCallTool({
-        id: s.id,
-        command: s.command || '',
-        args: s.args || [],
-        env: s.env,
-        toolName,
-        arguments: args,
-      })
-      return r
-    }
-
-    const result = await httpRpc(s, 'tools/call', {
-      name: toolName,
-      arguments: args,
-    })
-    const content = formatMcpContent(result)
-    return { ok: true, content, raw: result }
-  } catch (e) {
-    return {
-      ok: false,
-      content: '',
-      error: e instanceof Error ? e.message : String(e),
-    }
-  }
-}
-
-function formatMcpContent(result: unknown): string {
-  if (result == null) return '(empty)'
-  if (typeof result === 'string') return result
-  const r = result as { content?: Array<{ type?: string; text?: string }> }
-  if (Array.isArray(r.content)) {
-    return r.content
-      .map((c) => (c.type === 'text' || c.text ? c.text || '' : JSON.stringify(c)))
-      .join('\n')
-  }
-  return JSON.stringify(result, null, 2).slice(0, 8000)
-}
 
 export async function listAllMcpTools(
   servers: McpServerConfig[],

@@ -1,4 +1,4 @@
-import { shell, type WebContents } from 'electron'
+import type { WebContents } from 'electron'
 import fs from 'node:fs/promises'
 import {
   clearVaultSecret,
@@ -636,12 +636,4 @@ export async function publishContent(
     case 'youtube':
       return publishYouTube(input, access.token)
   }
-}
-
-export async function openContentPublishDocs(platformValue: string) {
-  const platform = normalizePlatform(platformValue)
-  const docs = platform && contentPublishProvider(platform)?.docsUrl
-  if (!docs) return { ok: false, error: '找不到平台文件' }
-  await shell.openExternal(docs)
-  return { ok: true }
 }

@@ -150,6 +150,8 @@ export function setVaultSecret(
         : extra?.keepRefreshToken
           ? prev?.refreshToken
           : prev?.refreshToken,
+    clientId: prev?.clientId,
+    clientSecret: prev?.clientSecret,
     expiresAt,
     tokenType: extra?.tokenType || prev?.tokenType,
     updatedAt: new Date().toISOString(),

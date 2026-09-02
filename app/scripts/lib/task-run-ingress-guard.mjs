@@ -16,7 +16,6 @@ export const taskRunIngressFiles = [
   'src/components/subdesign/CritiqueTheater.tsx',
   'src/agent/subdesign/workspaceIntegration.ts',
   'src/agent/hostAgentQueuePump.ts',
-  'src/agent/hermes/backgroundJobs.ts',
   'src/agent/hermes/delegate.ts',
 ]
 

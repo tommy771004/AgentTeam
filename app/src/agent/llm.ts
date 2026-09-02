@@ -163,10 +163,6 @@ export function resolveRoleModel(settings: LlmSettings, role: string): ResolvedR
 }
 
 /** Resolve model for a sub-agent role. */
-export function modelForRole(settings: LlmSettings, role: string): string {
-  return resolveRoleModel(settings, role).model
-}
-
 export function withRoleModel(settings: LlmSettings, role: string): LlmSettings {
   const resolved = resolveRoleModel(settings, role)
   return { ...settings, model: resolved.model }
@@ -543,30 +539,5 @@ export async function runPrimaryAgentTask(
     context,
     toolContext,
     opts,
-  )
-}
-
-export async function synthesizeReport(
-  settings: LlmSettings,
-  objective: string,
-  stepOutputs: string[],
-  dod: string,
-): Promise<LlmChatResult> {
-  return chatCompletion(
-    settings,
-    [
-      {
-        role: 'system',
-        content:
-          settings.subAgentsEnabled === true
-            ? 'You are the Writer/Synthesizer sub-agent. Produce a polished Markdown report with title, executive summary, key findings, and a short JSON example block if relevant.'
-            : 'You are the primary agent. Produce a polished Markdown report with title, executive summary, key findings, and a short JSON example block if relevant.',
-      },
-      {
-        role: 'user',
-        content: `Objective: ${objective}\n\nDefinition of Done: ${dod}\n\nStep outputs:\n${stepOutputs.map((s, i) => `### Step ${i + 1}\n${s}`).join('\n\n')}`,
-      },
-    ],
-    { maxTokens: 2000 },
   )
 }

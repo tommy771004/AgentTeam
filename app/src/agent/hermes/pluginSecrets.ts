@@ -50,7 +50,7 @@ type VaultApi = {
   migrate: (map: Record<string, unknown>) => Promise<{ ok: boolean; imported: number; error?: string }>
   refresh: (input: {
     pluginId: string
-    clientId: string
+    clientId?: string
     clientSecret?: string
     tokenUrl: string
     tokenAuth?: 'body' | 'basic'
@@ -61,7 +61,6 @@ type VaultApi = {
 let memoryMap: SecretMap = {}
 /** Electron metadata mirror (hydrated from vault) */
 let metaMap: Record<string, PluginSecretMeta> = {}
-let hydratedFromVault = false
 
 function vaultApi(): VaultApi | undefined {
   const g = globalThis as unknown as { subagents?: { secrets?: VaultApi } }
@@ -156,7 +155,6 @@ export async function hydratePluginSecrets(): Promise<number> {
     }
     const metas = await api.list()
     metaMap = Object.fromEntries(metas.map((m) => [m.id, m]))
-    hydratedFromVault = true
     return metas.length
   } catch {
     return 0
@@ -183,10 +181,6 @@ export function hasPluginSecret(id: string): boolean {
 /** Availability only: custom-tool credentials override connector credentials main-side. */
 export function hasToolCredential(id: string): boolean {
   return hasPluginSecret(`credential:custom-tool:${id}`) || hasPluginSecret(id) || hasPluginSecret(`${id}-connector`)
-}
-
-export function pluginSecretsHydrated(): boolean {
-  return !vaultApi() || hydratedFromVault
 }
 
 /**

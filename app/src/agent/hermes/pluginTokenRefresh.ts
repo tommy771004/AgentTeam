@@ -95,17 +95,13 @@ export async function refreshDueTokens(deps: TokenRefreshDeps): Promise<number> 
     const vault = pluginSecretsVaultApi()
     for (const cand of listRefreshCandidates(skew)) {
       const client = deps.getClient(cand.clientKey)
-      if (!client?.clientId) {
-        deps.onError?.(cand.pluginId, '缺少 OAuth Client ID，無法 refresh')
-        continue
-      }
       try {
         if (vault) {
           // Electron: refresh_token never leaves the vault
           const r = await vault.refresh({
             pluginId: cand.pluginId,
-            clientId: client.clientId,
-            clientSecret: client.clientSecret,
+            clientId: client?.clientId,
+            clientSecret: client?.clientSecret,
             tokenUrl: cand.tokenUrl,
             tokenAuth: cand.tokenAuth,
           })
@@ -115,6 +111,10 @@ export async function refreshDueTokens(deps: TokenRefreshDeps): Promise<number> 
           }
           await deps.onRefreshed(cand.pluginId, { meta: r.meta })
           count += 1
+          continue
+        }
+        if (!client?.clientId) {
+          deps.onError?.(cand.pluginId, '缺少 OAuth Client ID，無法 refresh')
           continue
         }
         // Browser fallback: legacy raw-record exchange

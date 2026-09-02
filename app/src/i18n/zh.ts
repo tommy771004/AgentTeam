@@ -20,29 +20,6 @@ export const STATUS_ZH: Record<string, string> = {
   warning: '警告',
 }
 
-export const JOB_STATUS_ZH: Record<string, string> = {
-  idle: '待命',
-  running: '執行中',
-  success: '成功',
-  failed: '失敗',
-  skipped: '已略過',
-  interrupted: '執行中斷',
-}
-
-export const SCHEDULE_KIND_ZH: Record<string, string> = {
-  daily: '每日',
-  interval: '間隔',
-  once: '單次',
-}
-
-export const STEP_STATUS_ZH: Record<string, string> = {
-  PENDING: '待處理',
-  IN_PROGRESS: '進行中',
-  COMPLETED: '已完成',
-  FAILED: '失敗',
-  SKIPPED: '已略過',
-}
-
 export function loopTypeZh(t: string) {
   return LOOP_TYPE_ZH[t] || t
 }

@@ -85,14 +85,13 @@ export function ComplianceReportExport({ activeRunIds = [] }: { activeRunIds?: s
   }
 
   return (
-    <section className="glass-panel rounded-xl p-5">
-      <h2 className="font-semibold flex items-center gap-2 mb-3">
-        <Icon name="verified_user" size={18} className="text-primary" />
+    <section className="glass-panel min-w-0 rounded-xl p-5">
+      <h2 className="mb-3 flex min-w-0 items-center gap-2 break-words font-semibold">
+        <Icon name="verified_user" size={18} className="shrink-0 text-primary" />
         合規報告匯出
       </h2>
-      <p className="text-xs text-on-surface-variant mb-3">
-        彙整既有證據：授權決策、憑證引用（僅 metadata）、檔案變更、因 fingerprint 變更被封鎖的工具、
-        entitlement 決策與 outbound 外送紀錄。不會新增任何蒐集，也不含原始憑證。
+      <p className="mb-3 break-words text-xs text-on-surface-variant">
+        彙整現有的授權、檔案變更與外送紀錄；不新增蒐集，也不含原始憑證。
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <select

@@ -487,7 +487,7 @@ export function SubDesignPage() {
               <div>
                 <h2 className="text-[22px] font-semibold tracking-tight text-on-surface">探索全部資源</h2>
                 <p className="mt-1 max-w-[620px] text-[12px] leading-relaxed text-outline">
-                  先瀏覽 OpenDesign 官網精選的 24 個範本，也可切換到完整本機 catalog。選定後會保留來源、digest 與授權證據。
+                  瀏覽官方精選或完整本機範本；選取後會保留來源與授權資訊。
                 </p>
               </div>
               <div className="flex items-center gap-5" role="group" aria-label="範本資源集合">
@@ -557,7 +557,7 @@ export function SubDesignPage() {
               })}
             </div>
           </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(min(260px,100%),1fr))] gap-3">
             {visibleTemplates.map((template, index) => {
               const selected = template.id === templateId
               const unavailable = template.availability === 'requires-capability'
@@ -573,7 +573,7 @@ export function SubDesignPage() {
                     setSurfaceId(template.surface)
                     setBrief((current) => current || template.suggestedObjective)
                   }}
-                  className={`group flex min-h-[176px] flex-col overflow-hidden rounded-2xl border text-left transition-colors ${
+                  className={`group flex min-h-[176px] min-w-0 flex-col overflow-hidden rounded-2xl border text-left transition-colors ${
                     selected
                       ? 'border-primary/45 bg-primary/[0.08]'
                       : unavailable
@@ -597,14 +597,14 @@ export function SubDesignPage() {
                       <span className="tabular-nums">{String(index + 1).padStart(2, '0')}</span>
                       <Icon name={template.icon} size={19} className={selected ? 'text-primary' : 'text-outline group-hover:text-on-surface'} />
                     </span>
-                    <span className="mt-3 block text-[15px] font-semibold leading-snug text-on-surface">{template.title}</span>
-                    <span className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-outline">{template.summary}</span>
+                    <span className="mt-3 line-clamp-2 break-words text-[15px] font-semibold leading-snug text-on-surface">{template.title}</span>
+                    <span className="mt-2 line-clamp-2 break-words text-[12px] leading-relaxed text-outline">{template.summary}</span>
                     {template.contractNotice ? (
                       <span className="mt-3 line-clamp-2 text-[10px] leading-relaxed text-error">{template.contractNotice}</span>
                     ) : null}
-                    <span className="mt-auto flex items-end justify-between gap-3 pt-4 text-[10px] text-outline">
-                      <span>{categoryLabel}</span>
-                      <span>
+                    <span className="mt-auto flex min-w-0 items-end justify-between gap-3 pt-4 text-[10px] text-outline">
+                      <span className="min-w-0 truncate">{categoryLabel}</span>
+                      <span className="shrink-0 text-right">
                         {template.contractNotice
                           ? '契約不相容'
                           : unavailable

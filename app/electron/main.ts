@@ -33,6 +33,7 @@ import {
   isVaultEncryptionAvailable,
   listVaultMeta,
   migrateIntoVault,
+  setVaultOAuthSecret,
   setVaultSecret,
 } from './secretsVault'
 import { handleCredentialVaultIntent } from './integrationCredentialVault'
@@ -1402,15 +1403,50 @@ ipcMain.handle(
     if (!provider) {
       return { ok: false, pluginId, error: `外掛 ${pluginId} 不支援 OAuth` }
     }
-    return runPluginOAuth(
+    const envPrefix = `AGENTSTUDIO_${provider.clientKey.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_OAUTH`
+    const previous = getVaultSecret(pluginId)
+    const clientId =
+      process.env[`${envPrefix}_CLIENT_ID`]?.trim() ||
+      String(input?.clientId || '').trim() ||
+      previous?.clientId ||
+      ''
+    const clientSecret =
+      process.env[`${envPrefix}_CLIENT_SECRET`]?.trim() ||
+      (input?.clientSecret ? String(input.clientSecret).trim() : '') ||
+      previous?.clientSecret
+    if (!clientId) {
+      return {
+        ok: false,
+        pluginId,
+        error: `尚未設定 ${provider.clientKey} OAuth 應用程式（${envPrefix}_CLIENT_ID）`,
+      }
+    }
+    const result = await runPluginOAuth(
       {
         pluginId,
         provider,
-        clientId: String(input?.clientId || '').trim(),
-        clientSecret: input?.clientSecret ? String(input.clientSecret) : undefined,
+        clientId,
+        clientSecret,
       },
       evt.sender,
     )
+    if (!result.ok || !result.accessToken) {
+      return { ok: false, pluginId, error: result.error || 'OAuth 授權失敗' }
+    }
+    try {
+      const meta = setVaultOAuthSecret(pluginId, result.accessToken, {
+        clientId,
+        clientSecret,
+        refreshToken: result.refreshToken,
+        expiresIn: result.expiresIn,
+        tokenType: result.tokenType,
+      })
+      return { ok: true, pluginId, meta }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'OAuth 憑證未能安全保存'
+      evt.sender.send('oauth:status', { pluginId, phase: 'error', error: message })
+      return { ok: false, pluginId, error: message }
+    }
   },
 )
 
@@ -1809,7 +1845,7 @@ ipcMain.handle(
 ipcMain.handle(
   'cli:runAgent',
   async (
-    evt,
+    _evt,
     input: {
       kind: LocalCliKind
       binary?: string
@@ -3398,7 +3434,7 @@ function attestSubDesignEvidence(input: {
   return attestation
 }
 
-function readAndVerifyEvidenceAttestation(root: string, artifact: SubDesignArtifact, kind: string, relativePath: string, file: string): SubDesignEvidenceAttestation {
+function readAndVerifyEvidenceAttestation(artifact: SubDesignArtifact, kind: string, relativePath: string, file: string): SubDesignEvidenceAttestation {
   const attestationPath = evidenceAttestationFile(file)
   if (!fs.existsSync(attestationPath)) throw new Error('缺少 main process attestation；請重新 capture 或 lint。')
   const parsed = JSON.parse(fs.readFileSync(attestationPath, 'utf8')) as Partial<SubDesignEvidenceAttestation>
@@ -3491,7 +3527,7 @@ function verifyAdditionalEvidenceCandidate(input: {
   if (!isPathInside(fs.realpathSync(input.root), realFile)) throw new Error('symlink escapes workspace')
   if (!isPathInside(input.evidenceDir, realFile)) throw new Error('非必要 evidence 必須位於 Host evidence store')
   const candidateKind = String(input.item.kind || 'evidence')
-  const attestation = readAndVerifyEvidenceAttestation(input.root, input.artifact, candidateKind, input.relativePath, realFile)
+  const attestation = readAndVerifyEvidenceAttestation(input.artifact, candidateKind, input.relativePath, realFile)
   if (input.item.sha256 && String(input.item.sha256).toLowerCase() !== attestation.sha256) throw new Error('提交的 sha256 與 attestation 不一致')
   if (input.item.evidenceId && String(input.item.evidenceId) !== attestation.evidenceId) throw new Error('提交的 evidenceId 與 attestation 不一致')
   verifySubDesignEvidenceContent(candidateKind, realFile)
@@ -3566,7 +3602,7 @@ function verifySubDesignEvidence(input: {
       if (!allowed) throw new Error('path 不在 artifact evidence 或 supporting files 範圍')
       const stat = fs.statSync(realFile)
       if (Number.isFinite(artifactUpdatedAt) && stat.mtimeMs + 2_000 < artifactUpdatedAt) throw new Error('檔案早於本次 artifact revision')
-      const attestation = readAndVerifyEvidenceAttestation(root, artifact, kind, relativePath, realFile)
+      const attestation = readAndVerifyEvidenceAttestation(artifact, kind, relativePath, realFile)
       if (item?.sha256 && String(item.sha256).toLowerCase() !== attestation.sha256) throw new Error('提交的 sha256 與 attestation 不一致')
       if (item?.evidenceId && String(item.evidenceId) !== attestation.evidenceId) throw new Error('提交的 evidenceId 與 attestation 不一致')
       verifySubDesignEvidenceContent(kind, realFile)
@@ -5041,7 +5077,7 @@ ipcMain.handle(
     _evt,
     input: {
       pluginId: string
-      clientId: string
+      clientId?: string
       clientSecret?: string
       tokenUrl: string
       tokenAuth?: 'body' | 'basic'
@@ -5051,13 +5087,16 @@ ipcMain.handle(
     if (!rec?.refreshToken) {
       return { ok: false as const, error: 'vault 中沒有 refresh_token' }
     }
+    const provider = oauthProviderForPlugin(input.pluginId)
+    const clientId = rec.clientId || String(input?.clientId || '').trim()
+    if (!clientId) return { ok: false as const, error: 'vault 中沒有 OAuth Client ID' }
     const r = await refreshOAuthToken({
       pluginId: input.pluginId,
       refreshToken: rec.refreshToken,
-      clientId: String(input?.clientId || ''),
-      clientSecret: input?.clientSecret,
-      tokenUrl: String(input?.tokenUrl || ''),
-      tokenAuth: input?.tokenAuth,
+      clientId,
+      clientSecret: rec.clientSecret || input?.clientSecret,
+      tokenUrl: provider?.tokenUrl || String(input?.tokenUrl || ''),
+      tokenAuth: provider?.tokenAuth || input?.tokenAuth,
     })
     if (!r.ok || !r.accessToken) {
       return { ok: false as const, error: r.error || 'refresh 失敗' }

@@ -170,9 +170,3 @@ export async function verifyModelCapabilities(
 
   return { profile, logs }
 }
-
-/** Badge label for UI. */
-export function profileBadge(p: ModelProfile | null): '已驗證' | '推測' | '未知' {
-  if (!p) return '未知'
-  return p.source === 'verified' ? '已驗證' : p.source === 'assumed' ? '推測' : '未知'
-}

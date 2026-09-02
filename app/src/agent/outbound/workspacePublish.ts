@@ -2,8 +2,7 @@
  * Workspace publish + evidence verification helpers.
  */
 
-import type { PolicyDraft, ActivePolicySlot, PolicyAdminStore } from './policyAdmin.ts'
-import { verifyLedgerFile, type HmacKeyProvider } from './evidenceLedger.ts'
+import type { ActivePolicySlot, PolicyAdminStore } from './policyAdmin.ts'
 
 export type PublishResult =
   | { ok: true; publishedVersion: number; changeId: string; etag: string }
@@ -37,27 +36,5 @@ export async function publishPolicyToWorkspace(opts: {
     publishedVersion: activated.slot.version,
     changeId: activated.slot.changeId,
     etag: res.etag,
-  }
-}
-
-export async function verifyEvidenceForAdmin(opts: {
-  ledgerFilePath: string
-  keyProvider: HmacKeyProvider
-}): Promise<{ ok: boolean; reason?: string }> {
-  return verifyLedgerFile(opts.ledgerFilePath, opts.keyProvider)
-}
-
-export function summarizeDraftForReview(draft: PolicyDraft): {
-  id: string
-  kind: string
-  connectionId?: string
-  fieldNames: string[]
-} {
-  const body = draft.body as unknown as Record<string, unknown>
-  return {
-    id: draft.id,
-    kind: draft.kind,
-    connectionId: draft.connectionId,
-    fieldNames: Object.keys(body).filter((k) => k !== 'detectors' && k !== 'extraDetectors'),
   }
 }

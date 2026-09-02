@@ -377,11 +377,6 @@ function logLocalCliResult(result: { cancelled?: boolean; ok: boolean; error?: s
 }
 
 /** Cancel active local CLI agent process (Electron) */
-export async function cancelLocalCliAgent(runId?: string): Promise<{ ok: boolean; killed: number }> {
-  if (!window.subagents?.cli?.cancel) return { ok: false, killed: 0 }
-  return window.subagents.cli.cancel(runId)
-}
-
 export function emptyAgentLike(partial: Partial<AgentState> & { objective: string }): AgentState {
   const isExternal =
     partial.executionKind === 'external' ||

@@ -159,10 +159,6 @@ const definitions: CliAdapterDefinition[] = [
 
 export const CLI_ADAPTERS: readonly CliAdapterDefinition[] = definitions
 
-export function getCliAdapter(id: string): CliAdapterDefinition | null {
-  return definitions.find((adapter) => adapter.id === id) || null
-}
-
 export const DISCOVERY_ONLY_AGENT_ADAPTERS = [
   { id: 'github-copilot', displayName: 'GitHub Copilot CLI', status: 'discovery-only' as const },
   { id: 'qwen-code', displayName: 'Qwen Code', status: 'discovery-only' as const },

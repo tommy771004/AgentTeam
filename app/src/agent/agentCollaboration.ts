@@ -1,7 +1,6 @@
 import type { AgentLifecycleState } from './agentLifecycle.ts'
 import { isReviewSnapshotRef, type ReviewSnapshotRef } from './reviewContract.ts'
 
-export const AGENT_COLLABORATION_CAPABILITY = 'agent-collaboration-v1' as const
 export const AGENT_MESSAGE_MAX_BYTES = 8 * 1024
 export const AGENT_RESULT_MAX_BYTES = 16 * 1024
 export const AGENT_MAILBOX_MAX_MESSAGES = 128

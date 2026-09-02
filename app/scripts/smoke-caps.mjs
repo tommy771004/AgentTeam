@@ -328,7 +328,6 @@ await test('Sub Agent switch defaults off and gates role/delegate paths', async 
   const runtime = fs.readFileSync(path.join(appRoot, 'src/agent/capabilities/runtime.ts'), 'utf8')
   const decision = fs.readFileSync(path.join(appRoot, 'src/agent/tools/approvalDecision.ts'), 'utf8')
   const delegate = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/delegate.ts'), 'utf8')
-  const background = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
   const queuePump = fs.readFileSync(path.join(appRoot, 'src/agent/hostAgentQueuePump.ts'), 'utf8')
   const settings = fs.readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf8')
   assert.match(types, /subAgentsEnabled: boolean/)
@@ -645,9 +644,8 @@ await test('Ticket 04: lifecycle ownership drift stays blocked at module seams',
   )
 })
 
-await test('Phase 3 item 6/7: background delegate links Archive once + hidden worker thread', async () => {
+await test('Phase 3 item 6/7: retired renderer background projection stays removed', async () => {
   const fs = await import('node:fs')
-  const bg = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
   const pump = fs.readFileSync(path.join(appRoot, 'src/agent/hostAgentQueuePump.ts'), 'utf8')
   const thread = fs.readFileSync(path.join(appRoot, 'src/store/threadStore.ts'), 'utf8')
   // The sidebar now groups by project; hidden-thread exclusion moved with the
@@ -655,8 +653,7 @@ await test('Phase 3 item 6/7: background delegate links Archive once + hidden wo
   const sidebar = fs.readFileSync(path.join(appRoot, 'src/lib/threadProjectGroups.ts'), 'utf8')
   const types = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunTypes.ts'), 'utf8')
   const coordinator = fs.readFileSync(path.join(appRoot, 'src/agent/taskRunCoordinator.ts'), 'utf8')
-  assert.match(bg, /archiveRunId/)
-  assert.match(bg, /never starts work/)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts')), false)
   assert.match(pump, /workerThread: !interactiveThreadId/, 'delegates remain hidden workers while interactive queue drains reuse their conversation')
   assert.match(pump, /reuseThreadId: interactiveThreadId/)
   assert.match(pump, /runTask\(\{/)
@@ -1143,7 +1140,13 @@ await test('P1-A vault: renderer never reads raw tokens; main resolves placehold
   const main = fs.readFileSync(path.join(appRoot, 'electron/main.ts'), 'utf8')
   assert.match(main, /secrets:list/)
   assert.match(main, /secrets:refresh/)
+  assert.match(main, /setVaultOAuthSecret\(pluginId, result\.accessToken/)
   assert.match(main, /credentialHttpRequest|createToolCredentialScope/) // main-only execution owners
+
+  const preload = fs.readFileSync(path.join(appRoot, 'electron/preload.ts'), 'utf8')
+  const pluginOAuthBlock = preload.slice(preload.indexOf('oauth:'), preload.indexOf('contentPublishing:'))
+  const pluginOAuthRunBlock = pluginOAuthBlock.slice(pluginOAuthBlock.indexOf('run:'), pluginOAuthBlock.indexOf('refresh:'))
+  assert.doesNotMatch(pluginOAuthRunBlock, /accessToken\??:\s*string|refreshToken\??:\s*string/i)
 
   const mcpBridge = fs.readFileSync(path.join(appRoot, 'electron/mcpBridge.ts'), 'utf8')
   assert.match(mcpBridge, /createToolCredentialScope/) // stdio env/args at spawn
@@ -2149,9 +2152,7 @@ await test('drift guard: delegate capability_mode stacks on role blocks; wait pr
   assert.doesNotMatch(delegate, /\brunTask\s*\(/)
   assert.match(hostDomain, /isRestrictiveAgentPolicy\(parentPolicy, childPolicy\)/)
   assert.match(hostDomain, /capabilities: profile\.capabilities \?\? profile\.activeTools/)
-  const jobs = fs.readFileSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts'), 'utf8')
-  assert.match(jobs, /export async function waitBackgroundJobs/)
-  assert.match(jobs, /wait_any/)
+  assert.equal(fs.existsSync(path.join(appRoot, 'src/agent/hermes/backgroundJobs.ts')), false)
 })
 
 await test('drift guard: metrics recorded at coordinator settle + guard decisions', async () => {

@@ -14,7 +14,7 @@ for (const relativePath of rendererIngressFiles) {
   assert.doesNotMatch(source, /runExternalObjective|AgentSessionRuntime|dispatchThreadTask\s*\(/, `${relativePath} bypasses the canonical ingress`)
 }
 
-for (const relativePath of ['src/agent/hermes/backgroundJobs.ts', 'src/agent/hermes/delegate.ts']) {
+for (const relativePath of ['src/agent/hermes/delegate.ts']) {
   const source = await readFile(resolve(root, relativePath), 'utf8')
   assert.doesNotMatch(source, /runTask\s*\(/, `${relativePath} must remain a fail-closed compatibility projection`)
   assert.doesNotMatch(source, /runExternalObjective|AgentSessionRuntime|dispatchThreadTask\s*\(/, `${relativePath} bypasses Host delegation ownership`)

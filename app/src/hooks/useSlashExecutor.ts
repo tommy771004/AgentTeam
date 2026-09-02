@@ -21,7 +21,6 @@ import { contextUsageReportLines, resolveKnownContextWindow } from '../agent/con
 async function runDynamicSlashCommand(
   cmd: SlashCommand,
   args: string,
-  log: (line: string) => void,
   runEmbedded: (goal: string, opts?: { skipUserBubble?: boolean }) => Promise<void>,
 ): Promise<boolean> {
   if (cmd.source === 'skill' && cmd.skillName) {
@@ -119,7 +118,7 @@ export function useSlashExecutor() {
     }
 
     // Dynamic skill shortcuts become Pi-native /skill:<name>.
-    if (await runDynamicSlashCommand(cmd, args, log, runEmbedded)) return
+    if (await runDynamicSlashCommand(cmd, args, runEmbedded)) return
 
     switch (name) {
       case 'help': {
@@ -509,15 +508,7 @@ export function useSlashExecutor() {
       case 'bg':
       case 'todo':
       case 'delegate': {
-        const { listBackgroundJobs } = await import('../agent/hermes/backgroundJobs')
-        const list = listBackgroundJobs()
-        if (!list.length) {
-          log('（無背景委派）')
-          return
-        }
-        list.slice(0, 15).forEach((j) => {
-          log(`· ${j.id} [${j.status}] ${j.goal.slice(0, 70)}`)
-        })
+        log('背景委派已由 Pi Host Agent Work Tree 管理。')
         return
       }
       case 'queue':

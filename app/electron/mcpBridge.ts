@@ -6,7 +6,6 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 import { spawnCommandSpec, terminateProcessTree } from './platformProcess'
 import { createToolCredentialScope } from './customToolCredentials'
 
@@ -442,6 +441,3 @@ function formatContent(result: unknown): string {
   return JSON.stringify(result, null, 2).slice(0, 8000)
 }
 
-export function newMcpId() {
-  return randomUUID().slice(0, 8)
-}

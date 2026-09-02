@@ -215,14 +215,3 @@ export function mergeCliProviders(
 }
 
 /** Find which provider owns a model id */
-export function providerForModel(
-  providers: CliProviderConfig[] | undefined,
-  modelId: string,
-): CliProviderConfig | undefined {
-  if (!modelId) return undefined
-  for (const p of providers || []) {
-    if (!p.enabled || !p.authorized) continue
-    if ((p.models || []).some((m) => m.id === modelId)) return p
-  }
-  return undefined
-}

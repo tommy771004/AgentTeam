@@ -17,10 +17,7 @@ import { useLearningStore } from './store/learningStore'
 import { useScheduleStore } from './store/scheduleStore'
 import { useAgentStore } from './store/agentStore'
 import { useProjectStore } from './store/projectStore'
-import {
-  startBackgroundJobSubscription,
-  useGatewayStore,
-} from './store/gatewayStore'
+import { useGatewayStore } from './store/gatewayStore'
 import type { ScheduledJob } from './agent/types'
 import { createScheduleTriggerSnapshot } from './agent/scheduler'
 import { scheduleSkillCurator } from './agent/hermes/curator'
@@ -960,19 +957,6 @@ function GatewayBootstrap() {
   const settings = useSettingsStore((s) => s.settings)
   const pushInbound = useGatewayStore((s) => s.pushInbound)
   const refreshStatus = useGatewayStore((s) => s.refreshStatus)
-
-  useEffect(() => {
-    let cancelled = false
-    let cleanup: (() => void) | undefined
-    void (async () => {
-      await waitForStartupRecovery()
-      if (!cancelled) cleanup = startBackgroundJobSubscription()
-    })()
-    return () => {
-      cancelled = true
-      cleanup?.()
-    }
-  }, [])
 
   // Auto-start telegram from settings
   useEffect(() => {

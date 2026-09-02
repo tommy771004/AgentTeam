@@ -424,18 +424,6 @@ export async function refreshOAuthToken(input: {
   }
 }
 
-/** Browser-safe refresh via fetch (same form as main process). */
-export async function refreshOAuthTokenHttp(input: {
-  pluginId: string
-  refreshToken: string
-  clientId: string
-  clientSecret?: string
-  tokenUrl: string
-  tokenAuth?: 'body' | 'basic'
-}): Promise<OAuthRunResult> {
-  return refreshOAuthToken(input)
-}
-
 export async function runPluginOAuth(
   input: OAuthRunInput,
   wc: WebContents | null | undefined,

@@ -121,10 +121,3 @@ export function mcpServerMissingSecret(
   if (secretForPlugin(secretOwner)) return null
   return secretOwner
 }
-
-export function enrichMcpServers(
-  servers: McpServerConfig[],
-  settings?: Partial<LlmSettings> | null,
-): McpServerConfig[] {
-  return servers.map((s) => enrichMcpServerWithSecrets(s, settings))
-}

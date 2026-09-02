@@ -20,17 +20,17 @@ export function SettingsRow({
 }) {
   return (
     <div
-      className={`flex gap-6 px-4 py-3.5 min-h-[56px] ${
-        align === 'center' ? 'items-center' : 'items-start'
+      className={`flex min-h-[56px] flex-col gap-3 px-4 py-3.5 md:flex-row md:gap-6 ${
+        align === 'center' ? 'md:items-center' : 'md:items-start'
       }`}
     >
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium text-on-surface leading-snug">{title}</div>
+        <div className="break-words text-[13px] font-medium leading-snug text-on-surface">{title}</div>
         {description ? (
-          <p className="text-[11px] text-outline mt-0.5 leading-relaxed max-w-xl">{description}</p>
+          <p className="mt-0.5 max-w-xl break-words text-[11px] leading-relaxed text-outline">{description}</p>
         ) : null}
       </div>
-      <div className="shrink-0 flex items-center justify-end max-w-[46%]">{control}</div>
+      <div className="flex w-full min-w-0 items-center justify-start md:w-auto md:max-w-[46%] md:shrink-0 md:justify-end">{control}</div>
     </div>
   )
 }

@@ -81,7 +81,7 @@ export function OpsPage() {
         <div>
           <p className="text-[10px] tracking-[0.2em] uppercase text-primary font-semibold">Ops Console</p>
           <h1 className="font-[family-name:var(--font-sora)] text-3xl font-semibold">執行營運總覽</h1>
-          <p className="text-sm text-on-surface-variant mt-1">排程、事件、佇列、容量與 recovery 的同一個投影面。</p>
+          <p className="mt-1 text-sm text-on-surface-variant">集中查看排程、事件、佇列與容量。</p>
         </div>
         <div className="flex gap-1" role="group" aria-label="Ops 檢視">
           {tabs.map((item) => (
@@ -100,10 +100,10 @@ export function OpsPage() {
 
       <section className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <Metric icon="play_circle" label="執行中" value={String(snapshot.capacity.active)} detail={`上限 ${snapshot.capacity.limit}`} />
-        <Metric icon="hourglass_top" label="剩餘容量" value={String(snapshot.capacity.remaining)} detail="per-app cap" />
-        <Metric icon="queue" label="待跑佇列" value={String(snapshot.queue.length)} detail="FIFO / capacity" />
+        <Metric icon="hourglass_top" label="剩餘容量" value={String(snapshot.capacity.remaining)} detail="應用上限" />
+        <Metric icon="queue" label="待跑佇列" value={String(snapshot.queue.length)} detail="依序執行" />
         <Metric icon="filter_alt" label="去重略過" value={String(snapshot.deduplicated.length)} detail="本機保留摘要" />
-        <Metric icon="restart_alt" label="Recovery" value={String(snapshot.recoveredRuns.length)} detail="未確定 run" />
+        <Metric icon="restart_alt" label="復原" value={String(snapshot.recoveredRuns.length)} detail="待確認工作" />
       </section>
 
       {showQueue && (
@@ -124,8 +124,8 @@ export function OpsPage() {
               </div>
             )}
           </Panel>
-          <Panel title="去重與 recovery" icon="history">
-            {snapshot.deduplicated.length === 0 && snapshot.recoveredRuns.length === 0 ? <Empty text="尚無去重略過或 crash recovery 記錄。" /> : (
+          <Panel title="去重與復原" icon="history">
+            {snapshot.deduplicated.length === 0 && snapshot.recoveredRuns.length === 0 ? <Empty text="尚無去重或復原記錄。" /> : (
               <div className="flex flex-col gap-2">
                 {snapshot.deduplicated.slice(-8).reverse().map((item, index) => (
                   <div key={`${item.at}-${index}`} className="text-xs border-l-2 border-warning pl-3">
@@ -194,11 +194,11 @@ export function OpsPage() {
 }
 
 function Metric({ icon, label, value, detail }: { icon: string; label: string; value: string; detail: string }) {
-  return <div className="glass-panel rounded-xl p-4"><div className="flex items-center gap-2 text-on-surface-variant"><Icon name={icon} size={16} /><span className="text-[10px] uppercase tracking-widest">{label}</span></div><p className="text-2xl font-semibold mt-2">{value}</p><p className="text-[11px] text-on-surface-variant">{detail}</p></div>
+  return <div className="glass-panel min-w-0 rounded-xl p-4"><div className="flex min-w-0 items-center gap-2 text-on-surface-variant"><Icon name={icon} size={16} className="shrink-0" /><span className="min-w-0 break-words text-[10px] uppercase tracking-widest">{label}</span></div><p className="mt-2 text-2xl font-semibold">{value}</p><p className="break-words text-[11px] text-on-surface-variant">{detail}</p></div>
 }
 
 function Panel({ title, icon, children }: { title: string; icon: string; children: ReactNode }) {
-  return <section className="glass-panel rounded-xl p-5"><h2 className="font-semibold flex items-center gap-2 mb-3"><Icon name={icon} size={18} className="text-primary" />{title}</h2>{children}</section>
+  return <section className="glass-panel min-w-0 rounded-xl p-5"><h2 className="mb-3 flex min-w-0 items-center gap-2 break-words font-semibold"><Icon name={icon} size={18} className="shrink-0 text-primary" />{title}</h2>{children}</section>
 }
 
 function Empty({ text }: { text: string }) {

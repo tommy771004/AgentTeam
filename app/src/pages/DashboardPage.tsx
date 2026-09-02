@@ -12,7 +12,6 @@ import {
 import { useAgentStore } from '../store/agentStore'
 import { useScheduleStore } from '../store/scheduleStore'
 import { useSettingsStore } from '../store/settingsStore'
-import { useGatewayStore } from '../store/gatewayStore'
 import { statusZh } from '../i18n/zh'
 import { getElectronBridgeStatus } from '../lib/electronBridge'
 import {
@@ -93,7 +92,6 @@ export function DashboardPage() {
   const enabledEvents = events.filter((e) => e.enabled).length
   const recent = archive.slice(0, 5)
   const meta = META[section] || META.overview
-  const bgJobs = useGatewayStore((s) => s.jobs)
   const [qLen, setQLen] = useState(() => queueLength())
   const [qDraining, setQDraining] = useState(() => isRunQueueDraining())
   const hitlStats = usePermissionAskStore((s) => s.stats)
@@ -167,16 +165,6 @@ export function DashboardPage() {
               }`}
             >
               {qLen}
-            </span>
-          }
-        />
-        <SettingsRow
-          title="背景委派"
-          description={settings.subAgentsEnabled === true ? 'delegate_task background' : 'Sub Agent 已關閉'}
-          control={
-            <span className="text-[13px] font-semibold tabular-nums">
-              {bgJobs.filter((j) => j.status === 'running' || j.status === 'queued').length}
-              <span className="text-outline font-normal"> / {bgJobs.length}</span>
             </span>
           }
         />

@@ -5,10 +5,7 @@ import { useLearningStore } from '../store/learningStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import type { PluginCatalogCategory, PluginCatalogItem } from '../agent/hermes/pluginCatalog'
-import {
-  OAUTH_REDIRECT_URI,
-  oauthProviderForPlugin,
-} from '../agent/hermes/pluginOAuth'
+import { oauthProviderForPlugin } from '../agent/hermes/pluginOAuth'
 import {
   installKindUserLabel,
   softTipUserFacing,
@@ -156,11 +153,8 @@ export function PluginMarketplace() {
         <h1 className="font-[family-name:var(--font-sora)] text-[28px] leading-tight font-semibold tracking-tight text-on-surface">
           擴充能力
         </h1>
-        <p className="text-[13px] text-on-surface-variant/85 mt-1.5">
-          連上 GitHub、Notion 等之後，在「新任務」直接下指令即可——不必理解底層協定。
-        </p>
-        <p className="text-[12px] text-outline mt-2 leading-relaxed">
-          多數情況：安裝 → 貼上授權金鑰 → 回新任務說話。進階工具包可選，非必須。
+        <p className="mt-1.5 break-words text-[13px] leading-relaxed text-on-surface-variant/85">
+          連接服務後，就能在新任務直接使用。
         </p>
       </header>
 
@@ -344,7 +338,7 @@ export function PluginMarketplace() {
                 <h2 className="border-b border-white/[0.07] pb-2.5 mb-0.5 text-[13px] font-semibold text-on-surface">
                   {CATEGORY_LABEL[value]}
                 </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(min(260px,100%),1fr))] gap-x-8">
                   {visible.map((item) => (
                     <MarketplaceRow
                       key={item.id}
@@ -368,11 +362,10 @@ export function PluginMarketplace() {
                       onRemove={() => void removePlugin(item.id)}
                       onAuthorize={(token) => void authorizePlugin(item.id, token)}
                       onClearAuth={() => void clearPluginAuth(item.id)}
-                      onRunOAuth={(client) => runPluginOAuth(item.id, client)}
-                      savedOAuthClient={(() => {
+                      onRunOAuth={() => {
                         const key = oauthProviderForPlugin(item.id)?.clientKey
-                        return key ? pluginOAuthClients?.[key] : undefined
-                      })()}
+                        return runPluginOAuth(item.id, key ? pluginOAuthClients?.[key] : undefined)
+                      }}
                     />
                   ))}
                 </div>
@@ -495,9 +488,9 @@ function installBlockReason(
   canUseProjectRoot: boolean,
 ): string | null {
   if (item.installKind === 'npm-mcp') {
-    if (!hasPluginInstaller) return '此進階工具包需要桌面版 App（Electron）'
+    if (!hasPluginInstaller) return '需使用桌面版安裝'
     if (item.npm?.requiresProjectRoot && !canUseProjectRoot) {
-      return '請先在上方／任務頁開啟本機專案目錄'
+      return '請先選擇本機專案'
     }
   }
   return null
@@ -537,7 +530,6 @@ function MarketplaceRow({
   onAuthorize,
   onClearAuth,
   onRunOAuth,
-  savedOAuthClient,
 }: {
   item: PluginCatalogItem
   installed?: { id: string; enabled: boolean; connectorAuth?: { hasCredential?: boolean; accountHint?: string } }
@@ -554,13 +546,10 @@ function MarketplaceRow({
   onRemove: () => void
   onAuthorize: (token: string) => void
   onClearAuth: () => void
-  onRunOAuth: (client: { clientId: string; clientSecret?: string }) => Promise<{ ok: boolean; error?: string }>
-  savedOAuthClient?: { clientId: string; clientSecret?: string }
+  onRunOAuth: () => Promise<{ ok: boolean; error?: string }>
 }) {
   const [tokenDraft, setTokenDraft] = useState('')
   const [savingAuth, setSavingAuth] = useState(false)
-  const [clientId, setClientId] = useState(savedOAuthClient?.clientId || '')
-  const [clientSecret, setClientSecret] = useState(savedOAuthClient?.clientSecret || '')
   const [oauthBusy, setOauthBusy] = useState(false)
   const [oauthStatus, setOauthStatus] = useState<{
     phase?: string
@@ -577,11 +566,6 @@ function MarketplaceRow({
   const auth = item.auth
   const oauthProvider = oauthProviderForPlugin(item.id)
   const hasElectronOAuth = Boolean(window.subagents?.oauth?.run)
-
-  useEffect(() => {
-    if (savedOAuthClient?.clientId) setClientId(savedOAuthClient.clientId)
-    if (savedOAuthClient?.clientSecret) setClientSecret(savedOAuthClient.clientSecret)
-  }, [savedOAuthClient?.clientId, savedOAuthClient?.clientSecret])
 
   useEffect(() => {
     if (!managed || !oauthProvider) return
@@ -613,10 +597,7 @@ function MarketplaceRow({
     setOauthBusy(true)
     setOauthStatus({ phase: 'starting', message: '啟動 OAuth…' })
     try {
-      const result = await onRunOAuth({
-        clientId,
-        clientSecret: clientSecret || undefined,
-      })
+      const result = await onRunOAuth()
       if (!result.ok) {
         setOauthStatus({ phase: 'error', message: result.error })
       } else {
@@ -628,8 +609,8 @@ function MarketplaceRow({
   }
 
   return (
-    <article className="border-b border-white/[0.06] py-3.5 transition-colors hover:bg-white/[0.02] -mx-1 px-1">
-      <div className="flex items-center gap-3">
+    <article className="min-w-0 border-b border-white/[0.06] px-1 py-3.5 transition-colors hover:bg-white/[0.02]">
+      <div className="flex min-w-0 items-center gap-3">
         <PluginBrandTile
           pluginId={item.id}
           name={item.name}
@@ -658,7 +639,7 @@ function MarketplaceRow({
                   </span>
                 )}
               </div>
-              <p className="mt-0.5 text-[12px] leading-snug text-outline line-clamp-1">
+              <p className="mt-0.5 line-clamp-1 break-words text-[12px] leading-snug text-outline">
                 {item.description}
               </p>
             </div>
@@ -684,14 +665,14 @@ function MarketplaceRow({
             )}
           </div>
           {!installed && blockReason && (
-            <p className="mt-1 text-[11px] text-outline/80">{blockReason}</p>
+            <p className="mt-1 break-words text-[11px] text-outline/80">{blockReason}</p>
           )}
           {!blockReason && softTip && (
-            <p className="mt-1 text-[11px] text-secondary/90">{softTipUserFacing(softTip)}</p>
+            <p className="mt-1 break-words text-[11px] text-secondary/90">{softTipUserFacing(softTip)}</p>
           )}
           {!installed && item.installKind === 'connector' && (
-            <p className="mt-1 text-[11px] text-outline/80">
-              授權後可直接在「新任務」下指令使用，不必再裝其他東西。
+            <p className="mt-1 break-words text-[11px] text-outline/80">
+              授權後即可在新任務使用。
             </p>
           )}
           <p className="mt-0.5 text-[10px] text-outline/50">{installKindUserLabel(item.installKind)}</p>
@@ -735,18 +716,13 @@ function MarketplaceRow({
                 <div>
                   <div className="text-[12px] font-semibold text-on-surface">
                     {oauthProvider
-                      ? oauthProvider.flow === 'device'
-                        ? 'OAuth 裝置碼登入'
-                        : 'OAuth 授權（本機回呼）'
+                      ? `連接 ${item.name}`
                       : auth?.label || '連接器授權'}
                   </div>
                   <p className="text-[11px] text-outline mt-0.5 leading-relaxed">
-                    {item.setupHint ||
-                      (oauthProvider
-                        ? oauthProvider.flow === 'device'
-                          ? '使用 OAuth App Client ID；瀏覽器輸入裝置碼完成授權。'
-                          : `在供應商後台註冊 Redirect URI：${OAUTH_REDIRECT_URI}`
-                        : '貼上供應商核發的 token；僅存於本機。')}
+                    {oauthProvider
+                      ? '將開啟供應商授權頁；完成後自動安全儲存。'
+                      : item.setupHint || '貼上供應商核發的 token；僅存於本機。'}
                   </p>
                 </div>
                 {(oauthProvider?.docsUrl || auth?.docsUrl) && (
@@ -760,96 +736,90 @@ function MarketplaceRow({
                 )}
               </div>
 
-              {!authorized && (
+              {!authorized && oauthProvider && (
                 <div className="space-y-2">
-                  <div className="text-[12px] font-semibold text-on-surface">① 推薦：貼上存取金鑰</div>
-                  <p className="text-[11px] text-outline leading-relaxed">
-                    完成後即可在「新任務」直接下指令，不必再設定其他東西。
-                  </p>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      type="password"
-                      autoComplete="off"
-                      value={tokenDraft}
-                      onChange={(e) => setTokenDraft(e.target.value)}
-                      placeholder={auth?.placeholder || '貼上 access token / PAT / API key'}
-                      className="flex-1 min-w-0 rounded-lg border border-white/10 bg-surface px-3 py-2 text-[12px] text-on-surface outline-none focus:border-primary/40 font-[family-name:var(--font-mono)]"
-                    />
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      disabled={!tokenDraft.trim() || savingAuth}
-                      onClick={() => void saveAuth()}
+                      disabled={oauthBusy || !hasElectronOAuth}
+                      onClick={() => void startOAuth()}
                       className="rounded-lg bg-primary-container px-3 py-2 text-[12px] font-semibold text-on-primary-container disabled:opacity-40"
                     >
-                      {savingAuth ? '儲存中…' : '儲存並開始用'}
+                      {oauthBusy ? '等待授權…' : `連接 ${item.name}`}
                     </button>
+                    {oauthBusy && (
+                      <button
+                        type="button"
+                        onClick={() => void window.subagents?.oauth?.cancel?.()}
+                        className="text-[12px] font-semibold text-outline"
+                      >
+                        取消
+                      </button>
+                    )}
                   </div>
+                  {!hasElectronOAuth && (
+                    <p className="text-[11px] text-secondary">OAuth 需使用桌面版。</p>
+                  )}
+                  {oauthStatus.message && (
+                    <div className="break-words text-[11px] text-on-surface-variant">
+                      {oauthStatus.message}
+                      {oauthStatus.userCode && (
+                        <div className="mt-1 font-[family-name:var(--font-mono)] tracking-widest">
+                          {oauthStatus.userCode}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
               {!authorized && oauthProvider && (
                 <details className="rounded-lg border border-white/[0.06] bg-surface/40 px-3 py-2">
                   <summary className="text-[11px] font-semibold text-outline cursor-pointer select-none">
-                    ② 進階：瀏覽器 OAuth 登入（需 Client ID）
+                    其他方式：使用存取金鑰
                   </summary>
                   <div className="mt-2 space-y-2">
-                    <input
-                      type="text"
-                      autoComplete="off"
-                      value={clientId}
-                      onChange={(e) => setClientId(e.target.value)}
-                      placeholder="OAuth Client ID"
-                      className="w-full rounded-lg border border-white/10 bg-surface px-3 py-2 text-[12px] text-on-surface outline-none focus:border-primary/40 font-[family-name:var(--font-mono)]"
-                    />
-                    {(oauthProvider.flow === 'code' || oauthProvider.tokenAuth === 'basic') && (
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <input
                         type="password"
                         autoComplete="off"
-                        value={clientSecret}
-                        onChange={(e) => setClientSecret(e.target.value)}
-                        placeholder="Client Secret（若需要）"
-                        className="w-full rounded-lg border border-white/10 bg-surface px-3 py-2 text-[12px] text-on-surface outline-none focus:border-primary/40 font-[family-name:var(--font-mono)]"
+                        value={tokenDraft}
+                        onChange={(e) => setTokenDraft(e.target.value)}
+                        placeholder={auth?.placeholder || '貼上 access token / PAT / API key'}
+                        className="min-w-0 flex-1 rounded-lg border border-white/10 bg-surface px-3 py-2 text-[12px] text-on-surface outline-none focus:border-primary/40 font-[family-name:var(--font-mono)]"
                       />
-                    )}
-                    <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        disabled={!clientId.trim() || oauthBusy || !hasElectronOAuth}
-                        onClick={() => void startOAuth()}
-                        className="rounded-lg bg-white/[0.08] border border-white/10 px-3 py-2 text-[12px] font-semibold text-on-surface disabled:opacity-40"
+                        disabled={!tokenDraft.trim() || savingAuth}
+                        onClick={() => void saveAuth()}
+                        className="rounded-lg border border-white/10 bg-white/[0.08] px-3 py-2 text-[12px] font-semibold text-on-surface disabled:opacity-40"
                       >
-                        {oauthBusy ? '授權中…' : oauthProvider.flow === 'device' ? '裝置碼登入' : 'OAuth 登入'}
+                        {savingAuth ? '儲存中…' : '儲存'}
                       </button>
-                      {oauthBusy && (
-                        <button
-                          type="button"
-                          onClick={() => void window.subagents?.oauth?.cancel?.()}
-                          className="text-[12px] font-semibold text-outline"
-                        >
-                          取消
-                        </button>
-                      )}
                     </div>
-                    {!hasElectronOAuth && (
-                      <p className="text-[11px] text-secondary">OAuth 需桌面版；瀏覽器請用上方貼金鑰。</p>
-                    )}
-                    {oauthStatus.message && (
-                      <div className="text-[11px] text-on-surface-variant">
-                        {oauthStatus.message}
-                        {oauthStatus.userCode && (
-                          <div className="font-[family-name:var(--font-mono)] tracking-widest mt-1">
-                            {oauthStatus.userCode}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {oauthProvider.flow === 'code' && (
-                      <p className="text-[10px] text-outline">
-                        Redirect：<code className="text-on-surface-variant">{OAUTH_REDIRECT_URI}</code>
-                      </p>
-                    )}
                   </div>
                 </details>
+              )}
+
+              {!authorized && !oauthProvider && (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={tokenDraft}
+                    onChange={(e) => setTokenDraft(e.target.value)}
+                    placeholder={auth?.placeholder || '貼上 access token / PAT / API key'}
+                    className="min-w-0 flex-1 rounded-lg border border-white/10 bg-surface px-3 py-2 text-[12px] text-on-surface outline-none focus:border-primary/40 font-[family-name:var(--font-mono)]"
+                  />
+                  <button
+                    type="button"
+                    disabled={!tokenDraft.trim() || savingAuth}
+                    onClick={() => void saveAuth()}
+                    className="rounded-lg bg-primary-container px-3 py-2 text-[12px] font-semibold text-on-primary-container disabled:opacity-40"
+                  >
+                    {savingAuth ? '儲存中…' : '儲存並開始用'}
+                  </button>
+                </div>
               )}
 
               {authorized && (

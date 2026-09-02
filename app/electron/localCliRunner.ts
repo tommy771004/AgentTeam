@@ -212,11 +212,6 @@ async function admitCliCapabilities(input: LocalCliRunInput, binary: string, emi
   return { snapshot, refusal }
 }
 
-/** Return only live Host sessions for renderer projection rebuild after reload. */
-export function listActiveExternalCliSessions() {
-  return externalCliSupervisor.activeSnapshots()
-}
-
 export function listExternalCliSessions() {
   return externalCliSupervisor.snapshots()
 }

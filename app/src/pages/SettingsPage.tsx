@@ -73,6 +73,7 @@ import {
   OAUTH_REDIRECT_URI,
   PLUGIN_OAUTH_PROVIDERS,
 } from '../agent/hermes/pluginOAuth'
+import { catalogItem } from '../agent/hermes/pluginCatalog'
 import { listPluginSecretMeta, secretNeedsRefresh } from '../agent/hermes/pluginSecrets'
 import { customToolsForSettings, listPendingToolPackages } from '../agent/tools/customTools'
 import { pluginRegistry } from '../agent/hermes/plugins'
@@ -173,7 +174,7 @@ const SECTION_META: Record<string, { title: string; subtitle: string }> = {
   },
   oauth: {
     title: '外掛 OAuth',
-    subtitle: 'Connector Client ID / Secret；裝置碼與本機回呼共用。Redirect：127.0.0.1:19789。',
+    subtitle: '直接前往供應商授權；完成後自動安全儲存。',
   },
   bundle: {
     title: '匯出匯入',
@@ -444,7 +445,6 @@ export function SettingsPage() {
   const uninstallFeaturePackAction = useFeaturePackStore((s) => s.uninstall)
   const rollbackFeaturePackAction = useFeaturePackStore((s) => s.rollback)
   const gatewayInbound = useGatewayStore((s) => s.inbound)
-  const bgJobs = useGatewayStore((s) => s.jobs)
   const projectRoot = useProjectStore((s) => s.root)
   const memory = useLearningStore((s) => s.memory)
   const legacyInstructionDocs = getLegacyInstructionDocs()
@@ -473,6 +473,13 @@ export function SettingsPage() {
   const [customToolsDraft, setCustomToolsDraft] = useState('')
   const [customToolsError, setCustomToolsError] = useState<string | null>(null)
   const [oauthRefreshMsg, setOauthRefreshMsg] = useState<string | null>(null)
+  const [oauthConnectingId, setOauthConnectingId] = useState<string | null>(null)
+  const [oauthConnectionStatus, setOauthConnectionStatus] = useState<{
+    pluginId?: string
+    message?: string
+    userCode?: string
+    error?: boolean
+  }>({})
   const [outboundStatus, setOutboundStatus] = useState<{
     deployGuard: string
     policySource: string
@@ -498,10 +505,25 @@ export function SettingsPage() {
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   const [updateProgress, setUpdateProgress] = useState(0)
   const refreshPluginTokens = useLearningStore((s) => s.refreshPluginTokens)
+  const installPlugin = useLearningStore((s) => s.installPlugin)
+  const runPluginOAuth = useLearningStore((s) => s.runPluginOAuth)
+  const clearPluginAuth = useLearningStore((s) => s.clearPluginAuth)
   // Recompute secret key list when plugins change
   const pluginsTick = useLearningStore((s) => s.plugins)
   const [customToolVaultKeys, setCustomToolVaultKeys] = useState<string[]>([])
   const approveToolPackage = useLearningStore((s) => s.approveToolPackage)
+
+  useEffect(() => {
+    const unsubscribe = window.subagents?.oauth?.onStatus?.((payload) => {
+      setOauthConnectionStatus({
+        pluginId: payload.pluginId,
+        message: payload.message || payload.error,
+        userCode: payload.userCode,
+        error: payload.phase === 'error',
+      })
+    })
+    return () => unsubscribe?.()
+  }, [])
 
   /** Instant apply — no save button */
   const set = (patch: Partial<typeof settings>) => {
@@ -867,6 +889,35 @@ export function SettingsPage() {
     setUpdateState(result.state as typeof updateState)
     setUpdateMsg(result.ok ? '已回復 migration snapshot；目前版本仍可啟動。' : '找不到可回復的 migration backup。')
     if (result.ok) window.setTimeout(() => window.location.reload(), 250)
+  }
+
+  const connectOAuthPlugin = async (pluginId: string) => {
+    const provider = PLUGIN_OAUTH_PROVIDERS[pluginId]
+    if (!provider || oauthConnectingId) return
+    setOauthConnectingId(pluginId)
+    setOauthConnectionStatus({ pluginId, message: '正在開啟授權頁…' })
+    try {
+      if (!pluginRegistry.list().some((plugin) => plugin.id === pluginId)) {
+        await installPlugin(pluginId, projectRoot || undefined)
+      }
+      const result = await runPluginOAuth(
+        pluginId,
+        settings.pluginOAuthClients?.[provider.clientKey],
+      )
+      setOauthConnectionStatus({
+        pluginId,
+        message: result.ok ? '已連接並安全儲存' : result.error || 'OAuth 授權失敗',
+        error: !result.ok,
+      })
+    } catch (error) {
+      setOauthConnectionStatus({
+        pluginId,
+        message: error instanceof Error ? error.message : 'OAuth 授權失敗',
+        error: true,
+      })
+    } finally {
+      setOauthConnectingId(null)
+    }
   }
 
   const meta = SECTION_META[section] || { title: '設定', subtitle: '' }
@@ -3186,23 +3237,6 @@ export function SettingsPage() {
                 )}
               </div>
             </SettingsGroup>
-            <SettingsGroup title="背景委派任務">
-              <div className="px-4 py-3">
-                {bgJobs.length === 0 ? (
-                  <p className="text-[12px] text-outline">
-                    尚無背景任務 — 使用 delegate_task(background=true)
-                  </p>
-                ) : (
-                  <ul className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar text-[11px] font-[family-name:var(--font-mono)]">
-                    {bgJobs.slice(0, 12).map((j) => (
-                      <li key={j.id} className="text-on-surface-variant">
-                        {j.id} [{j.status}] {j.goal.slice(0, 60)}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </SettingsGroup>
             <SettingsGroup title="Agent task lifecycle">
               <AgentTreeDiagnostic />
             </SettingsGroup>
@@ -3651,75 +3685,129 @@ export function SettingsPage() {
               )}
             </SettingsGroup>
 
-            <SettingsGroup title="OAuth Client 憑證">
-              {Array.from(
-                new Map(
-                  Object.values(PLUGIN_OAUTH_PROVIDERS).map((p) => [
-                    p.clientKey,
-                    {
-                      key: p.clientKey,
-                      flow: p.flow,
-                      docsUrl: p.docsUrl,
-                      needsSecret: p.tokenAuth === 'basic' || p.flow === 'code',
-                    },
-                  ]),
-                ).values(),
-              ).map((row) => {
-                const live = settings.pluginOAuthClients?.[row.key] || { clientId: '', clientSecret: '' }
+            <SettingsGroup title="連接外掛">
+              {Object.entries(PLUGIN_OAUTH_PROVIDERS).map(([pluginId, provider]) => {
+                const item = catalogItem(pluginId)
+                const installed = pluginRegistry.list().find((plugin) => plugin.id === pluginId)
+                const stored = listPluginSecretMeta().find((meta) => meta.id === pluginId)
+                const connected = Boolean(installed?.connectorAuth?.hasCredential || stored)
+                const status = oauthConnectionStatus.pluginId === pluginId
+                  ? oauthConnectionStatus
+                  : undefined
                 return (
-                  <div key={row.key} className="space-y-2 border-b border-line px-4 py-3 last:border-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <div className="text-[13px] font-semibold text-on-surface capitalize">{row.key}</div>
-                        <div className="text-[11px] text-outline">
-                          {row.flow === 'device' ? '裝置碼流程' : 'Code + 本機回呼'}
-                          {row.needsSecret ? ' · 建議填 Client Secret' : ''}
+                  <div key={pluginId} className="border-b border-line px-4 py-3 last:border-0">
+                    <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+                      <div className="min-w-0 flex-1">
+                        <div className="break-words text-[13px] font-semibold text-on-surface">
+                          {item?.name || provider.clientKey}
+                        </div>
+                        <div className="mt-0.5 break-words text-[11px] leading-relaxed text-outline">
+                          {connected ? '已連接；憑證存於本機安全儲存。' : '開啟授權頁，完成後自動儲存。'}
                         </div>
                       </div>
-                      {row.docsUrl && (
-                        <a
-                          href={row.docsUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] font-semibold text-primary hover:underline"
-                        >
-                          開發者後台
-                        </a>
-                      )}
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        {connected ? (
+                          <button
+                            type="button"
+                            className={settingsBtnCls}
+                            onClick={() => void clearPluginAuth(pluginId)}
+                          >
+                            中斷連接
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className={settingsBtnPrimaryCls}
+                            disabled={Boolean(oauthConnectingId) || !window.subagents?.oauth?.run}
+                            onClick={() => void connectOAuthPlugin(pluginId)}
+                          >
+                            {oauthConnectingId === pluginId ? '等待授權…' : '連接'}
+                          </button>
+                        )}
+                        {provider.docsUrl && (
+                          <a
+                            href={provider.docsUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[11px] font-semibold text-primary hover:underline"
+                          >
+                            說明
+                          </a>
+                        )}
+                      </div>
                     </div>
-                    <input
-                      type="text"
-                      className={settingsInputCls + ' font-[family-name:var(--font-mono)] text-[12px]'}
-                      placeholder="Client ID"
-                      value={live.clientId || ''}
-                      autoComplete="off"
-                      onChange={(e) =>
-                        set({
-                          pluginOAuthClients: {
-                            ...(settings.pluginOAuthClients || {}),
-                            [row.key]: { ...live, clientId: e.target.value },
-                          },
-                        })
-                      }
-                    />
-                    <input
-                      type="password"
-                      className={settingsInputCls + ' font-[family-name:var(--font-mono)] text-[12px]'}
-                      placeholder="Client Secret（選填／部分供應商必要）"
-                      value={live.clientSecret || ''}
-                      autoComplete="off"
-                      onChange={(e) =>
-                        set({
-                          pluginOAuthClients: {
-                            ...(settings.pluginOAuthClients || {}),
-                            [row.key]: { ...live, clientSecret: e.target.value },
-                          },
-                        })
-                      }
-                    />
+                    {status?.message && (
+                      <div className={`mt-2 break-words text-[11px] ${status.error ? 'text-error' : 'text-on-surface-variant'}`}>
+                        {status.message}
+                        {status.userCode && (
+                          <span className="ml-2 font-[family-name:var(--font-mono)] tracking-widest text-on-surface">
+                            {status.userCode}
+                          </span>
+                        )}
+                        {oauthConnectingId === pluginId && (
+                          <button
+                            type="button"
+                            className="ml-2 font-semibold text-outline hover:text-on-surface"
+                            onClick={() => void window.subagents?.oauth?.cancel?.()}
+                          >
+                            取消
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })}
+              {!window.subagents?.oauth?.run && (
+                <p className="px-4 py-3 text-[11px] text-secondary">OAuth 需使用桌面版。</p>
+              )}
+            </SettingsGroup>
+
+            <SettingsGroup title="OAuth 應用程式設定">
+              <details className="px-4 py-3">
+                <summary className="cursor-pointer select-none text-[12px] font-semibold text-on-surface-variant">
+                  開發者設定
+                </summary>
+                <p className="mt-2 break-words text-[11px] leading-relaxed text-outline">
+                  僅自行註冊 OAuth App 時需要。正式版本可由主程序環境設定提供。
+                </p>
+                <div className="mt-3 space-y-4">
+                  {Array.from(new Set(Object.values(PLUGIN_OAUTH_PROVIDERS).map((provider) => provider.clientKey))).map((clientKey) => {
+                    const live = settings.pluginOAuthClients?.[clientKey] || { clientId: '', clientSecret: '' }
+                    return (
+                      <div key={clientKey} className="space-y-2">
+                        <div className="text-[12px] font-semibold capitalize text-on-surface">{clientKey}</div>
+                        <input
+                          type="text"
+                          className={settingsInputCls + ' font-[family-name:var(--font-mono)] text-[12px]'}
+                          placeholder="Client ID"
+                          value={live.clientId || ''}
+                          autoComplete="off"
+                          onChange={(event) => set({
+                            pluginOAuthClients: {
+                              ...(settings.pluginOAuthClients || {}),
+                              [clientKey]: { ...live, clientId: event.target.value },
+                            },
+                          })}
+                        />
+                        <input
+                          type="password"
+                          className={settingsInputCls + ' font-[family-name:var(--font-mono)] text-[12px]'}
+                          placeholder="Client Secret（若供應商要求）"
+                          value={live.clientSecret || ''}
+                          autoComplete="off"
+                          onChange={(event) => set({
+                            pluginOAuthClients: {
+                              ...(settings.pluginOAuthClients || {}),
+                              [clientKey]: { ...live, clientSecret: event.target.value },
+                            },
+                          })}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              </details>
             </SettingsGroup>
 
             <SettingsGroup title="本機 token 狀態">

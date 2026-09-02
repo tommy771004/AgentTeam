@@ -309,7 +309,6 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     },
     manifest: connectorManifest(
-      'spreadsheets-connector',
       'Spreadsheets',
       sheetsConnectorTools(),
       'Sheets 已授權：用 gsheets_get_values 讀取範圍；寫入前須使用者確認。',
@@ -380,7 +379,6 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
       scopes: ['repo', 'read:org'],
     },
     manifest: connectorManifest(
-      'github-connector',
       'GitHub',
       githubConnectorTools(),
       'GitHub 已授權：優先使用 github_whoami / github_list_issues / github_list_prs；寫入操作仍須使用者明確要求與核准。',
@@ -464,7 +462,6 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
       authorizeUrl: 'https://www.notion.so/my-integrations',
     },
     manifest: connectorManifest(
-      'notion-connector',
       'Notion',
       notionConnectorTools(),
       'Notion 已授權：用 notion_search / notion_get_page 讀取整合可存取的頁面；不可捏造未取回的內容。',
@@ -489,7 +486,6 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
       scopes: ['https://www.googleapis.com/auth/calendar'],
     },
     manifest: connectorManifest(
-      'calendar-connector',
       'Google Calendar',
       googleCalendarTools(),
       'Calendar 已授權：用 gcal_list_calendars / gcal_list_events；建立事件前須使用者確認。',
@@ -514,7 +510,6 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
       authorizeUrl: 'https://linear.app/settings/api',
     },
     manifest: connectorManifest(
-      'linear-connector',
       'Linear',
       linearConnectorTools(),
       'Linear 已授權：用 linear_viewer / linear_list_issues 查詢；變更 issue 前須確認。',
@@ -539,7 +534,6 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
       authorizeUrl: 'https://app.clickup.com/settings/apps',
     },
     manifest: connectorManifest(
-      'clickup-connector',
       'ClickUp',
       clickupConnectorTools(),
       'ClickUp 已授權：用 clickup_user / clickup_list_teams / clickup_list_tasks。',
@@ -563,7 +557,6 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
       authorizeUrl: 'https://www.dropbox.com/developers/apps',
     },
     manifest: connectorManifest(
-      'dropbox-connector',
       'Dropbox',
       dropboxConnectorTools(),
       'Dropbox 已授權：用 dropbox_list_folder 列目錄；寫入/刪除須使用者明確要求。',
@@ -590,7 +583,6 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
       authorizeUrl: 'https://www.home-assistant.io/docs/authentication/#your-account-profile',
     },
     manifest: connectorManifest(
-      'homeassistant-connector',
       'Home Assistant',
       homeAssistantConnectorTools(),
       'Home Assistant 已授權：先 ha_api_status 驗證；查狀態用 ha_get_state / ha_list_states；控制用 ha_call_service（domain/service/entity_id）。門鎖、車庫、警報等危險操作必須先向使用者確認。base_url 預設 http://homeassistant.local:8123。',
@@ -614,7 +606,6 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
       authorizeUrl: 'https://app.asana.com/0/developer-console',
     },
     manifest: connectorManifest(
-      'asana-connector',
       'Asana',
       asanaConnectorTools(),
       'Asana 已授權：用 asana_me / asana_workspaces / asana_tasks。',
@@ -638,7 +629,6 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
       authorizeUrl: 'https://www.canva.com/developers/',
     },
     manifest: connectorManifest(
-      'canva-connector',
       'Canva',
       canvaConnectorTools(),
       'Canva 已授權：用 canva_user 驗證 token；其他操作依 Connect API 範圍。',
@@ -663,7 +653,6 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
       authorizeUrl: 'https://www.figma.com/developers/api#access-tokens',
     },
     manifest: connectorManifest(
-      'figma-connector',
       'Figma',
       figmaConnectorTools(),
       'Figma 已授權：用 figma_me / figma_get_file 讀取設計檔；勿外洩檔案內容。',
@@ -756,4 +745,3 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
 export function catalogItem(id: string) {
   return PLUGIN_CATALOG.find((item) => item.id === id)
 }
-

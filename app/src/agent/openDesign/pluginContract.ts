@@ -663,11 +663,3 @@ export function contractResultToDisplay(result: PluginContractResult): { executa
   }
   return { executable: false, label: '格式錯誤', reason: result.reason }
 }
-
-export function isLegacyContract(result: PluginContractResult): boolean {
-  return result.ok && result.kind === 'legacy'
-}
-
-export function isV1Compatible(result: PluginContractResult): boolean {
-  return result.ok && result.kind === 'v1'
-}

@@ -58,7 +58,7 @@ function normalizeRelative(value: string): string {
   return value.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '') || '.'
 }
 
-function walkFiles(root: string, baseDir: string, maxFiles = 4_000): string[] {
+function walkFiles(baseDir: string, maxFiles = 4_000): string[] {
   const result: string[] = []
   const visit = (dir: string) => {
     if (result.length >= maxFiles) return
@@ -113,7 +113,7 @@ export function grepWorkspaceFiles(
   const glob = opts.glob?.trim() ? globToRegExp(opts.glob) : null
   const base = opts.baseDir || root
   let truncated = false
-  for (const file of walkFiles(root, base, opts.maxFiles || 4_000)) {
+  for (const file of walkFiles(base, opts.maxFiles || 4_000)) {
     const relative = normalizeRelative(path.relative(root, file))
     if (glob && !glob.test(relative)) continue
     let stat: fs.Stats
@@ -147,7 +147,7 @@ export function globWorkspaceFiles(
   if (!pattern.trim()) return { ok: false, root, matches, files, truncated: false, error: 'pattern is required' }
   const matcher = globToRegExp(pattern)
   let truncated = false
-  for (const file of walkFiles(root, opts.baseDir || root, opts.maxFiles || 4_000)) {
+  for (const file of walkFiles(opts.baseDir || root, opts.maxFiles || 4_000)) {
     const relative = normalizeRelative(path.relative(root, file))
     if (!matcher.test(relative)) continue
     if (files.length >= maxResults) { truncated = true; break }

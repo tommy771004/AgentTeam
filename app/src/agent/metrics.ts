@@ -144,10 +144,6 @@ export function finalizeRunMetric(
   return record
 }
 
-export function listRunMetrics(): RunMetricRecord[] {
-  return readRecords()
-}
-
 /** JSONL 匯出(每行一筆,可餵外部收集器)。 */
 export function exportRunMetricsJsonl(): string {
   return readRecords()

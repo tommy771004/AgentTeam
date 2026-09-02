@@ -55,8 +55,3 @@ export async function inspectCliProviderCapabilities(
   cache.set(normalizedProvider, { key, snapshot })
   return snapshot
 }
-
-export function invalidateCliProviderCapabilities(provider?: string): void {
-  if (provider) cache.delete(providerKey(provider))
-  else cache.clear()
-}

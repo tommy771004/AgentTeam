@@ -998,7 +998,7 @@ const api = {
       ipcRenderer.invoke('secrets:migrate', map) as Promise<{ ok: boolean; imported: number; error?: string }>,
     refresh: (input: {
       pluginId: string
-      clientId: string
+      clientId?: string
       clientSecret?: string
       tokenUrl: string
       tokenAuth?: 'body' | 'basic'
@@ -1008,14 +1008,20 @@ const api = {
       >,
   },
   oauth: {
-    run: (input: { pluginId: string; clientId: string; clientSecret?: string }) =>
+    run: (input: { pluginId: string; clientId?: string; clientSecret?: string }) =>
       ipcRenderer.invoke('oauth:run', input) as Promise<{
         ok: boolean
         pluginId: string
-        accessToken?: string
-        refreshToken?: string
-        expiresIn?: number
-        tokenType?: string
+        meta?: {
+          id: string
+          tokenHint: string
+          expiresAt?: number
+          tokenType?: string
+          updatedAt: string
+          hasRefreshToken: boolean
+          hasClientCredentials: boolean
+          encrypted: boolean
+        }
         error?: string
       }>,
     refresh: (input: {

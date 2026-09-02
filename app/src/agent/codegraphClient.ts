@@ -214,13 +214,6 @@ export function parseCodegraphToGraph(
 }
 
 /** @deprecated use parseCodegraphToGraph */
-export function parseCodegraphOutputToGraph(
-  output: string,
-  query: string,
-): KnowledgeGraph {
-  return parseCodegraphToGraph(output, query)
-}
-
 export function mergeKnowledgeGraphs(
   task: KnowledgeGraph,
   code: KnowledgeGraph,

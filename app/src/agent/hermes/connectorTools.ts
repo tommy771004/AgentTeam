@@ -384,7 +384,6 @@ export function homeAssistantConnectorTools(
 }
 
 export function connectorManifest(
-  pluginId: string,
   name: string,
   tools: CustomToolDefinition[],
   promptAppend: string,

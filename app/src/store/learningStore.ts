@@ -183,12 +183,11 @@ interface LearningStore {
   ) => Promise<void>
   clearPluginAuth: (id: string) => Promise<void>
   /**
-   * Electron OAuth (device code or loopback code flow).
-   * Saves client credentials into settings.pluginOAuthClients when provided.
+   * Electron OAuth (device code or loopback code flow). Tokens stay in main.
    */
   runPluginOAuth: (
     id: string,
-    client: { clientId: string; clientSecret?: string },
+    client?: { clientId?: string; clientSecret?: string },
   ) => Promise<{ ok: boolean; error?: string }>
   /** Refresh all due OAuth access tokens (uses refresh_token + client credentials). */
   refreshPluginTokens: () => Promise<number>
@@ -200,6 +199,53 @@ interface LearningStore {
   applyPlugins: () => void
   /** Approve a tool package's privilege fingerprint and unlock withheld tools. */
   approveToolPackage: (pluginId: string) => Promise<{ ok: boolean; message: string }>
+}
+
+async function markPluginAuthorized(
+  id: string,
+  accountHint: string,
+  get: () => LearningStore,
+): Promise<boolean> {
+  const item = catalogItem(id)
+  const existing = pluginRegistry.list().find((plugin) => plugin.id === id)
+  if (!existing) return false
+  const mode: 'pat' | 'api_key' | 'oauth' =
+    item?.auth?.type === 'oauth' || oauthProviderForPlugin(id)
+      ? 'oauth'
+      : item?.auth?.type === 'api_key'
+        ? 'api_key'
+        : 'pat'
+  const catalogTools = item?.manifest?.customTools
+  const next: typeof existing = {
+    ...existing,
+    enabled: true,
+    customTools: existing.customTools?.length
+      ? existing.customTools
+      : catalogTools || existing.customTools,
+    promptAppend: existing.promptAppend || item?.manifest?.promptAppend,
+    skills: existing.skills?.length ? existing.skills : item?.manifest?.skills,
+    connectorAuth: {
+      mode,
+      hasCredential: true,
+      accountHint,
+      authorizedAt: new Date().toISOString(),
+      lastAuthorizeUrl: item?.auth?.authorizeUrl || item?.auth?.docsUrl,
+    },
+  }
+  pluginRegistry.add(next)
+  pluginRegistry.apply()
+  get().refresh()
+  await persistManifest(next)
+  await get().persist()
+  await stopMcpSessionsForSecretOwner(id)
+  await get().checkPlugin(id)
+  for (const plugin of pluginRegistry.list()) {
+    const dependent = catalogItem(plugin.id)
+    if (dependent?.npm?.secretPluginId === id || dependent?.dependsOnPluginId === id) {
+      await get().checkPlugin(plugin.id)
+    }
+  }
+  return true
 }
 
 /**
@@ -1238,7 +1284,6 @@ export const useLearningStore = create<LearningStore>((set, get) => {
     },
 
     authorizePlugin: async (id, token, extra) => {
-      const item = catalogItem(id)
       const existing = pluginRegistry.list().find((plugin) => plugin.id === id)
       if (!existing) {
         set({ pluginError: `請先安裝外掛：${id}` })
@@ -1275,48 +1320,11 @@ export const useLearningStore = create<LearningStore>((set, get) => {
       }
       // NOTE: no customToolSecrets mirror — {{secret:pluginId}} resolves from the
       // vault in main (http/mcp); browser fallback reads the local record directly.
-      const mode: 'pat' | 'api_key' | 'oauth' =
-        item?.auth?.type === 'oauth' || oauthProviderForPlugin(id)
-          ? 'oauth'
-          : item?.auth?.type === 'api_key'
-            ? 'api_key'
-            : 'pat'
-      // Ensure catalog tools are present even if installed before tools existed
-      const catalogTools = item?.manifest?.customTools
-      const next: typeof existing = {
-        ...existing,
-        enabled: true,
-        customTools: existing.customTools?.length
-          ? existing.customTools
-          : catalogTools || existing.customTools,
-        promptAppend: existing.promptAppend || item?.manifest?.promptAppend,
-        skills: existing.skills?.length ? existing.skills : item?.manifest?.skills,
-        connectorAuth: {
-          mode,
-          hasCredential: true,
-          accountHint: accountHintFromToken(trimmed),
-          authorizedAt: new Date().toISOString(),
-          lastAuthorizeUrl: item?.auth?.authorizeUrl || item?.auth?.docsUrl,
-        },
-      }
-      pluginRegistry.add(next)
-      pluginRegistry.apply()
-      get().refresh()
-      await persistManifest(next)
-      await get().persist()
-      await stopMcpSessionsForSecretOwner(id)
-      await get().checkPlugin(id)
-      // Also refresh health of npm-mcp packages that depend on this secret
-      for (const p of pluginRegistry.list()) {
-        const item = catalogItem(p.id)
-        if (item?.npm?.secretPluginId === id || item?.dependsOnPluginId === id) {
-          await get().checkPlugin(p.id)
-        }
-      }
+      await markPluginAuthorized(id, accountHintFromToken(trimmed), get)
       set({ pluginError: null })
     },
 
-    runPluginOAuth: async (id, client) => {
+    runPluginOAuth: async (id, client = {}) => {
       const item = catalogItem(id)
       const provider = oauthProviderForPlugin(id)
       if (!provider) {
@@ -1329,25 +1337,6 @@ export const useLearningStore = create<LearningStore>((set, get) => {
         set({ pluginError: msg })
         return { ok: false, error: msg }
       }
-      const clientId = client.clientId.trim()
-      if (!clientId) {
-        const msg = '請填寫 OAuth Client ID'
-        set({ pluginError: msg })
-        return { ok: false, error: msg }
-      }
-      // Persist client credentials for next time
-      const settings = useSettingsStore.getState()
-      const prev = settings.settings.pluginOAuthClients || {}
-      await settings.update({
-        pluginOAuthClients: {
-          ...prev,
-          [provider.clientKey]: {
-            clientId,
-            clientSecret: client.clientSecret?.trim() || prev[provider.clientKey]?.clientSecret,
-          },
-        },
-      })
-
       const api = window.subagents?.oauth
       if (!api?.run) {
         const msg = 'OAuth 需要 Electron 桌面版（npm run dev 開出桌面視窗）'
@@ -1358,19 +1347,16 @@ export const useLearningStore = create<LearningStore>((set, get) => {
       try {
         const result = await api.run({
           pluginId: id,
-          clientId,
+          clientId: client.clientId?.trim() || undefined,
           clientSecret: client.clientSecret?.trim() || undefined,
         })
-        if (!result.ok || !result.accessToken) {
+        if (!result.ok || !result.meta?.tokenHint) {
           const error = result.error || 'OAuth 失敗'
           set({ pluginError: error })
           return { ok: false, error }
         }
-        await get().authorizePlugin(id, result.accessToken, {
-          refreshToken: result.refreshToken,
-          expiresIn: result.expiresIn,
-          tokenType: result.tokenType,
-        })
+        await markPluginAuthorized(id, result.meta.tokenHint, get)
+        set({ pluginError: null })
         return { ok: true }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)

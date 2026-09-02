@@ -127,15 +127,3 @@ export function openWorkspaceEnvelope(opts: {
 export function requiresSecureEnvelope(transport: 'http' | 'https'): boolean {
   return transport === 'http'
 }
-
-export function pinWorkspaceUrl(url: string): { ok: true; origin: string; url: string } | { ok: false; reason: string } {
-  try {
-    const u = new URL(url)
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-      return { ok: false, reason: 'unsupported protocol' }
-    }
-    return { ok: true, origin: u.origin, url: u.toString() }
-  } catch {
-    return { ok: false, reason: 'invalid URL' }
-  }
-}

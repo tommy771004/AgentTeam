@@ -156,24 +156,3 @@ export async function loadCompactionCheckpoint(runId: string): Promise<Compactio
     return null
   }
 }
-
-/** Every checkpoint for one run, oldest first; all runs when `runId` is absent. */
-export async function listCompactionCheckpoints(runId?: string): Promise<CompactionCheckpoint[]> {
-  const api = bridge()
-  if (!api?.list) return []
-  try {
-    return ((await api.list(runId)) as CompactionCheckpoint[] | undefined) || []
-  } catch {
-    return []
-  }
-}
-
-export async function clearCompactionCheckpoints(runId: string): Promise<boolean> {
-  const api = bridge()
-  if (!api?.remove || !runId) return false
-  try {
-    return ((await api.remove(runId)) as { ok?: boolean } | undefined)?.ok === true
-  } catch {
-    return false
-  }
-}

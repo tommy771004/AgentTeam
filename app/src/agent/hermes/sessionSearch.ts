@@ -137,20 +137,3 @@ export async function summarizeSessionHits(
     return null
   }
 }
-
-/** Compress long step outputs (Hermes context compressor lite) */
-export function compressStepOutputs(outputs: string[], maxChars = 6000): string {
-  const joined = outputs.join('\n---\n')
-  if (joined.length <= maxChars) return joined
-  // Keep head + tail
-  const head = outputs.slice(0, 2).join('\n---\n')
-  const tail = outputs.slice(-2).join('\n---\n')
-  const midCount = Math.max(0, outputs.length - 4)
-  return [
-    head,
-    `\n…[已壓縮 ${midCount} 段中間步驟輸出]…\n`,
-    tail,
-  ]
-    .join('\n')
-    .slice(0, maxChars)
-}
