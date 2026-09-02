@@ -84,6 +84,8 @@ try {
   assert.equal(pausedItem?.autoStartPaused, true, 'interruption pauses automatic queue draining')
   send(32, 'runs/claim')
   assert.match(String((await waitFor(32)).error?.message || ''), /No claimable/)
+  send(321, 'runs/claim', { runId: 'queued-after-interrupt' })
+  assert.match(String((await waitFor(321)).error?.message || ''), /unavailable/)
   const queueRevision = Math.max(...paused.result.queue.map((item: Record<string, unknown>) => Number(item.revision || 0)))
   send(33, 'runs/start', { runId: 'queued-after-interrupt', expectedRevision: queueRevision })
   const started = await waitFor(33)

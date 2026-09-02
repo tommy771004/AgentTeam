@@ -52,7 +52,7 @@ export class PiRunQueue {
       || this.items.find((item) => item.status === 'queued' && item.autoStartPaused !== true && canClaim(item))
   }
   claim(runId?: string, canClaim: (item: PiQueuedRun) => boolean = () => true) {
-    const item = runId ? this.items.find((candidate) => candidate.runId === runId && candidate.status === 'queued' && canClaim(candidate)) : this.dequeue(canClaim)
+    const item = runId ? this.items.find((candidate) => candidate.runId === runId && candidate.status === 'queued' && candidate.autoStartPaused !== true && canClaim(candidate)) : this.dequeue(canClaim)
     if (item) { item.status = 'running'; item.autoStartPaused = false; item.manualStartRequested = false }
     return item
   }

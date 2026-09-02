@@ -1,6 +1,7 @@
 import { useAgentStore } from '../store/agentStore.ts'
 import { runTask } from './taskRunCoordinator.ts'
 import type { PiTurnSettlement } from './piHostRun.ts'
+import type { RunContextPolicy } from './types.ts'
 import { buildExternalCliDelegateContract, RUNNER_IDS, type RunnerId } from './runners/types.ts'
 
 type ClaimedRun = {
@@ -64,6 +65,11 @@ function enumValue<T extends string>(value: unknown, allowed: readonly T[]): T |
   return typeof value === 'string' && allowed.includes(value as T) ? value as T : undefined
 }
 
+function contextPolicySnapshot(profile: Record<string, unknown>): RunContextPolicy | undefined {
+  const value = profile.contextPolicySnapshot
+  return value && typeof value === 'object' ? value as RunContextPolicy : undefined
+}
+
 function queuedRunOverrides(
   claimed: ClaimedRun,
   runner: RunnerId,
@@ -72,6 +78,7 @@ function queuedRunOverrides(
 ) {
   const profile = claimed.profile
   const temporary = interactive ? profile.temporary === true : true
+  const frozenContextPolicy = interactive ? contextPolicySnapshot(profile) : undefined
   return {
     runId: claimed.runId,
     sourceKind: 'delegate' as const,
@@ -86,13 +93,15 @@ function queuedRunOverrides(
     unattended: profile.unattended === true,
     preloadCapabilityIds: Array.isArray(profile.capabilities) ? profile.capabilities.map(String) : undefined,
     temporary,
-    ...(interactive ? {} : {
-      contextPolicySnapshot: {
-        memoryEnabled: false, memoryWriteEnabled: false, referenceChatHistory: false, temporary: true,
-        project: projectRoot,
-        outboundShellMode: enumValue(profile.outbound, ['off', 'demo', 'optional', 'required'] as const) || 'off',
-      },
-    }),
+    ...(interactive
+      ? (frozenContextPolicy ? { contextPolicySnapshot: frozenContextPolicy } : {})
+      : {
+          contextPolicySnapshot: {
+            memoryEnabled: false, memoryWriteEnabled: false, referenceChatHistory: false, temporary: true,
+            project: projectRoot,
+            outboundShellMode: enumValue(profile.outbound, ['off', 'demo', 'optional', 'required'] as const) || 'off',
+          },
+        }),
     externalCliContract: runner === 'builtin' ? undefined : buildExternalCliDelegateContract({ role: 'leaf' as const, unattended: profile.unattended === true }),
   }
 }

@@ -6,14 +6,13 @@ const appRoot = resolve(import.meta.dirname, '..')
 const repoRoot = resolve(appRoot, '..')
 const read = (path: string) => readFile(resolve(repoRoot, path), 'utf8')
 
-const [appReadme, rootReadme, devState, index, spec, qualification, report] = await Promise.all([
+const [appReadme, rootReadme, devState, index, spec, qualification] = await Promise.all([
   read('app/README.md'),
   read('README.md'),
   read('DEV_STATE.md'),
   read('.scratch/INDEX.md'),
   read('.scratch/release-qualification-hardening/spec.md'),
   read('.scratch/release-qualification-hardening/qualification.md'),
-  read('app/release-evidence/paid-beta-qualification.md'),
 ])
 
 for (const vocabulary of ['compile success', 'deterministic qualification', 'platform qualification', 'release-ready', 'Paid Beta GO']) {
@@ -21,10 +20,8 @@ for (const vocabulary of ['compile success', 'deterministic qualification', 'pla
 }
 assert.match(appReadme, /plain-browser[\s\S]{0,160}(?:UI|degraded preview)[\s\S]{0,160}(?:does not|不)[\s\S]{0,160}production Pi[\s\S]{0,40}Core Host/i)
 assert.match(spec, /^Status: resolved$/m)
-assert.match(report, /^# Paid Beta Release Qualification: NO-GO$/m)
-assert.match(report, /Criteria: 0\/49 passed/)
-assert.match(report, /Automated repository hardening: BLOCKED \(0\/6\)/)
-assert.match(report, /External release evidence: BLOCKED/)
+assert.match(qualification, /Paid Beta release NO-GO/)
+assert.match(qualification, /NO-GO（0\/49）/)
 assert.match(devState, /Paid Beta[^\n]*NO-GO（0\/49）/)
 assert.match(index, /release-qualification-hardening[^\n]*resolved（20\/20 tickets done/)
 assert.match(index, /release-qualification-hardening\/qualification\.md/)

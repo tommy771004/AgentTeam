@@ -2,7 +2,7 @@
 
 Status: repository hardening resolved；Paid Beta release NO-GO
 
-本 effort 的 automated repository work 已完成，但這不等於 release-ready 或 Paid Beta GO。權威 release report 仍是 [`app/release-evidence/paid-beta-qualification.md`](../../app/release-evidence/paid-beta-qualification.md)：目前缺少 coherent workflow receipts 與 signed-platform／clean-machine 等外部證據，因此為 **NO-GO（0/49）**。
+本 effort 的 automated repository work 已完成，但這不等於 release-ready 或 Paid Beta GO。完整 Paid Beta report 由 release qualification workflow 產生並隨 evidence artifact 上傳；目前缺少 coherent workflow receipts 與 signed-platform／clean-machine 等外部證據，因此為 **NO-GO（0/49）**。
 
 ## Readiness ladder
 

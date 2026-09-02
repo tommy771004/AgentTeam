@@ -22,6 +22,7 @@ assert.deepEqual(lifecycle.enqueue({ ...run, runId: 'selected', clientMessageId:
 assert.equal(lifecycle.pauseSession('s1'), true, 'interrupt pauses later work in the same conversation')
 assert.equal(lifecycle.dequeue(), undefined, 'automatic drain skips a paused follow-up')
 assert.equal(lifecycle.snapshot().find((item) => item.runId === 'next')?.autoStartPaused, true)
+assert.equal(lifecycle.claim('next'), undefined, 'explicit claim cannot bypass an interruption pause')
 assert.equal(lifecycle.start('selected', lifecycle.revision()).ok, true, 'explicit start resumes the paused conversation queue')
 assert.equal(lifecycle.dequeue()?.runId, 'selected', 'an explicitly selected submission starts before the queue head')
 assert.equal(lifecycle.claim()?.runId, 'selected')

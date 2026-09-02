@@ -65,7 +65,7 @@ Local Markdown tracker per `docs/agents/issue-tracker.md`.
 
 1. **paid-beta #14 release qualification** — `blocked-pending-real-signed-platform-evidence`
    - 需 clean-machine 上 signed 安裝、CLI doctor、N-1→N、entitlement、workflow 實機證據。
-   - 2026-09-01 重跑 [`qualify-release.mts`](../app/scripts/qualify-release.mts) 為 **NO-GO（0/49）**；retained report 見 [`paid-beta-qualification.md`](../app/release-evidence/paid-beta-qualification.md)。
+   - 2026-09-01 重跑 [`qualify-release.mts`](../app/scripts/qualify-release.mts) 為 **NO-GO（0/49）**；完整 report 由 release qualification workflow 產生並隨 evidence artifact 上傳。
    - 目錄已移除；歷史 No-Go 記錄可自 git 歷史（759d691 之前的 `.scratch/subagents-paid-beta/evidence/`）取回。
 2. **runtime-contract #14 Linux bwrap 真機 qualification** — 需 Linux CI 首綠（macOS seatbelt 已完成）；完成後補勾 #14 三框與 #22 的 2.1。
 3. **Optional polish（非 P0）**

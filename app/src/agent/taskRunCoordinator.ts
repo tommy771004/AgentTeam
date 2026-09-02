@@ -2000,13 +2000,21 @@ function builtinFollowUpProfile(input: {
   settings: LlmSettings
   existingThread?: { model?: string; agentMode?: string }
 }): Record<string, unknown> {
+  const model = input.opts.overrides?.model || input.existingThread?.model
+  const temporary = input.opts.overrides?.temporary ?? input.settings.temporaryChatDefault === true
+  const contextPolicySnapshot = input.opts.overrides?.contextPolicySnapshot || buildRunContextPolicy(input.settings, {
+    model,
+    temporary,
+    project: input.opts.projectRoot?.trim() || input.opts.overrides?.projectRoot,
+  })
   return Object.fromEntries(Object.entries({
-    model: input.opts.overrides?.model || input.existingThread?.model,
+    model,
     thinkingLevel: input.opts.overrides?.thinkingDepth,
     speed: input.opts.overrides?.speed,
     approvalMode: input.opts.overrides?.approvalMode || input.settings.approvalMode,
     agentMode: input.opts.overrides?.agentMode || input.existingThread?.agentMode,
-    temporary: input.opts.overrides?.temporary ?? input.settings.temporaryChatDefault === true,
+    temporary,
+    contextPolicySnapshot,
   }).filter(([, value]) => value !== undefined))
 }
 
@@ -2685,7 +2693,9 @@ async function coordinateTaskRun(
     attachedSkills:
       opts.attachedSkills || opts.overrides?.attachedSkills || undefined,
     temporary,
-    contextPolicySnapshot: admittedSettings.contextPolicySnapshot,
+    // A Host-queued follow-up carries its submission-time policy in overrides;
+    // only ordinary runs fall back to the settings-derived admission snapshot.
+    contextPolicySnapshot: opts.overrides?.contextPolicySnapshot || admittedSettings.contextPolicySnapshot,
     unattended: opts.overrides?.unattended ?? sourceIsAutomation,
     hitlTimeoutMs: opts.overrides?.hitlTimeoutMs,
     projectRoot: opts.projectRoot?.trim() || opts.overrides?.projectRoot,

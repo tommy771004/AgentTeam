@@ -17,5 +17,5 @@
 
 - Root/app README、DEV_STATE、spec、tracker 與 qualification 使用同一五階 readiness vocabulary；plain-browser 明示為 UI/degraded preview。
 - `qualification.md` 對 20 張票逐一引用 owning gate，並保留 repository resolved／Paid Beta NO-GO 的不同狀態。
-- Canonical local report 為 `app/release-evidence/paid-beta-qualification.md`：NO-GO（0/49）、hardening BLOCKED（0/6）、external evidence BLOCKED。
-- `smoke-release-hardening-rollup.mts` 驗證 vocabulary、20/20 ticket links、tracker status 與 NO-GO truth；build/dist-only contract另由 `smoke-release-build-once.mts` 鎖定。
+- Paid Beta report 由 release qualification workflow 產生並隨 evidence artifact 上傳；repository qualification 保留 NO-GO（0/49）、hardening BLOCKED（0/6）、external evidence BLOCKED 的狀態記錄。
+- `smoke-release-hardening-rollup.mts` 驗證 vocabulary、20/20 ticket links、tracker status 與 repository NO-GO truth；build/dist-only contract另由 `smoke-release-build-once.mts` 鎖定。

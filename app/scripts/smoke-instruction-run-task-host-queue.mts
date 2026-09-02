@@ -410,6 +410,14 @@ try {
   await bounded('mutate nested source', writeFile(nestedFile, 'NESTED_NEW\n'))
   await bounded('mutate include source', writeFile(includeFile, `INCLUDE_NEW\n@${nestedFile}\n`))
   await bounded('mutate project source', writeFile(projectFile, `PROJECT_NEW\n@${includeFile}\n`))
+  // Policy changes while B waits must not rewrite the accepted follow-up's
+  // submission-time context contract.
+  useSettingsStore.setState({ settings: {
+    ...useSettingsStore.getState().settings,
+    memoryEnabled: false,
+    memoryWriteEnabled: false,
+    referenceChatHistory: false,
+  } })
   const refreshed = await bounded('queued-run source refresh', bridge.piHost.instructions.resolve({ projectRoot: projectDir, workPath: projectDir }))
   assert.match(refreshed.instructionSnapshot.effectiveText, /PROJECT_NEW/)
   assert.match(refreshed.instructionSnapshot.effectiveText, /INCLUDE_NEW/)

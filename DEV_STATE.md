@@ -8,7 +8,7 @@
 
 `npm run build`／`dist:*` 仍是 compilation/packaging-only；`npm run qualify:deterministic` 不啟動 Electron App、不要求 signing credentials；`npm run smoke` 是完整 repository qualification；macOS/Windows signed installer、notarization、clean-machine 與 update lifecycle 是 explicit platform qualification。plain-browser 只供 UI/degraded preview，不是 production Pi Core Host execution。
 
-Paid Beta qualifier 已重跑並保存在 `app/release-evidence/paid-beta-qualification.md`，目前為 **NO-GO（0/49）**：Automated repository hardening 因本機沒有 workflow-owned coherent receipt 為 BLOCKED（0/6），external signed-platform evidence 亦為 BLOCKED。Repository effort resolved 不會覆蓋這個 release blocker，也不得宣稱 release-ready 或 Paid Beta GO。
+Paid Beta qualifier 的最新狀態為 **NO-GO（0/49）**：Automated repository hardening 因本機沒有 workflow-owned coherent receipt 為 BLOCKED（0/6），external signed-platform evidence 亦為 BLOCKED。完整 report 由 release qualification workflow 產生並上傳；repository effort resolved 不會覆蓋這個 release blocker，也不得宣稱 release-ready 或 Paid Beta GO。
 
 ## 本日進展：Release qualification deterministic gate
 
@@ -24,7 +24,7 @@ Telegram、Webhook 與 custom-tool credentials 現在以 stable `credential:*` r
 
 `app/scripts/qualify-external-cli-real.mts` 已從 shipped admission／adapter owner 重跑並保存 metadata-only evidence。Codex CLI 0.150.1 process exit 0，active checkpoint、restart projection 與 Turn Record 通過，但原生 `AGENTS.md` marker 未出現，因此仍為 `native_discovery_unproven`；Claude Code 2.1.246 實際啟動後回報 `auth_unavailable`。兩者皆維持 unqualified，未由 process success 推導 DoD。本輪依使用者指示未做 Linux bwrap，也未安裝或登入 Grok／Gemini／Cursor。
 
-Paid Beta release qualifier 最新重跑為 **NO-GO（0/49）**：沒有 signed/notarized artifact、clean-machine install、N-1→N、entitlement、workflow、trust publication 與 coherent hardening receipt evidence。報告保存在 `app/release-evidence/paid-beta-qualification.md`；不得發佈或宣稱 ready。
+Paid Beta release qualifier 最新狀態為 **NO-GO（0/49）**：沒有 signed/notarized artifact、clean-machine install、N-1→N、entitlement、workflow、trust publication 與 coherent hardening receipt evidence。完整 report 由 release qualification workflow 產生並上傳；不得發佈或宣稱 ready。
 
 ## 本日收口：Host-owned Agent Collaboration
 
