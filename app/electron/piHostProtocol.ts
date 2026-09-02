@@ -333,7 +333,7 @@ export type PiHostEvent =
       payload: {
         runId: string
         sessionId: string
-        phase: 'memory-recalled' | 'memory-written' | 'compacted' | 'model-switched' | 'skills-unavailable'
+        phase: 'memory-recalled' | 'memory-written' | 'compacting' | 'compacted' | 'model-switched' | 'skills-unavailable'
         recalled?: number
         written?: number
         previousModel?: string
@@ -1628,6 +1628,19 @@ function runAutoCompactionPreflight(input: {
     && input.session.messages.length > keepMessages
     && (pressure.level === 'compact' || pressure.level === 'emergency')
   if (!shouldCompact) return
+  const compactingEvent: PiHostEvent = {
+    event: 'host/context',
+    payload: {
+      runId: input.runId,
+      sessionId: input.session.id,
+      phase: 'compacting',
+      contextWindowTokens: input.contextWindow,
+      reason: pressure.level === 'emergency' ? 'emergency' : 'auto',
+      estimatedTokens: pressure.estimatedTokens,
+    },
+  }
+  if (input.emit) input.emit(compactingEvent)
+  else input.turnEvents.push(compactingEvent)
   const compacted = compactHostSession({
     state: input.state,
     session: input.session,

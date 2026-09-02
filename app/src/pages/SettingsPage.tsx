@@ -66,6 +66,7 @@ import { recommendToolTuning } from '../agent/modelTuning'
 import { API_PROVIDER_PRESETS, apiProviderPreset, isSubscriptionProviderPreset } from '../agent/apiProviders'
 import { SubscriptionConnectionStatus } from '../components/settings/SubscriptionConnectionStatus'
 import { SubscriptionModelPicker } from '../components/settings/SubscriptionModelPicker'
+import { refreshSubscriptionCatalogAfterCliDetection } from '../hooks/useSubscriptionCatalog'
 import { PersonalizationInstructionsSection } from '../components/settings/PersonalizationInstructionsSection'
 import { getLegacyInstructionDocs } from '../agent/hermes/promptBuilder'
 import {
@@ -2047,6 +2048,7 @@ export function SettingsPage() {
                             enabled: r.found ? true : p.enabled,
                           }
                           set({ cliProviders: next })
+                          refreshSubscriptionCatalogAfterCliDetection()
                           setCliMsg(
                             r.found
                               ? `✓ ${p.name}: ${r.path}`
@@ -2096,6 +2098,7 @@ export function SettingsPage() {
                         ? { roleModels: { orchestrator: strongest, synthesizer: strongest, analyst: fastest, executor: fastest } }
                         : {}),
                     })
+                    refreshSubscriptionCatalogAfterCliDetection()
                     setCliMsg(
                       [
                         '✓ 已匯入本機偵測結果（不會複製 OAuth/API secret）',

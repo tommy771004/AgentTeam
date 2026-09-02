@@ -403,13 +403,16 @@ export function mapPiHostEventToActivity(event: PiHostEventLike): PiHostActivity
         eventId: `pi-context-memory-written-${written}`,
       }
     }
-    if (phase === 'compacted') {
+    const compaction = {
+      compacting: { title: '正在壓縮對話上下文…', phase: 'executing' as const, eventId: 'pi-context-compacting' },
+      compacted: { title: '已壓縮對話上下文', eventId: 'pi-context-compacted' },
+    }[String(phase)]
+    if (compaction) {
       return {
         kind: 'status',
         runId,
-        title: '已壓縮對話上下文',
+        ...compaction,
         detail: contextWindow,
-        eventId: 'pi-context-compacted',
       }
     }
     if (phase === 'model-switched') {

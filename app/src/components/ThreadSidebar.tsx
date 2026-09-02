@@ -74,8 +74,9 @@ export function ThreadSidebar({ onThreadSelected }: { onThreadSelected?: () => v
     [durableProjectOrder, liveProjectKeys],
   )
   const liveThreadKeys = useMemo(
-    () => threads.filter((thread) => !thread.hidden).map((thread) => thread.id),
-    [threads],
+    () => buildProjectGroups(threads, activeRoot, activeName)
+      .flatMap((group) => group.threads.map((thread) => thread.id)),
+    [threads, activeRoot, activeName],
   )
   const durableThreadOrder = useMemo(
     () => mergeThreadOrder(threadOrder, liveThreadKeys),

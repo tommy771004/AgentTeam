@@ -39,6 +39,18 @@ assert.deepEqual(context, {
   detail: '10 tokens',
   eventId: 'pi-context-model-loopback-small-model',
 })
+const compacting = mapPiHostEventToActivity({
+  event: 'host/context',
+  payload: { runId: 'run-context', phase: 'compacting', contextWindowTokens: 200_000 },
+})
+assert.deepEqual(compacting, {
+  kind: 'status',
+  runId: 'run-context',
+  title: '正在壓縮對話上下文…',
+  detail: '200,000 tokens',
+  phase: 'executing',
+  eventId: 'pi-context-compacting',
+})
 assert.deepEqual(tool, {
   kind: 'tool',
   runId: 'run-1',

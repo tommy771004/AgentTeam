@@ -1,4 +1,4 @@
-import type { Thread } from '../store/threadStore'
+import { isDraftThread, type Thread } from '../store/threadStore'
 
 /** Conversations shown per project before 「顯示更多」 is offered. */
 export const COLLAPSED_PER_PROJECT = 4
@@ -177,7 +177,7 @@ export function buildProjectGroups(
     byKey.set(root, { key: root, root, label: activeName || projectNameFromRoot(root), threads: [] })
   }
   for (const thread of threads) {
-    if (thread.hidden) continue
+    if (thread.hidden || isDraftThread(thread)) continue
     const bound = thread.projectRoot?.trim() || ''
     const key = bound || UNBOUND_KEY
     let group = byKey.get(key)

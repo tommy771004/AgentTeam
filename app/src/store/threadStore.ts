@@ -209,6 +209,22 @@ export type Thread = {
   projectRoot?: string
 }
 
+/**
+ * A blank composer needs a thread id for per-conversation draft/settings state,
+ * but it is not a conversation yet. It materializes once submission adds a
+ * message or run admission changes its status.
+ */
+export function isDraftThread(thread: Thread): boolean {
+  return !thread.hidden
+    && thread.title === '新對話'
+    && thread.bubbles.length === 0
+    && (thread.runPlan?.length || 0) === 0
+    && (!thread.lastStatus || thread.lastStatus === 'idle')
+    && !thread.subDesignBriefId
+    && !thread.continueGoal
+    && !thread.externalRun
+}
+
 interface ThreadStore {
   threads: Thread[]
   activeId: string | null
@@ -746,7 +762,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
         .map((session) => session.threadId as string),
     )
     const current = get().threads
-    const isPlaceholder = current.length === 1 && current[0].runner === 'builtin' && current[0].title === '新對話' && current[0].bubbles.length === 0
+    const isPlaceholder = current.length === 1 && isDraftThread(current[0])
     const preserved = (isPlaceholder ? [] : current).filter((thread) => !byThread.has(thread.id) && !tombstoned.has(thread.id))
     const now = new Date().toISOString()
     const projected = [...byThread.values()].flatMap((projection) => {
@@ -797,7 +813,22 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
 
   createThread: (opts) => {
     const t = emptyThread(opts)
-    const threads = [t, ...get().threads].slice(0, MAX_THREADS)
+    const current = get()
+    const active = current.threads.find((thread) => thread.id === current.activeId)
+    // Repeated 「新對話」 actions replace the current blank draft instead of
+    // accumulating invisible placeholders in the persisted thread list.
+    if (isDraftThread(t) && active && isDraftThread(active)) {
+      const replacement = { ...t, id: active.id }
+      const threads = current.threads.map((thread) =>
+        thread.id === active.id ? replacement : thread,
+      )
+      const draftByThread = { ...current.draftByThread }
+      delete draftByThread[active.id]
+      set({ threads, activeId: active.id, showRunPanel: false, draftByThread })
+      persist(threads, active.id)
+      return active.id
+    }
+    const threads = [t, ...current.threads].slice(0, MAX_THREADS)
     // Hidden worker threads (background delegate) must not steal UI focus.
     if (t.hidden) {
       set({ threads })

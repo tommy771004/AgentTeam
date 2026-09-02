@@ -12,7 +12,7 @@ import {
   reorderProject,
   projectThreadSidebar,
 } from '../src/lib/threadProjectGroups.ts'
-import type { Thread } from '../src/store/threadStore.ts'
+import { useThreadStore, type Thread } from '../src/store/threadStore.ts'
 
 function thread(partial: Partial<Thread> & { id: string }): Thread {
   return {
@@ -37,6 +37,42 @@ const emptyActive = buildProjectGroups([], '/Users/me/productivity-hub', '')
 assert.equal(emptyActive.length, 1)
 assert.equal(emptyActive[0].label, 'productivity-hub')
 assert.deepEqual(emptyActive[0].threads, [])
+
+// A blank composer thread is draft state, not an unbound conversation. It
+// stays out of the tree even if the project selector has already stamped a
+// root; run admission materializes it by changing status to running.
+const draftOnly = buildProjectGroups(
+  [thread({ id: 'draft', title: '新對話', projectRoot: '/Users/me/AgentTeam' })],
+  '/Users/me/AgentTeam',
+  'AgentTeam',
+)
+assert.equal(draftOnly.length, 1)
+assert.deepEqual(draftOnly[0].threads, [])
+const materializedDraft = buildProjectGroups(
+  [thread({ id: 'running', title: '新對話', lastStatus: 'running' })],
+  '',
+)
+assert.equal(materializedDraft[0].label, '未綁定專案')
+assert.deepEqual(materializedDraft[0].threads.map((item) => item.id), ['running'])
+
+const initialDraft = thread({ id: 'draft-reuse', title: '新對話' })
+const storage = new Map<string, string>()
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+  },
+})
+useThreadStore.setState({
+  threads: [initialDraft],
+  activeId: initialDraft.id,
+  draftByThread: { [initialDraft.id]: '尚未送出' },
+})
+const reusedDraftId = useThreadStore.getState().createThread()
+assert.equal(reusedDraftId, initialDraft.id)
+assert.equal(useThreadStore.getState().threads.length, 1)
+assert.equal(useThreadStore.getState().draftByThread[initialDraft.id], undefined)
 
 const groups = buildProjectGroups(
   [

@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { SubscriptionProviderCatalog } from '../agent/subscriptionCatalog'
 
+const SUBSCRIPTION_CATALOG_REFRESH_EVENT = 'agentteam:subscription-catalog-refresh'
+
+/** Re-read CLI OAuth and Pi's live model metadata after Settings probes the local CLIs. */
+export function refreshSubscriptionCatalogAfterCliDetection(): void {
+  window.dispatchEvent(new Event(SUBSCRIPTION_CATALOG_REFRESH_EVENT))
+}
+
 /**
  * The single loader for the Host snapshot's subscription catalog.
  *
@@ -50,9 +57,11 @@ export function useSubscriptionCatalog(): {
       setAttempt((value) => value + 1)
     }
     window.addEventListener('focus', requery)
+    window.addEventListener(SUBSCRIPTION_CATALOG_REFRESH_EVENT, requery)
     document.addEventListener('visibilitychange', requery)
     return () => {
       window.removeEventListener('focus', requery)
+      window.removeEventListener(SUBSCRIPTION_CATALOG_REFRESH_EVENT, requery)
       document.removeEventListener('visibilitychange', requery)
     }
   }, [])
